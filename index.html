@@ -157,21 +157,59 @@
 
         <!-- Home View -->
         <div class="view" id="view-home">
-          <h1 class="view-title">Dashboard</h1>
-          <div id="homeStats" class="stats-row"></div>
-          <div class="home-columns">
-            <div class="home-column">
-              <h3>My Issues</h3>
-              <div id="myIssues" class="card-list"></div>
+          <!-- Hero Banner -->
+          <div class="db-hero">
+            <div class="db-hero-text">
+              <div id="dbGreeting" class="db-greeting">Good morning</div>
+              <div id="dbUserName" class="db-username">Welcome back</div>
             </div>
-            <div class="home-column">
-              <h3>Recent Activity</h3>
-              <div id="recentActivity" class="activity-feed"></div>
+            <div class="db-hero-actions">
+              <button class="btn btn-primary" onclick="openCreateIssue()">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
+                Create Issue
+              </button>
             </div>
           </div>
-          <div class="home-spaces-section">
-            <h3>All Spaces</h3>
-            <div id="allSpacesGrid" class="spaces-grid"></div>
+
+          <!-- Stat Cards -->
+          <div id="homeStats" class="db-stats"></div>
+
+          <!-- Main Grid -->
+          <div class="db-main-grid">
+            <!-- My Issues -->
+            <div class="db-panel">
+              <div class="db-panel-header">
+                <span class="db-panel-title">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm5 5a5 5 0 0 0-10 0h10z"/></svg>
+                  My Issues
+                </span>
+                <span id="myIssuesBadge" class="db-panel-badge"></span>
+              </div>
+              <div id="myIssues" class="db-issue-list"></div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="db-panel">
+              <div class="db-panel-header">
+                <span class="db-panel-title">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/></svg>
+                  Recent Activity
+                </span>
+              </div>
+              <div id="recentActivity" class="db-activity-list"></div>
+            </div>
+          </div>
+
+          <!-- All Spaces -->
+          <div class="db-spaces-section">
+            <div class="db-section-header">
+              <span class="db-section-title">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3A1.5 1.5 0 0 1 15 10.5v3A1.5 1.5 0 0 1 13.5 15h-3A1.5 1.5 0 0 1 9 13.5v-3z"/></svg>
+                All Spaces
+              </span>
+              <span id="dbSpacesCount" class="db-section-count"></span>
+            </div>
+            <div id="allSpacesGrid" class="db-spaces-grid"></div>
           </div>
         </div>
 
