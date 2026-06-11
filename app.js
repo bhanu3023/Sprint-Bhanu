@@ -1,3 +1,5 @@
+window._isMemberOnly = (function() { try { const u = JSON.parse(localStorage.getItem("sb-user")); return u && u.role === "member"; } catch(e) { return false; } })();
+
 // ═══════════════════════════════════════════════════════════
 // SPRINTBOARD ENTERPRISE — SPA CORE LOGIC
 // ═══════════════════════════════════════════════════════════
@@ -217,16 +219,58 @@ function stopDrawerLiveSync() {
 }
 
 function closeDrawer() {
+  document.body.classList.remove('issue-page');
+  window.history.replaceState({}, "", "/");
   stopDrawerLiveSync();
   $('issueDrawer').setAttribute('hidden', '');
   S.drawerIssueId = null;
   window._drawerPending = {};
+  if (S._prevTab && S._prevSpace) {
+    S.currentSpace = S._prevSpace;
+    navigateToSpace(S._prevSpace, S._prevTab);
+  } else if (S._prevView) {
+    navigateTo(S._prevView);
+  }
+  S._prevView = null; S._prevTab = null; S._prevSpace = null;
 }
 window.closeDrawer = closeDrawer;
 
+function goBackToSavedPage() {
+  window.history.replaceState({}, "", "/");
+  stopDrawerLiveSync();
+  $('issueDrawer').setAttribute('hidden', '');
+  S.drawerIssueId = null;
+  window._drawerPending = {};
+  var pTab   = S._prevTab;
+  var pSpace = S._prevSpace;
+  var pView  = S._prevView;
+  S._prevView = null; S._prevTab = null; S._prevSpace = null;
+  if (pTab && pSpace) {
+    S.currentSpace = pSpace;
+    navigateToSpace(pSpace, pTab);
+  } else if (pView && pView !== 'home') {
+    navigateTo(pView);
+  } else if (S.currentSpace) {
+    navigateToSpace(S.currentSpace, 'allwork');
+  } else {
+    var firstSpace = S.data && S.data.spaces && S.data.spaces[0];
+    if (firstSpace) navigateToSpace(firstSpace.id, 'allwork');
+    else navigateTo('home');
+  }
+}
+window.goBackToSavedPage = goBackToSavedPage;
+
 // Opens an issue in a new browser tab
 function openIssuePage(issueId) {
-  window.open('/?issue=' + encodeURIComponent(issueId), '_blank');
+  S._prevView = S.currentView;
+  S._prevTab = S.currentTab;
+  S._prevSpace = S.currentSpace;
+  S._prevScrollY = window.scrollY;
+  var issueObj = (S.data.issues || []).find(function(i){ return i.id == issueId; });
+  var issueKey = issueObj ? issueObj.key : issueId;
+  window.history.pushState({ issueId: issueId }, "", "?issue=" + issueKey);
+  document.body.classList.add("issue-page");
+  openDrawer(issueId);
 }
 window.openIssuePage = openIssuePage;
 
@@ -240,10 +284,10 @@ window.saveDrawerChanges = saveDrawerChanges;
 // CONSTANTS: STATUSES, PRIORITIES, TYPES
 // ═══════════════════════════════════════════════════════════
 var STATUS_COLORS = {
-  'To Do': '#6b7280',
-  'In Progress': '#3b82f6',
-  'In Review': '#f59e0b',
-  'Done': '#10b981'
+  'To Do': '#42526e',
+  'In Progress': '#0052cc',
+  'In Review': '#ff991f',
+  'Done': '#00875a'
 };
 var PRIORITY_COLORS = {
   highest: '#dc2626', high: '#ef4444', medium: '#f59e0b', low: '#3b82f6', lowest: '#6b7280'
@@ -252,7 +296,7 @@ var PRIORITY_ICONS = {
   highest: '\u2B06\u2B06', high: '\u2B06', medium: '\u2B1B', low: '\u2B07', lowest: '\u2B07\u2B07'
 };
 var TYPE_ICONS = {
-  epic: '\u26A1', story: '\uD83D\uDCD6', task: '\u2705', bug: '\uD83D\uDC1B', subtask: '\uD83D\uDCCC'
+  epic: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#9747FF"/><path d="M9.5 3.5L6 8h3l-2.5 5 6-6.5H9L11 3.5z" fill="white"/></svg>', story: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#36B37E"/><path d="M5 4.5h6v1H8.5V11h-1V5.5H5V4.5z" fill="white"/><rect x="4" y="7" width="8" height="1" fill="white"/></svg>', task: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#0052CC"/><polyline points="3.5,8 6.5,11 12.5,5" stroke="white" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>', bug: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#FF5630"/><circle cx="8" cy="8" r="3" fill="white" opacity="0.9"/><line x1="8" y1="3" x2="8" y2="5" stroke="white" stroke-width="1.5"/><line x1="8" y1="11" x2="8" y2="13" stroke="white" stroke-width="1.5"/><line x1="3" y1="7" x2="5" y2="7.5" stroke="white" stroke-width="1.5"/><line x1="11" y1="7.5" x2="13" y2="7" stroke="white" stroke-width="1.5"/><line x1="4" y1="5" x2="6" y2="6.5" stroke="white" stroke-width="1.5"/><line x1="10" y1="6.5" x2="12" y2="5" stroke="white" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="#FF5630"/></svg>', subtask: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#0065FF"/><polyline points="3.5,8 6.5,11 12.5,5" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="4" width="4" height="4" rx="1" fill="none" stroke="white" stroke-width="1.2"/></svg>'
 };
 var SPRINT_STATUS_COLORS = {
   planning: '#6b7280', active: '#3b82f6', completed: '#10b981'
@@ -262,14 +306,25 @@ var SPRINT_STATUS_COLORS = {
 // HTML BADGE / AVATAR HELPERS
 // ═══════════════════════════════════════════════════════════
 function statusBadge(status) {
-  var color = STATUS_COLORS[status] || '#6b7280';
-  return '<span class="badge" style="background:' + color + ';color:#fff">' + esc(status) + '</span>';
+  var styles = {
+    'To Do':      'background:#dfe1e6;color:#42526e',
+    'In Progress':'background:#deebff;color:#0052cc',
+    'In Review':  'background:#fff0b3;color:#974f0c',
+    'Done':       'background:#e3fcef;color:#006644'
+  };
+  var style = styles[status] || 'background:#dfe1e6;color:#42526e';
+  return '<span style="' + style + ';border-radius:3px;text-transform:uppercase;font-size:11px;font-weight:700;letter-spacing:0.04em;padding:2px 8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;cursor:pointer">' + esc(status) + '<span style="font-size:11px;margin-left:2px">&#9662;</span></span>';
 }
 
 function priorityBadge(priority) {
-  var color = PRIORITY_COLORS[priority] || '#6b7280';
-  var icon = PRIORITY_ICONS[priority] || '';
-  return '<span class="badge badge-priority" style="color:' + color + '">' + icon + ' ' + cap(priority) + '</span>';
+  var colors = {
+    highest: '#dc2626', high: '#ef4444', medium: '#f59e0b', low: '#3b82f6', lowest: '#6b7280'
+  };
+  var color = colors[priority] || '#6b7280';
+  return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;white-space:nowrap;cursor:pointer">' +
+    '<span style="color:#172b4d;font-weight:500">' + cap(priority) + '</span>' +
+    '<span style="color:#6b778c;font-size:12px;line-height:1;vertical-align:middle;margin-top:3px">&#9662;</span>' +
+    '</span>';
 }
 
 function typeIcon(type) {
@@ -287,18 +342,27 @@ function sprintStatusBadge(status) {
 
 function avatarHtml(user, size) {
   size = size || 32;
-  if (!user) return '<span class="avatar" style="width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.4) + 'px;background:#ccc">?</span>';
+  var baseStyle = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.4) + 'px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:700;flex-shrink:0;vertical-align:middle;line-height:1;text-align:center;overflow:hidden;';
+  if (!user) return '<span class="avatar" style="' + baseStyle + 'background:#ccc">?</span>';
   var color = user.color || '#174F96';
-  return '<span class="avatar" style="width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.4) + 'px;background:' + color + '" title="' + esc(user.name) + '">' + initials(user.name) + '</span>';
+  return '<span class="avatar" style="' + baseStyle + 'background:' + color + '" title="' + esc(user.name) + '">' + initials(user.name) + '</span>';
 }
 
 function issueKeyStr(issue) {
   return issue.key || (issue.project_key ? issue.project_key + '-?' : '#' + issue.id);
 }
 
-function statCard(label, value, color) {
-  return '<div class="stat-card"><div class="stat-value" style="color:' + color + '">' + value + '</div><div class="stat-label">' + label + '</div></div>';
+function statCard(label, value, color, filter) {
+  var click = filter ? ' onclick="window._statCardClick(\'' + filter + '\')" style="cursor:pointer"' : '';
+  return '<div class="stat-card"' + click + '><div class="stat-value" style="color:' + color + '">' + value + '</div><div class="stat-label">' + label + '</div></div>';
 }
+window._statCardClick = function(filter) {
+  navigateToSpace(S.currentSpace, 'backlog');
+  setTimeout(function() {
+    window._activeStatFilter = filter;
+    renderBacklog();
+  }, 100);
+};
 
 // ═══════════════════════════════════════════════════════════
 // DATA HELPERS
@@ -340,21 +404,18 @@ function isFavorited(spaceId) {
 }
 
 function populateUserSelect(sel, members, selectedId) {
-  // Sort alphabetically by name, Unassigned always first
   var sorted = members.slice().sort(function(a, b) {
     return (a.name || '').localeCompare(b.name || '');
   });
   var html = '<option value="">Unassigned</option>';
   for (var i = 0; i < sorted.length; i++) {
     var u = sorted[i];
-    html += '<option value="' + u.id + '"' + (u.id == selectedId ? ' selected' : '') + '>' + esc(u.name) + '</option>';
+    html += '<option value="' + u.id + '"' + (String(u.id) === String(selectedId) ? ' selected' : '') + '>' + esc(u.name) + '</option>';
   }
   sel.innerHTML = html;
-  // Show scrollable list — cap at 8 visible rows so all members accessible via scroll
-  var total = sorted.length + 1; // +1 for Unassigned
-  sel.size = Math.min(total, 8);
-  sel.style.overflowY = total > 8 ? 'scroll' : 'auto';
-  sel.style.height = 'auto';
+  sel.size = 1;
+  sel.style.overflowY = 'hidden';
+  sel.style.height = '34px';
 }
 
 function populateSprintSelect(sel, sprints, selectedId) {
@@ -371,10 +432,10 @@ function populateSprintSelect(sel, sprints, selectedId) {
 // ═══════════════════════════════════════════════════════════
 function initTheme() {
   // Use localStorage as fast initial load; DB preference applied after login in init()
-  var saved = localStorage.getItem('sb-theme') || 'dark';
+  var saved = localStorage.getItem('sb-theme') || 'light';
   applyTheme(saved, false);
-  if ($('themeToggle')) $('themeToggle').addEventListener('click', toggleTheme);
-  if ($('themeToggleTop')) $('themeToggleTop').addEventListener('click', toggleTheme);
+
+
 }
 
 function toggleTheme() {
@@ -388,9 +449,11 @@ function applyTheme(theme, saveToDb) {
   } else {
     document.body.classList.remove('light');
   }
-  var icon = theme === 'light' ? '\uD83C\uDF19' : '\u2600\uFE0F';
-  if ($('themeToggle')) $('themeToggle').textContent = icon;
-  if ($('themeToggleTop')) $('themeToggleTop').textContent = icon;
+  var moonSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#42526e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+  var sunSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#42526e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+  var icon = theme === 'light' ? sunSvg : moonSvg;
+  if ($('themeToggle')) $('themeToggle').innerHTML = icon;
+  if ($('themeToggleTop')) $('themeToggleTop').innerHTML = icon;
   localStorage.setItem('sb-theme', theme);
   // Persist to DB when user explicitly toggles
   if (saveToDb && S.currentUser) {
@@ -419,13 +482,16 @@ async function init() {
     var me = null;
     try { me = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + token } }).then(function(r) { return r.ok ? r.json() : null; }); }
     catch (_) {}
-    if (!me) { localStorage.removeItem('sb-token'); localStorage.removeItem('sb-user'); window.location.href = '/login.html'; return; }
+    if (!me) { localStorage.removeItem('sb-token'); localStorage.removeItem('sb-user');
+      var _ri = new URLSearchParams(window.location.search).get('issue');
+      if (_ri) localStorage.setItem('sb-return-issue', _ri);
+      window.location.href = '/login.html'; return; }
 
     S.currentUser = me.id;
     S.currentUserObj = me;
     localStorage.setItem('sb-user', JSON.stringify(me));
     // Apply DB-stored theme preference
-    if (me.theme) applyTheme(me.theme, false);
+    applyTheme('light', false);
 
     var data = await api('/api/data');
     S.data = data;
@@ -434,15 +500,43 @@ async function init() {
     renderUserFooter(me);
 
     renderSidebar();
-    navigateTo('home');
+    // navigateTo home handled below after issue param check
     loadNotifications();
 
     $('loadingOverlay').setAttribute('hidden', '');
     $('app').removeAttribute('hidden');
 
     // If opened via issue link (?issue=ID), show as full-page Jira-style view
+    // Check for return issue after login
+    var _returnIssue = localStorage.getItem('sb-return-issue');
+    if (_returnIssue) {
+      localStorage.removeItem('sb-return-issue');
+      if (!new URLSearchParams(window.location.search).get('issue')) {
+        window.history.replaceState({}, '', '/?issue=' + encodeURIComponent(_returnIssue));
+      }
+    }
     var issueParam = new URLSearchParams(window.location.search).get('issue');
+    if (!issueParam) navigateTo('home');
     if (issueParam) {
+      // Resolve key to UUID (e.g. BRT-76 -> UUID)
+      // First try local data
+      var issueByKey = (S.data && S.data.issues || []).find(function(i){ return i.key === issueParam || i.id === issueParam; });
+      if (issueByKey) {
+        issueParam = issueByKey.id;
+      } else {
+        // Fetch from API by key
+        try {
+          var keyIssue = await api('/api/issues?key=' + encodeURIComponent(issueParam));
+          if (keyIssue && keyIssue.id) issueParam = keyIssue.id;
+        } catch(e) {}
+      }
+      // If issueParam still looks like a key, fetch UUID first
+      if (issueParam && /^[A-Z]+-\d+$/.test(issueParam)) {
+        try {
+          var ki = await api('/api/issues?key=' + encodeURIComponent(issueParam));
+          if (ki && ki.id) issueParam = ki.id;
+        } catch(e) {}
+      }
       document.body.classList.add('issue-page');
       $('app').removeAttribute('hidden');
       // Uncollapse sidebar so it's always visible on issue pages
@@ -454,12 +548,17 @@ async function init() {
           var iss = await api('/api/issues/' + issueParam);
           if (iss && iss.space_id) {
             // Set sidebar state without triggering _exitIssuePage
+            // Save prev before overwriting (in case not already saved)
+            if (S._prevTab === undefined || S._prevTab === null) S._prevTab = S.currentTab;
+            if (S._prevView === undefined || S._prevView === null) S._prevView = S.currentView;
+            if (S._prevSpace === undefined || S._prevSpace === null) S._prevSpace = S.currentSpace;
             S.currentSpace = iss.space_id;
             S.currentView = 'space';
             S.currentTab = 'backlog';
             var space = getSpace(iss.space_id);
             if (space) {
-              $('spaceNav').removeAttribute('hidden');
+              // $('spaceNav').removeAttribute('hidden'); // Already have top nav
+              // Removed: navSection hiding - keep visible
               qsa('.space-item').forEach(function(el) {
                 el.classList.toggle('active', el.dataset.spaceId === iss.space_id);
               });
@@ -498,7 +597,7 @@ function renderUserFooter(user) {
     '</div>' +
     '<div class="user-footer-actions">' +
     (isAdmin ? '<button class="btn-icon footer-icon-btn" title="Admin Settings" onclick="navigateTo(\'settings\')" style="font-size:15px">⚙️</button>' : '') +
-    '<button class="btn-icon footer-icon-btn" title="Logout" onclick="doLogout()" style="font-size:15px">🚪</button>' +
+    '<button class="btn-icon footer-icon-btn" title="Logout" onclick="doLogout()" style="font-size:15px;background:none;border:none;cursor:pointer;color:#c0c8d4" title="Logout"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>' +
     '</div>';
 }
 
@@ -506,6 +605,9 @@ async function doLogout() {
   try { await api('/api/auth/logout', 'POST'); } catch (_) {}
   localStorage.removeItem('sb-token');
   localStorage.removeItem('sb-user');
+  // Redirect to Microsoft logout so it remembers the account for next login
+  var user = null;
+  try { user = JSON.parse(localStorage.getItem('sb-user') || 'null'); } catch(_) {}
   window.location.href = '/login.html';
 }
 window.doLogout = doLogout;
@@ -514,13 +616,16 @@ window.doLogout = doLogout;
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════
 function _exitIssuePage() {
-  if (!document.body.classList.contains('issue-page')) return;
   document.body.classList.remove('issue-page');
   var drawer = $('issueDrawer');
   if (drawer) drawer.setAttribute('hidden', '');
+  window.history.replaceState({}, "", "/");
+  S.drawerIssueId = null;
+  window._currentIssueKey = null;
 }
 
 function navigateTo(view) {
+  document.body.classList.remove('settings-active');
   // Guard: global Reports is owner-only
   if (view === 'global-reports' && (S.currentUserObj || {}).role !== 'owner') {
     toast('Only owners can access Reports', 'error');
@@ -535,13 +640,15 @@ function navigateTo(view) {
   qsa('.view').forEach(function (v) { v.setAttribute('hidden', ''); });
   $('spaceHeader').setAttribute('hidden', '');
   $('spaceNav').setAttribute('hidden', '');
+  var navSection = document.querySelector('.nav-section');
+              // Removed: navSection hiding - keep visible
 
   // Show target
   var target = $('view-' + view);
   if (target) target.removeAttribute('hidden');
 
   // Breadcrumb
-  var label = view === 'yourwork' ? 'Your Work' : view === 'global-reports' ? 'Reports' : view === 'worklog-report' ? 'Work Log' : view === 'product-roadmap' ? 'Product Roadmap' : cap(view);
+  var label = view === 'yourwork' ? 'Assigned to me' : view === 'global-reports' ? 'Reports' : view === 'worklog-report' ? 'Work Log' : view === 'product-roadmap' ? 'Product Roadmap' : cap(view);
   updateBreadcrumb([{ label: label }]);
 
   // Active state
@@ -557,7 +664,7 @@ function navigateTo(view) {
   else if (view === 'worklog-report') renderWorklogReport();
   else if (view === 'product-roadmap') renderProductRoadmap();
   else if (view === 'user-management') renderUserManagement();
-  else if (view === 'settings') renderAdminSettings('org-general');
+  else if (view === 'settings') { document.body.classList.add('settings-active'); renderAdminSettings('org-general'); }
   else if (view === 'global-reports') renderGlobalReports();
 }
 
@@ -623,7 +730,7 @@ function navigateToSpace(spaceId, tab) {
 
   qsa('.view').forEach(function (v) { v.setAttribute('hidden', ''); });
   $('spaceHeader').removeAttribute('hidden');
-  $('spaceNav').removeAttribute('hidden');
+  // $('spaceNav').removeAttribute('hidden'); // Already have top nav
   renderSpaceHeader(space);
 
   updateBreadcrumb([
@@ -633,9 +740,25 @@ function navigateToSpace(spaceId, tab) {
   ]);
 
   qsa('.nav-item[data-view]').forEach(function (el) { el.classList.remove('active'); });
-  qsa('.nav-item[data-tab]').forEach(function (el) { el.classList.toggle('active', el.dataset.tab === tab); });
-  qsa('.space-item').forEach(function (el) {
-    el.classList.toggle('active', el.dataset.spaceId === S.currentSpace);
+  qsa('.space-subnav').forEach(function(el){ el.remove(); });
+  qsa('.space-item').forEach(function(el){
+    var isSel = String(el.dataset.spaceId) === String(spaceId);
+    el.classList.toggle('active', isSel);
+    if(isSel){
+      var sub = document.createElement('div');
+      sub.className = 'space-subnav';
+      sub.innerHTML = [
+        {t:'summary',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>',l:'Summary'},
+        {t:'backlog',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',l:'Backlog'},
+        {t:'sprint',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',l:'Active Sprint'},
+        {t:'reports',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>',l:'Reports'},
+        {t:'allwork',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',l:'All Work'},
+        {t:'space-settings',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',l:'Settings'}
+      ].map(function(x){
+        return '<a class="nav-item space-subitem'+(x.t===tab?' active':'')+' " data-tab="'+x.t+'" data-space-id="'+spaceId+'"><span class="nav-icon">'+x.i+'</span> '+x.l+'</a>';
+      }).join('');
+      el.parentNode.insertBefore(sub, el.nextSibling);
+    }
   });
 
   renderTab(tab);
@@ -776,12 +899,28 @@ function renderSidebar() {
 function spaceNavItem(sp) {
   var active = S.currentSpace == sp.id ? ' active' : '';
   var isOwner = canCreateSpace();
-  return '<a class="nav-item space-item' + active + '" data-space-id="' + sp.id + '">' +
-    '<span class="space-dot" style="background:' + (sp.color || '#174F96') + '"></span>' +
-    '<span class="nav-icon">' + esc(sp.icon || '\uD83D\uDCC1') + '</span> ' +
+  var initLetter = sp.name ? sp.name.charAt(0).toUpperCase() : '?';
+  var bgColor = sp.color || '#174F96';
+  var isActive = S.currentSpace != null && String(S.currentSpace) === String(sp.id);
+  var subnav = isActive ? (
+    '<div class="space-subnav">' +
+'<a class="nav-item space-subitem' + (S.currentTab==='summary'?' active':'') + '" data-tab="summary" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg></span> Summary</a>' +
+    '<a class="nav-item space-subitem' + (S.currentTab==='backlog'?' active':'') + '" data-tab="backlog" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span> Backlog</a>' +
+    '<a class="nav-item space-subitem' + (S.currentTab==='sprint'?' active':'') + '" data-tab="sprint" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> Active Sprint</a>' +
+    '<a class="nav-item space-subitem' + (S.currentTab==='reports'?' active':'') + '" data-tab="reports" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg></span> Reports</a>' +
+    '<a class="nav-item space-subitem' + (S.currentTab==='allwork'?' active':'') + '" data-tab="allwork" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span> All Work</a>' +
+    '<a class="nav-item space-subitem' + (S.currentTab==='space-settings'?' active':'') + '" data-tab="space-settings" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings</a>' +
+    '</div>'
+  ) : '';
+  return '<div class="space-item-wrap">' +
+    '<a class="nav-item space-item' + active + '" data-space-id="' + sp.id + '">' +
+    '<span class="space-dot" style="background:transparent;"></span>' +
+    '<span class="space-jira-icon" style="background:' + bgColor + ';width:20px;height:20px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;margin-right:6px;">' + initLetter + '</span>' +
     '<span class="space-item-name">' + esc(sp.name) + '</span>' +
     (isOwner ? '<button class="btn-icon space-item-menu-btn" data-space-menu-id="' + sp.id + '" title="More options">\u22EF</button>' : '') +
-    '</a>';
+    '</a>' +
+    subnav +
+    '</div>';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -875,7 +1014,7 @@ function renderHome() {
     var issCount = getSpaceIssues(sp.id).length;
     gridHtml += '<div class="space-card" onclick="navigateToSpace(\'' + sp.id + '\')">' +
       '<div class="space-card-header">' +
-      '<span class="space-card-icon" style="background:' + (sp.color || '#174F96') + '">' + esc(sp.icon || '\uD83D\uDCC1') + '</span>' +
+      '<span class="space-card-icon" style="background:' + (sp.color || '#174F96') + ';width:40px;height:40px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;flex-shrink:0">' + (sp.name ? sp.name.charAt(0).toUpperCase() : '?') + '</span>' +
       '<div><h4 class="space-card-name">' + esc(sp.name) + '</h4>' +
       '<span class="badge badge-muted">' + esc(sp.key) + '</span></div>' +
       '</div>' +
@@ -1312,10 +1451,10 @@ function _prmListView(items, groupBy) {
 // ── Board (Kanban) View ──
 function _prmBoardView(items) {
   var cols = [
-    { key:'planned',     label:'Planned',     icon:'📋', accent:'#607D8B' },
-    { key:'in_progress', label:'In Progress', icon:'🔄', accent:'#2196F3' },
-    { key:'on_hold',     label:'On Hold',     icon:'⏸', accent:'#FF9800' },
-    { key:'completed',   label:'Completed',   icon:'✅', accent:'#4CAF50' }
+    { key:'planned',     label:'Planned',     icon:'', accent:'#607D8B' },
+    { key:'in_progress', label:'In Progress', icon:'', accent:'#2196F3' },
+    { key:'on_hold',     label:'On Hold',     icon:'', accent:'#FF9800' },
+    { key:'completed',   label:'Completed',   icon:'', accent:'#4CAF50' }
   ];
   var html = '<div class="prm-board">';
   cols.forEach(function(col) {
@@ -1631,7 +1770,7 @@ window._prmOpenModal = function(id, defaultStatus) {
     '<div class="modal-header"><h3>' + title + '</h3><button class="btn-icon" onclick="window._prmCloseModal()">✕</button></div>' +
     '<div class="modal-body" style="display:grid;gap:14px">' +
       '<div><label class="form-label">Title *</label><input id="prmFTitle" class="input" value="' + esc(v.title||'') + '" placeholder="Roadmap item title"></div>' +
-      '<div><label class="form-label">Description</label><textarea id="prmFDesc" class="input" rows="2" placeholder="Optional description">' + esc(v.description||'') + '</textarea></div>' +
+      '<div><label class="form-label">Description</label><textarea id="prmFDesc" class="input" rows="8" placeholder="Optional description">' + esc(v.description||'') + '</textarea></div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
         '<div><label class="form-label">Status</label><select id="prmFStatus" class="input">' +
           ['planned','in_progress','on_hold','completed'].map(function(s){ return '<option value="' + s + '"' + (v.status===s?' selected':'') + '>' + _prmStatusLabel(s) + '</option>'; }).join('') +
@@ -1901,10 +2040,10 @@ function _wlrRender() {
   var uniqueUsers   = (function(){ var s={}; rows.forEach(function(r){s[r.user_id]=1;}); return Object.keys(s).length; })();
 
   summary.innerHTML =
-    _wlrCard('⏱️', 'Total Logged', _wlrFmt(totalMins), '#2563eb') +
-    _wlrCard('💰', 'Billable',     _wlrFmt(billMins),  '#16a34a') +
-    _wlrCard('🎫', 'Tickets',      uniqueTickets,      '#7c3aed') +
-    _wlrCard('👥', 'Contributors', uniqueUsers,        '#ea580c');
+    _wlrCard('', 'Total Logged', _wlrFmt(totalMins), '#2563eb') +
+    _wlrCard('', 'Billable',     _wlrFmt(billMins),  '#16a34a') +
+    _wlrCard('', 'Tickets',      uniqueTickets,      '#7c3aed') +
+    _wlrCard('', 'Contributors', uniqueUsers,        '#ea580c');
 
   if (!rows.length) {
     content.innerHTML = '<p class="text-muted placeholder-text">No work logs found for the selected filters.</p>';
@@ -1968,7 +2107,7 @@ function _wlrRender() {
 
 function _wlrFlatTable(rows) {
   var html = '<table class="data-table wlr-table"><thead><tr>' +
-    '<th>Date</th><th>User</th><th>Space</th><th>Ticket</th><th>Title</th>' +
+    '<th>Date</th><th>Assignee</th><th>Space</th><th>Ticket</th><th>Title</th>' +
     '<th>Time</th><th>Description</th><th>Billable</th>' +
     '</tr></thead><tbody>';
   rows.forEach(function(r) {
@@ -1981,7 +2120,7 @@ function _wlrFlatTable(rows) {
       '<td>' + esc(userName) + '</td>' +
       '<td>' + esc(spaceName) + '</td>' +
       '<td class="issue-key" style="cursor:pointer" onclick="openIssuePage(\'' + r.issue_id + '\')">' + esc(r.issue_key || '—') + '</td>' +
-      '<td>' + esc(r.issue_title || '—') + '</td>' +
+      '<td><span style="color:var(--accent);cursor:pointer;font-weight:500" onclick="openIssuePage(\'' + r.issue_id + '\')">' + esc(r.issue_title || '—') + '</span></td>' +
       '<td style="white-space:nowrap;font-weight:600;color:var(--accent)">' + _wlrFmt(r.time_spent||0) + '</td>' +
       '<td class="text-muted">' + esc(r.description || '—') + '</td>' +
       '<td style="text-align:center">' + (r.is_billable ? '<span style="color:var(--success);font-weight:600">✓</span>' : '<span style="color:var(--text3)">—</span>') + '</td>' +
@@ -2532,7 +2671,7 @@ window._wlrEditWorklog = function(id) {
         '<div><label class="form-label">Time Spent (minutes)</label><input id="wlrEditTime" class="input" type="number" min="1" value="' + (r.time_spent||0) + '"></div>' +
         '<div><label class="form-label">Date</label><input id="wlrEditDate" class="input" type="date" value="' + esc(r.work_date ? r.work_date.slice(0,10) : '') + '"></div>' +
       '</div>' +
-      '<div><label class="form-label">Description</label><textarea id="wlrEditDesc" class="input" rows="2">' + esc(r.description||'') + '</textarea></div>' +
+      '<div><label class="form-label">Description</label><textarea id="wlrEditDesc" class="input" rows="8">' + esc(r.description||'') + '</textarea></div>' +
       '<div style="display:flex;align-items:center;gap:8px"><input id="wlrEditBillable" type="checkbox"' + (r.is_billable ? ' checked' : '') + ' style="width:16px;height:16px"><label for="wlrEditBillable" class="form-label" style="margin:0">Billable</label></div>' +
     '</div>' +
     '<div class="modal-footer"><span style="flex:1"></span>' +
@@ -2712,11 +2851,11 @@ function renderSummary() {
   }
 
   $('summaryStats').innerHTML =
-    statCard('Total Issues', total, '#174F96') +
-    statCard('To Do', todo, STATUS_COLORS['To Do']) +
-    statCard('In Progress', inProg, STATUS_COLORS['In Progress']) +
-    statCard('Done', done, STATUS_COLORS['Done']) +
-    statCard('Overdue', overdue, '#dc2626');
+    statCard('Total Issues', total, '#174F96', 'all') +
+    statCard('To Do', todo, STATUS_COLORS['To Do'], 'To Do') +
+    statCard('In Progress', inProg, STATUS_COLORS['In Progress'], 'In Progress') +
+    statCard('Done', done, STATUS_COLORS['Done'], 'Done') +
+    statCard('Overdue', overdue, '#dc2626', 'overdue');
 
   // Widgets
   var sprints = getSpaceSprints(S.currentSpace);
@@ -2785,22 +2924,34 @@ function renderSummary() {
     '<div class="chart-card"><h4 class="chart-title">Priority Distribution</h4>' + barChart(prioGroups, total) + '</div>';
 }
 
-function barChart(groups, total) {
-  var html = '';
-  for (var i = 0; i < groups.length; i++) {
-    var g = groups[i];
-    var pct = total ? Math.round((g.count / total) * 100) : 0;
-    html += '<div class="bar-row">' +
-      '<span class="bar-label">' + g.label + '</span>' +
-      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + g.color + '"></div></div>' +
-      '<span class="bar-value">' + g.count + '</span></div>';
-  }
-  return html;
-}
+;
+
 
 // ═══════════════════════════════════════════════════════════
 // TIMELINE TAB
 // ═══════════════════════════════════════════════════════════
+function barChart(groups, total) {
+  var max = 0;
+  for (var i = 0; i < groups.length; i++) { if (groups[i].count > max) max = groups[i].count; }
+  if (max === 0) max = 1;
+  var H = 150;
+  var bars = groups.map(function(g) {
+    var px = g.count > 0 ? Math.max(Math.round((g.count/max)*H), 4) : 0;
+    return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;min-width:0">' +
+      '<span style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px">' + g.count + '</span>' +
+      '<div style="width:70%;height:' + px + 'px;background:' + g.color + ';border-radius:5px 5px 0 0"></div>' +
+      '<div style="width:70%;height:2px;background:var(--border)"></div>' +
+      '<span style="font-size:10px;color:var(--text3);margin-top:5px;text-align:center;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis">' + g.label + '</span>' +
+    '</div>';
+  }).join('');
+  var legend = groups.map(function(g) {
+    return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)">' +
+      '<span style="width:9px;height:9px;border-radius:2px;background:' + g.color + ';flex-shrink:0;display:inline-block"></span>' +
+      g.label + ' &middot; ' + g.count + '</span>';
+  }).join('');
+  return '<div style="display:flex;align-items:flex-end;gap:8px;height:' + (H+50) + 'px">' + bars + '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">' + legend + '</div>';
+}
 function renderTimeline() {
   var issues = getSpaceIssues(S.currentSpace).filter(function (i) { return i.start_date && i.due_date; });
   if (!issues.length) {
@@ -2871,7 +3022,18 @@ function renderTimeline() {
 // ═══════════════════════════════════════════════════════════
 function renderBacklog() {
   var sprints = getSpaceSprints(S.currentSpace);
-  var issues = getSpaceIssues(S.currentSpace);
+  var allSpaceIssues = getSpaceIssues(S.currentSpace);
+  var statFilter = window._activeStatFilter || null;
+  var issues = allSpaceIssues;
+  if (statFilter) {
+    var now2 = new Date();
+    if (statFilter === 'overdue') {
+      issues = allSpaceIssues.filter(function(i) { return i.due_date && new Date(i.due_date) < now2 && i.status !== 'Done'; });
+    } else if (statFilter !== 'all') {
+      issues = allSpaceIssues.filter(function(i) { return i.status === statFilter; });
+    }
+    window._activeStatFilter = null;
+  }
   var searchTerm = ($('backlogSearch').value || '').toLowerCase();
 
   // Sort sprints: active first, planning, completed
@@ -2890,6 +3052,10 @@ function renderBacklog() {
         return iss.title.toLowerCase().indexOf(searchTerm) >= 0 || issueKeyStr(iss).toLowerCase().indexOf(searchTerm) >= 0;
       });
     }
+    // Sort by created_at descending (newest first like Jira)
+    sprintIssues = sprintIssues.slice().sort(function(a, b) {
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
     var points = sprintIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
     var collapsed = sp.status === 'completed';
 
@@ -2914,10 +3080,10 @@ function renderBacklog() {
       html += '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();window._startSprint(\'' + sp.id + '\')">Start Sprint</button>';
     }
     if (sp.status === 'active') {
-      html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._completeSprint(\'' + sp.id + '\')">Complete</button>';
+      html += (window._isMemberOnly ? "" : '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._completeSprint(\'' + sp.id + '\')">' + 'Complete</button>');
     }
-    html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._openSprintModal(\'' + sp.id + '\')">Edit</button>' +
-      '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._deleteSprint(\'' + sp.id + '\')">Delete</button>' +
+    html += (window._isMemberOnly ? "" : '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._openSprintModal(\'' + sp.id + '\')">' + 'Edit</button>') +
+      (window._isMemberOnly ? "" : '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._deleteSprint(\'' + sp.id + '\')">' + 'Delete</button>') +
       '</div></div>' +
       '<div class="backlog-lane-body' + (collapsed ? ' collapsed' : '') + '" data-sprint-drop="' + sp.id + '" ' +
       'ondragover="event.preventDefault();event.currentTarget.classList.add(\'drag-over\')" ' +
@@ -3223,36 +3389,73 @@ function renderCalendar() {
 // ═══════════════════════════════════════════════════════════
 function renderReports() {
   var sel = $('reportSelector');
-  sel.onchange = function () { renderReportContent(sel.value); };
+  sel.onchange = function () { renderReportContent(sel.value, window._lastSelectedSprintId); };
   renderReportContent(sel.value);
 }
 
-async function renderReportContent(type) {
+async function renderReportContent(type, selectedSprintId) {
   var c = $('reportContent');
-  c.innerHTML = '<p class="text-muted">Loading report\u2026</p>';
+  c.innerHTML = '<p class="text-muted">Loading report…</p>';
   try {
+    var allSprints = getSpaceSprints(S.currentSpace);
+    var activeSprint = (selectedSprintId && allSprints.find(function(sp){ return sp.id === selectedSprintId; }))
+      || allSprints.find(function(sp){ return sp.status === 'active'; })
+      || allSprints[allSprints.length - 1];
+    if (activeSprint) window._lastSelectedSprintId = activeSprint.id;
+    var sprintSelectorHtml = allSprints && allSprints.length > 0
+      ? '<div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
+        '<select class="input input-sm" onchange="window._globalRptSprintChange(this.value,\'' + type + '\')">' +
+        allSprints.map(function(sp) {
+          return '<option value="' + sp.id + '"' + (activeSprint && sp.id === activeSprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
+        }).join('') + '</select></div>'
+      : '';
     if (type === 'burndown') {
-      var sprints = getSpaceSprints(S.currentSpace);
-      var targetSprint = sprints.find(function(sp){ return sp.status === 'active'; }) || sprints[sprints.length - 1];
-      if (!targetSprint) { c.innerHTML = '<p class="placeholder-text">No sprints found for this space.</p>'; return; }
-      var data = await api('/api/reports/sprint/' + targetSprint.id);
-      renderBurndownReport(c, data, sprints);
+      if (!activeSprint) { c.innerHTML = '<p class="placeholder-text">No sprints found.</p>'; return; }
+      var data = await api('/api/reports/sprint/' + activeSprint.id);
+      renderBurndownReport(c, data, allSprints, sprintSelectorHtml);
     } else if (type === 'velocity') {
       var data2 = await api('/api/reports/velocity?space_id=' + S.currentSpace);
-      renderVelocityReport(c, data2);
+      renderVelocityReport(c, data2, allSprints, sprintSelectorHtml);
     } else if (type === 'cumulative') {
       var data3 = await api('/api/reports/status?space_id=' + S.currentSpace);
-      renderCumulativeReport(c, data3);
+      renderCumulativeReport(c, data3, allSprints, sprintSelectorHtml);
     } else if (type === 'control') {
       var data4 = await api('/api/reports/cycle-time?space_id=' + S.currentSpace);
-      renderControlChart(c, data4);
+      renderControlChart(c, data4, allSprints, sprintSelectorHtml);
     }
+    window._globalRptSprintChange = async function(sprintId, rtype) {
+      window._lastSelectedSprintId = sprintId;
+      var cont = $('reportContent') || c;
+      cont.innerHTML = '<p class="text-muted">Loading…</p>';
+      try {
+        var newSel = '<div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
+          '<select class="input input-sm" onchange="window._globalRptSprintChange(this.value,\'' + rtype + '\')">' +
+          allSprints.map(function(sp) {
+            return '<option value="' + sp.id + '"' + (sp.id === sprintId ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
+          }).join('') + '</select></div>';
+        if (rtype === 'burndown') {
+          var d = await api('/api/reports/sprint/' + sprintId);
+          renderBurndownReport(cont, d, allSprints);
+          var sel = cont.querySelector('select'); if (sel) sel.value = sprintId;
+        } else if (rtype === 'velocity') {
+          var d2 = await api('/api/reports/velocity?space_id=' + S.currentSpace);
+          renderVelocityReport(cont, d2, allSprints, newSel);
+        } else if (rtype === 'cumulative') {
+          var d3 = await api('/api/reports/status?space_id=' + S.currentSpace);
+          renderCumulativeReport(cont, d3, allSprints, newSel);
+        } else if (rtype === 'control') {
+          var d4 = await api('/api/reports/cycle-time?space_id=' + S.currentSpace);
+          renderControlChart(cont, d4, allSprints, newSel);
+        }
+      } catch(e) { cont.innerHTML = '<p class="text-muted">Error: ' + esc(e.message) + '</p>'; }
+    };
   } catch (e) {
     c.innerHTML = '<p class="text-muted">Failed to load report: ' + esc(e.message) + '</p>';
   }
 }
 
-function renderBurndownReport(c, data, allSprints) {
+function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
   // Works with /api/reports/sprint/:id response:
   // { sprint, total, done, in_progress, points_completed, points_remaining }
   var sprint = data.sprint || {};
@@ -3263,14 +3466,14 @@ function renderBurndownReport(c, data, allSprints) {
   var ptsDone = Number(data.points_completed) || 0;
   var ptsLeft = Number(data.points_remaining) || 0;
 
-  // Sprint selector
-  var sprintOpts = (allSprints || []).map(function(sp) {
-    return '<option value="' + sp.id + '"' + (sp.id === sprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
-  }).join('');
-  var selectorHtml = allSprints && allSprints.length > 1
+  // Use passed sprintSelectorHtml or build own
+  var selectorHtml = sprintSelectorHtml || (allSprints && allSprints.length > 1
     ? '<div style="margin-bottom:12px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
-      '<select class="input input-sm" onchange="window._rptChangeSprint(this.value)">' + sprintOpts + '</select></div>'
-    : '';
+      '<select class="input input-sm" onchange="window._rptChangeSprint(this.value)">' +
+      (allSprints || []).map(function(sp) {
+        return '<option value="' + sp.id + '"' + (sp.id === sprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
+      }).join('') + '</select></div>'
+    : '');
 
   // Visual progress bar showing Done / In Progress / Remaining
   var chartH = 140;
@@ -3314,16 +3517,18 @@ function renderBurndownReport(c, data, allSprints) {
     '</div>';
 
   window._rptChangeSprint = async function(sprintId) {
-    var cont = $('reportContent') || c;
-    cont.innerHTML = '<p class="text-muted">Loading\u2026</p>';
+    window._lastSelectedSprintId = sprintId;
+    var cont = $("reportContent") || c;
     try {
-      var d = await api('/api/reports/sprint/' + sprintId);
+      var d = await api("/api/reports/sprint/" + sprintId);
       renderBurndownReport(cont, d, allSprints);
-    } catch(e) { cont.innerHTML = '<p class="text-muted">Error: ' + esc(e.message) + '</p>'; }
+      var sel = cont.querySelector("select"); if (sel) sel.value = sprintId;
+    } catch(e) { cont.innerHTML = "<p class=\"text-muted\">Error: " + esc(e.message) + "</p>"; }
   };
 }
 
-function renderVelocityReport(c, data) {
+function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
   var sprints = Array.isArray(data) ? data : [];
   if (!sprints.length) { c.innerHTML = '<p class="placeholder-text">No completed sprints yet. Complete a sprint to see velocity data.</p>'; return; }
 
@@ -3344,6 +3549,7 @@ function renderVelocityReport(c, data) {
   }).join('');
 
   c.innerHTML = '<div class="report-chart">' +
+    sprintSelectorHtml +
     '<h4>Velocity Chart</h4>' +
     '<div class="report-stats-row">' + statCard('Avg Velocity', avg + ' pts', '#174F96') + '</div>' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
@@ -3358,7 +3564,8 @@ function renderVelocityReport(c, data) {
     '</div></div>';
 }
 
-function renderCumulativeReport(c, data) {
+function renderCumulativeReport(c, data, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
   var STATUSES = ['To Do', 'In Progress', 'In Review', 'Done'];
   var issues = getSpaceIssues(S.currentSpace);
   var counts = STATUSES.map(function(s) {
@@ -3390,6 +3597,7 @@ function renderCumulativeReport(c, data) {
   }).join('');
 
   c.innerHTML = '<div class="report-chart">' +
+    sprintSelectorHtml +
     '<h4>Cumulative Flow — Current Snapshot</h4>' +
     '<p style="font-size:12px;color:var(--text2);margin-bottom:12px">Work items across all stages (today\'s snapshot)</p>' +
     '<div style="display:flex;height:28px;border-radius:6px;overflow:hidden;margin-bottom:20px">' + segments + '</div>' +
@@ -3397,7 +3605,8 @@ function renderCumulativeReport(c, data) {
     '</div>';
 }
 
-function renderControlChart(c, data) {
+function renderControlChart(c, data, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
   var items = Array.isArray(data) ? data : [];
   if (!items.length) {
     c.innerHTML = '<div class="report-chart"><h4>Control Chart — Cycle Time</h4><p class="placeholder-text">No completed issues with history data yet.</p></div>';
@@ -3423,6 +3632,7 @@ function renderControlChart(c, data) {
   }).join('');
 
   c.innerHTML = '<div class="report-chart">' +
+    sprintSelectorHtml +
     '<h4>Control Chart — Cycle Time per Issue</h4>' +
     '<div class="report-stats-row">' + statCard('Avg Cycle Time', avgDays + ' days', '#174F96') + '</div>' +
     '<div style="display:flex;gap:12px;font-size:11px;color:var(--text2);margin-bottom:12px">' +
@@ -3726,17 +3936,18 @@ window._awClearFilters = function() {
 var AW_ALL_COLUMNS = [
   { key: 'key',             label: 'Key',            sortCol: 'key',          def: true },
   { key: 'title',           label: 'Title',          sortCol: 'title',        def: true },
-  { key: 'type',            label: 'Type',           sortCol: 'type',         def: true },
   { key: 'status',          label: 'Status',         sortCol: 'status',       def: true },
-  { key: 'priority',        label: 'Priority',       sortCol: 'priority',     def: true },
   { key: 'assignee',        label: 'Assignee',       sortCol: 'assignee',     def: true },
+  { key: 'reporter',        label: 'Reporter',       sortCol: null,           def: false },
+  { key: 'priority',        label: 'Priority',       sortCol: 'priority',     def: true },
   { key: 'sprint',          label: 'Sprint',         sortCol: 'sprint_id',    def: true },
-  { key: 'story_points',    label: 'Points',         sortCol: 'story_points', def: true },
   { key: 'due_date',        label: 'Due Date',       sortCol: 'due_date',     def: true },
   { key: 'updated_at',      label: 'Updated',        sortCol: 'updated_at',   def: true },
+  { key: 'work',            label: 'Work',           sortCol: 'key',          def: false },
+  { key: 'type',            label: 'Type',           sortCol: 'type',         def: false },
+  { key: 'story_points',    label: 'Points',         sortCol: 'story_points', def: false },
   { key: 'start_date',      label: 'Start Date',     sortCol: 'start_date',   def: false },
   { key: 'created_at',      label: 'Created',        sortCol: 'created_at',   def: false },
-  { key: 'reporter',        label: 'Reporter',       sortCol: null,           def: false },
   { key: 'labels',          label: 'Labels',         sortCol: 'labels',       def: false },
   { key: 'fix_description', label: 'Fix Description',sortCol: null,           def: false },
 ];
@@ -3800,6 +4011,7 @@ window._awToggleColKey = function(key, on) {
   renderAllWork();
 };
 
+S.allWorkSort = { col: 'key', dir: 'desc' };
 function renderAllWork() {
   var search = ($('allWorkSearch') ? $('allWorkSearch').value : '').toLowerCase().trim();
   var f = S.awFilters;
@@ -3837,6 +4049,13 @@ function renderAllWork() {
   if (f.dueDateTo)     issues = issues.filter(function(i) { return i.due_date && i.due_date.slice(0,10) <= f.dueDateTo; });
   if (f.startDateFrom) issues = issues.filter(function(i) { return i.start_date && i.start_date.slice(0,10) >= f.startDateFrom; });
   if (f.startDateTo)   issues = issues.filter(function(i) { return i.start_date && i.start_date.slice(0,10) <= f.startDateTo; });
+  // Sort by created_at descending (newest first)
+  issues = issues.slice().sort(function(a, b) {
+    return new Date(b.created_at) - new Date(a.created_at);
+  });
+  // Update ticket count display
+  var countEl = document.getElementById('awTicketCount');
+  if (countEl) countEl.textContent = issues.length + ' work items';
   // Custom field filters
   _awActiveFields.forEach(function(key) {
     if (key.indexOf('cf_') !== 0) return;
@@ -3883,8 +4102,8 @@ function renderAllWork() {
     if (vb == null) vb = '';
     if (typeof va === 'string') va = va.toLowerCase();
     if (typeof vb === 'string') vb = vb.toLowerCase();
-    if (va < vb) return dir === 'asc' ? -1 : 1;
-    if (va > vb) return dir === 'asc' ? 1 : -1;
+    if (va < vb) return dir === 'asc' ? 1 : -1;
+    if (va > vb) return dir === 'asc' ? -1 : 1;
     return 0;
   });
 
@@ -3931,7 +4150,7 @@ function renderAllWork() {
 
   var visCols = _awGetVisibleCols();
 
-  html += '<table class="data-table"><thead><tr>' +
+  html += '<table class="data-table" style="min-width:1200px;width:100%"><thead><tr>' +
     '<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>' +
     visCols.map(function(col) {
       return col.sortCol
@@ -3953,12 +4172,12 @@ function renderAllWork() {
       visCols.map(function(col) {
         var cell = '';
         switch(col.key) {
-          case 'key':             cell = '<td class="issue-key" onclick="' + nav + '">' + esc(issueKeyStr(iss)) + '</td>'; break;
-          case 'title':           cell = '<td onclick="' + nav + '">' + esc(iss.title) + '</td>'; break;
+          case 'key':             cell = '<td class="issue-key" onclick="' + nav + '" style="white-space:nowrap;width:90px;min-width:90px">' + esc(issueKeyStr(iss)) + '</td>'; break;
+          case 'title':           cell = '<td onclick="' + nav + '" style="min-width:200px;max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(iss.title) + '</td>'; break;
           case 'type':            cell = '<td onclick="' + nav + '">' + typeIcon(iss.type) + ' ' + cap(iss.type) + '</td>'; break;
-          case 'status':          cell = '<td onclick="' + nav + '">' + statusBadge(iss.status) + '</td>'; break;
-          case 'priority':        cell = '<td onclick="' + nav + '">' + priorityBadge(iss.priority) + '</td>'; break;
-          case 'assignee':        cell = '<td onclick="' + nav + '">' + (assignee ? avatarHtml(assignee,24)+' '+esc(assignee.name) : '<span class="text-muted">Unassigned</span>') + '</td>'; break;
+          case 'status':          cell = '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\'  )" style="cursor:pointer">' + statusBadge(iss.status) + '</td>'; break;
+          case 'priority':        cell = '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\'  )" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>'; break;
+          case 'assignee':        cell = '<td onclick="event.stopPropagation();awInlineAssignee(event,\'' + iid + '\',\'' + (iss.assignee_id||'') + '\'  )" style="cursor:pointer;white-space:nowrap">' + (assignee ? avatarHtml(assignee,24)+'&nbsp;'+esc(assignee.name)+'<span style="color:#6b778c;font-size:10px;margin-left:4px">&#9662;</span>' : '<span class="text-muted">Unassigned</span>') + '</td>'; break;
           case 'sprint':          cell = '<td onclick="' + nav + '">' + (sprint ? esc(sprint.name) : '\u2014') + '</td>'; break;
           case 'story_points':    cell = '<td onclick="' + nav + '">' + (iss.story_points != null ? iss.story_points : '\u2014') + '</td>'; break;
           case 'due_date':        cell = '<td onclick="' + nav + '">' + (fmtDateShort(iss.due_date) || '\u2014') + '</td>'; break;
@@ -3993,7 +4212,7 @@ function renderAllWork() {
         S.allWorkSort.dir = S.allWorkSort.dir === 'asc' ? 'desc' : 'asc';
       } else {
         S.allWorkSort.col = c;
-        S.allWorkSort.dir = 'asc';
+        S.allWorkSort.dir = 'desc';
       }
       renderAllWork();
     };
@@ -4375,14 +4594,16 @@ function showSpaceContextMenu(anchorBtn, spaceId) {
   var starred = isFavorited(spaceId);
   var starLabel = starred ? '\u2B50 Remove from starred' : '\u2B50 Add to starred';
 
-  var isAdminUser = canCreateSpace();
+  var isAdminUser = S.currentUserObj && (S.currentUserObj.role === 'admin' || S.currentUserObj.role === 'owner');
   var menu = document.createElement('div');
   menu.className = 'space-context-menu';
+  var starSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="' + (starred ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+  var starText = starred ? 'Remove from starred' : 'Add to starred';
   menu.innerHTML =
-    '<div class="space-context-menu-item" data-action="star">' + starLabel + '</div>' +
-    (isAdminUser ? '<div class="space-context-menu-item" data-action="people">\uD83D\uDC65 Manage people</div>' : '') +
-    (isAdminUser ? '<div class="space-context-menu-item" data-action="settings">\u2699\uFE0F Space settings</div>' : '') +
-    (isAdminUser ? '<div class="space-context-menu-item danger" data-action="delete">\uD83D\uDDD1\uFE0F Delete space</div>' : '');
+    '<div class="space-context-menu-item" data-action="star">' + starSvg + ' ' + starText + '</div>' +
+    (isAdminUser ? '<div class="space-context-menu-item" data-action="people"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Manage people</div>' : '') +
+    (isAdminUser ? '<div class="space-context-menu-item" data-action="settings"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Space settings</div>' : '') +
+    (isAdminUser ? '<div class="space-context-menu-item danger" data-action="delete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> Delete space</div>' : '');
 
   // Position relative to the button
   var rect = anchorBtn.getBoundingClientRect();
@@ -4649,6 +4870,18 @@ $('customFieldForm').addEventListener('submit', async function (e) {
 // ISSUE DRAWER (open)
 // ═══════════════════════════════════════════════════════════
 async function openDrawer(issueId) {
+  // Save current location for back button - detect allwork from URL/view
+  var currentTab = S.currentTab;
+  if (!currentTab) {
+    // Try to detect from active nav item
+    var activeNav = document.querySelector('.nav-item.active[data-tab]');
+    if (activeNav) currentTab = activeNav.dataset.tab;
+  }
+  if (!currentTab && document.getElementById('view-allwork') && !document.getElementById('view-allwork').hidden) {
+    currentTab = 'allwork';
+  }
+  window._issueReturnTab = currentTab || 'allwork';
+  window._issueReturnSpace = S.currentSpace;
   S.drawerIssueId = issueId;
   // Reset comment file attachments for the new issue
   _commentFiles = [];
@@ -4658,7 +4891,9 @@ async function openDrawer(issueId) {
     issue = await api('/api/issues/' + issueId);
   } catch (e) { return; }
 
-  $('issueDrawer').removeAttribute('hidden');
+  if (issue && issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); window._currentIssueKey = issue.key; }
+  if (issue && issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); }
+  document.body.classList.add('issue-page'); void document.body.offsetHeight; var dp = document.querySelector('.drawer-panel'); if(dp){ dp.style.position='fixed'; dp.style.inset='0'; dp.style.width='100vw'; dp.style.maxWidth='100vw'; dp.style.height='100vh'; dp.style.zIndex='99999'; dp.style.display='flex'; dp.style.flexDirection='column'; } $('issueDrawer').removeAttribute('hidden');
 
   // Parent breadcrumb for subtasks
   var parentCrumb = $('drawerParentBreadcrumb');
@@ -4678,8 +4913,24 @@ async function openDrawer(issueId) {
   $('drawerType').textContent = typeLabel(issue.type);
   $('drawerType').className = 'badge badge-type badge-type-' + (issue.type || 'task');
   $('drawerTitle').textContent = issue.title || '';
-  $('drawerDesc').textContent = issue.description || '';
-  $('drawerFixDesc').textContent = issue.fix_description || '';
+  // Render description - convert plain text to HTML safely
+  var descText = issue.description || '';
+  var fixDescText = issue.fix_description || '';
+  // If content has no HTML tags, convert newlines to <br>
+  function renderDesc(text) {
+    if (!text) return '';
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      // Clean up excessive gaps from pasted HTML
+      return text
+        .replace(/<p>\s*<\/p>/gi, '')
+        .replace(/(<br\s*\/?>){3,}/gi, '<br>')
+        .replace(/&nbsp;/gi, ' ')
+        .trim();
+    }
+    var p=text.replace(/\\n{3,}/g,'\\n\\n').replace(/\\n/g,'<br>'); var d=p.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>'); return d.replace(/(https?:\/\/\S+)/g,'<a href="$1" style="color:#0129AC;text-decoration:underline" target="_blank">$1</a>');
+  }
+  $('drawerDesc').innerHTML = renderDesc(descText);
+  $('drawerFixDesc').innerHTML = renderDesc(fixDescText);
 
   $('drawerStatus').value = issue.status || 'To Do';
   $('drawerPriority').value = issue.priority || 'medium';
@@ -4779,6 +5030,11 @@ function startDrawerLiveSync(issueId) {
     if (S.drawerIssueId !== issueId) return stopDrawerLiveSync();
     try {
       var fresh = await api('/api/issues/' + issueId);
+      // Fetch custom field values separately if not included
+      if (fresh && !fresh.custom_field_values) {
+        var cfVals = await api('/api/issues/' + issueId + '/field-values');
+        fresh.custom_field_values = cfVals || [];
+      }
       if (!fresh) return;
       // Update right-side fields silently (only if not focused by user)
       var activeId = document.activeElement && document.activeElement.id;
@@ -4850,10 +5106,45 @@ function bindDrawerEdits(issue) {
   }
 
 
-  $('drawerStatus').onchange    = function () { autoSave('status',       $('drawerStatus').value); };
+  $('drawerStatus').onchange = function () { autoSave('status', $('drawerStatus').value); updateStatusBtn($('drawerStatus').value); };
+  updateStatusBtn($('drawerStatus').value);
   $('drawerPriority').onchange  = function () { autoSave('priority',     $('drawerPriority').value); };
   $('drawerAssignee').onchange  = function () { autoSave('assignee_id',  $('drawerAssignee').value || null); };
   $('drawerReporter').onchange  = function () { autoSave('reporter_id',  $('drawerReporter').value || null); };
+  // ── Clickable type badge dropdown (Jira-like) ──
+  var typeEl = $('drawerType');
+  if (typeEl) {
+    typeEl.style.cursor = 'pointer';
+    typeEl.onclick = function(e) {
+      e.stopPropagation();
+      var old = document.getElementById('_typeMenu');
+      if (old) { old.remove(); return; }
+      var types = ['epic','story','task','bug','subtask'];
+      var icons = {epic:'⚡',story:'📖',task:'✅',bug:'🐛',subtask:'📌'};
+      var rect = typeEl.getBoundingClientRect();
+      var menu = document.createElement('div');
+      menu.id = '_typeMenu';
+      menu.style.cssText = 'position:fixed;top:'+(rect.bottom+4)+'px;left:'+rect.left+'px;background:#fff;border:1px solid #dfe1e6;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;min-width:160px;padding:4px;';
+      types.forEach(function(t) {
+        var item = document.createElement('div');
+        item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:13px;border-radius:4px;display:flex;align-items:center;gap:8px;';
+        item.innerHTML = '<span>'+ icons[t] +'</span><span>'+(t.charAt(0).toUpperCase()+t.slice(1))+'</span>';
+        item.onmouseover = function(){ this.style.background='#f4f5f7'; };
+        item.onmouseout = function(){ this.style.background='';};
+        item.onclick = function(){
+          menu.remove();
+          typeEl.textContent = t.charAt(0).toUpperCase()+t.slice(1);
+          typeEl.className = 'badge badge-type badge-type-'+t;
+          autoSave('type',t);
+        };
+        menu.appendChild(item);
+      });
+      document.body.appendChild(menu);
+      setTimeout(function(){
+        document.addEventListener('click',function h(ev){ if(!menu.contains(ev.target)){menu.remove();document.removeEventListener('click',h);} });
+      },100);
+    };
+  }
   $('drawerSprint').onchange = function () {
     var sprintId = $('drawerSprint').value;
     // Check if existing due date exceeds the newly selected sprint's end date
@@ -4905,8 +5196,54 @@ function bindDrawerEdits(issue) {
     if (title) autoSave('title', title);
   };
 
+  var _drawerDescOriginal = '';
+  $('drawerDesc').onfocus = function() {
+    _drawerDescOriginal = $('drawerDesc').innerHTML;
+    var b = $('drawerDescBtns'); if(b) b.style.display='flex';
+  };
+  var drawerDescSaveBtn = $('drawerDescSave');
+  var drawerDescCancelBtn = $('drawerDescCancel');
+  if(drawerDescSaveBtn) drawerDescSaveBtn.onclick = async function(e) {
+    e.preventDefault(); e.stopPropagation();
+    drawerDescSaveBtn.disabled = true;
+    drawerDescSaveBtn.textContent = 'Saving...';
+    var b = $('drawerDescBtns'); if(b) b.style.display='none';
+    var descEl = $('drawerDesc');
+    var imgs = descEl.querySelectorAll('img[src^="data:"],img[src^="blob:"]');
+    for (var i = 0; i < imgs.length; i++) {
+      try {
+        var resp = await fetch(imgs[i].src);
+        var blob = await resp.blob();
+        var fd = new FormData();
+        fd.append('files', blob, 'desc-img-' + Date.now() + '.png');
+        var up = await fetch('/api/upload-temp', { method:'POST', headers:{'Authorization':'Bearer '+getAuthToken()}, body:fd });
+        var upJson = await up.json();
+        if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
+      } catch(ex) { console.error('img upload failed', ex); }
+    }
+    autoSave('description', descEl.innerHTML.trim());
+  };
+  if(drawerDescCancelBtn) drawerDescCancelBtn.onclick = function() {
+    $('drawerDesc').innerHTML = _drawerDescOriginal;
+    var b = $('drawerDescBtns'); if(b) b.style.display='none';
+  };
   $('drawerDesc').oninput = function () {
-    autoSave('description', $('drawerDesc').textContent.trim());
+    autoSave('description', $('drawerDesc').innerHTML.trim());
+  };
+  var _drawerFixDescOriginal = '';
+  $('drawerFixDesc').onfocus = function() {
+    _drawerFixDescOriginal = $('drawerFixDesc').innerHTML;
+    var b = $('drawerFixDescBtns'); if(b) b.style.display='flex';
+  };
+  var fixSaveBtn = $('drawerFixDescSave');
+  var fixCancelBtn = $('drawerFixDescCancel');
+  if(fixSaveBtn) fixSaveBtn.onclick = function() {
+    var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
+    autoSave('fix_description', $('drawerFixDesc').innerHTML.trim());
+  };
+  if(fixCancelBtn) fixCancelBtn.onclick = function() {
+    $('drawerFixDesc').innerHTML = _drawerFixDescOriginal;
+    var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
   };
   $('drawerFixDesc').oninput = function () {
     autoSave('fix_description', $('drawerFixDesc').textContent.trim());
@@ -4952,37 +5289,73 @@ function bindDrawerEdits(issue) {
           '</div></div>';
       }).join('');
 
-      // Click to insert mention
+      // Use mousedown to preserve selection before blur
       dropdown.querySelectorAll('.mention-item').forEach(function(item) {
-        item.onclick = function() {
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();
           var name = item.dataset.name;
-          var val = textarea.value;
-          // Replace @query with @Name
-          var before = val.substring(0, mentionStart);
-          var after = val.substring(textarea.selectionStart);
-          textarea.value = before + '@' + name + ' ' + after;
-          // Move caret after inserted mention
-          var pos = mentionStart + name.length + 2;
-          textarea.setSelectionRange(pos, pos);
-          textarea.focus();
+          var isContentEditable = textarea.contentEditable === 'true';
+          if (isContentEditable) {
+            // Restore saved selection range
+            textarea.focus();
+            var sel = window.getSelection();
+            if (_savedRange && sel) {
+              sel.removeAllRanges();
+              sel.addRange(_savedRange);
+            }
+            var textBefore = _savedTextBefore || getTextBeforeCaret(textarea);
+            var atIdx2 = textBefore.lastIndexOf('@');
+            if (atIdx2 !== -1) {
+              var queryLen = textBefore.length - atIdx2;
+              for (var i = 0; i < queryLen; i++) {
+                document.execCommand('delete', false, null);
+              }
+            }
+            document.execCommand('insertText', false, '@' + name + ' ');
+          } else {
+            var val = textarea.value;
+            var before = val.substring(0, mentionStart);
+            var after = val.substring(textarea.selectionStart);
+            textarea.value = before + '@' + name + ' ' + after;
+            var pos = mentionStart + name.length + 2;
+            textarea.setSelectionRange(pos, pos);
+            textarea.focus();
+          }
           closeMention();
-        };
+        });
       });
     }
 
+    var _savedRange = null;
+    var _savedTextBefore = '';
+    if (textarea.contentEditable === 'true') {
+      textarea.addEventListener('keyup', function() {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          _savedRange = sel.getRangeAt(0).cloneRange();
+          _savedTextBefore = getTextBeforeCaret(textarea);
+        }
+      });
+    }
     textarea.addEventListener('input', function() {
-      var val = textarea.value;
-      var caret = textarea.selectionStart;
-      // Find the @ that triggered this mention (scan backwards from caret)
-      var slice = val.substring(0, caret);
-      var atIdx = slice.lastIndexOf('@');
+      var isContentEditable = textarea.contentEditable === 'true';
+      var textBefore;
+      if (isContentEditable) {
+        var sel = window.getSelection();
+        if (!sel || !sel.rangeCount) return;
+        var range = sel.getRangeAt(0).cloneRange();
+        range.selectNodeContents(textarea);
+        range.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+        textBefore = range.toString();
+      } else {
+        textBefore = textarea.value.substring(0, textarea.selectionStart);
+      }
+      var atIdx = textBefore.lastIndexOf('@');
       if (atIdx === -1) { closeMention(); return; }
-      // Only trigger if @ is at start of word (preceded by space, newline, or start of string)
-      var charBefore = slice[atIdx - 1];
+      var charBefore = textBefore[atIdx - 1];
       if (atIdx > 0 && charBefore !== ' ' && charBefore !== '\n') { closeMention(); return; }
-      var query = slice.substring(atIdx + 1);
-      // If query has a space it means @mention was completed
-      if (query.indexOf(' ') !== -1) { closeMention(); return; }
+      var query = textBefore.substring(atIdx + 1);
+      if (query.split(' ').length > 4) { closeMention(); return; }
       mentionStart = atIdx;
       showMention(query);
     });
@@ -5019,23 +5392,56 @@ function bindDrawerEdits(issue) {
   })();
 
   $('drawerCommentSubmit').onclick = async function () {
-    var body = $('drawerCommentInput').value.trim();
+  // Paste image support for comment box
+  var _commentPasteEl = $('drawerCommentInput');
+  if (_commentPasteEl) {
+    _commentPasteEl.addEventListener('paste', function(e) {
+      var items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault();
+          var file = items[i].getAsFile();
+          if (!file) continue;
+          _commentFiles.push(file);
+          _renderCommentFileList();
+          toast('Image pasted — click Comment to post');
+          break;
+        }
+      }
+    });
+  }
+    var _ci = $('drawerCommentInput');
+    var body = _ci ? _ci.value.trim() : '';
+    var commentBody = body;
     if (!body && !_commentFiles.length) return;
+    // Disable button to prevent duplicate submissions
+    var submitBtn = $('drawerCommentSubmit');
+    if (submitBtn._submitting) return;
+    submitBtn._submitting = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Posting...';
     var commentBody = body;
 
-    // Upload attached files first
+    // Upload attached files to comment-specific endpoint
     if (_commentFiles.length) {
       var fd = new FormData();
+      fd.append('issue_id', issueId);
       _commentFiles.forEach(function(f) { fd.append('files', f); });
       try {
         toast('Uploading attachment…');
-        await fetch('/api/issues/' + issueId + '/attachments', {
+        var uploadRes = await fetch('/api/comments/upload', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + getAuthToken() },
           body: fd
         });
-        if (!commentBody) {
-          commentBody = '📎 ' + _commentFiles.map(function(f) { return f.name; }).join(', ');
+        var uploadData = await uploadRes.json();
+        if (uploadData.files && uploadData.files.length) {
+          var fileRefs = uploadData.files.map(function(f) {
+            var isImg = f.type && f.type.startsWith('image/');
+            return (isImg ? '[img:' : '[file:') + f.name + '|' + f.url + ']';
+          }).join('\n');
+          commentBody = commentBody ? commentBody + '\n' + fileRefs : fileRefs;
         }
       } catch(e) { toast('Attachment upload failed', 'error'); }
       _commentFiles = [];
@@ -5043,12 +5449,42 @@ function bindDrawerEdits(issue) {
     }
 
     if (commentBody) {
+      // Optimistic UI - show comment instantly before API response
+      var me = S.currentUserObj || {};
+      var tempComment = {
+        id: 'temp-' + Date.now(),
+        user_id: S.currentUser,
+        body: commentBody,
+        created_at: new Date().toISOString(),
+        user_name: me.name || '',
+        user_color: me.color || '#666',
+        user_avatar_url: me.avatar_url || null
+      };
+      if (_drawerIssueData) {
+        _drawerIssueData.comments = (_drawerIssueData.comments || []).concat([tempComment]);
+        renderDrawerActivity(_drawerIssueData);
+      }
+      $('drawerCommentInput').value = '';
+      // Re-enable button immediately
+      submitBtn._submitting = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Comment';
+      // Post in background then refresh
       await api('/api/comments', 'POST', { issue_id: issueId, user_id: S.currentUser, body: commentBody });
+    } else {
+      $('drawerCommentInput').value = '';
+      // Re-enable button
+      submitBtn._submitting = false;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Comment';
     }
-    $('drawerCommentInput').value = '';
-    // Re-fetch full issue so worklogs + history are preserved in _drawerIssueData
-    var updated = await api('/api/issues/' + issueId);
-    if (updated) renderDrawerActivity(updated);
+    // Refresh in background to get real comment ID
+    api('/api/issues/' + issueId).then(function(updated) {
+      if (updated) {
+        _drawerIssueData = updated;
+        renderDrawerActivity(updated);
+      }
+    });
     toast('Comment added');
   };
 
@@ -5074,16 +5510,10 @@ function bindDrawerEdits(issue) {
     menu.className = 'drawer-actions-menu';
     // Member quick actions always shown; Move/Delete for owner/admin only
     var memberActions =
-      '<div class="drawer-actions-item" id="drawerQuickAssignItem">👤 Assign to me</div>' +
-      '<div class="drawer-actions-item" id="drawerQuickSubtaskItem">📌 Add subtask</div>' +
-      '<div class="drawer-actions-item" id="drawerQuickLinkItem">🔗 Link an issue</div>';
+      '';
     menu.innerHTML = isOwner
-      ? memberActions +
-        '<div style="margin:2px 4px;border-top:1px solid var(--border)"></div>' +
-        '<div class="drawer-actions-item" id="drawerMoveItem">📋 Move to another board</div>' +
-        '<div style="margin:2px 4px;border-top:1px solid var(--border)"></div>' +
-        '<div class="drawer-actions-item danger" id="drawerDeleteItem">🗑️ Delete issue</div>'
-      : memberActions;
+      ? '<div class="drawer-actions-item danger" id="drawerDeleteItem">🗑️ Delete issue</div>'
+      : '<div class="drawer-actions-item" style="color:var(--text3);padding:8px 12px;font-size:13px">No actions available</div>';
 
     var rect = $('drawerActionsBtn').getBoundingClientRect();
     menu.style.cssText = 'position:fixed;right:' + (window.innerWidth - rect.right) + 'px;top:' + (rect.bottom + 4) + 'px;' +
@@ -5091,33 +5521,10 @@ function bindDrawerEdits(issue) {
 
     document.body.appendChild(menu);
 
-    // ── Member quick actions (visible to all roles) ──────────
-    document.getElementById('drawerQuickAssignItem').onclick = function () {
-      menu.remove();
-      // Assign current user to this issue
-      var assignee = $('drawerAssignee');
-      if (assignee && S.currentUser) {
-        assignee.value = S.currentUser;
-        assignee.dispatchEvent(new Event('change'));
-        toast('Assigned to you');
-      }
-    };
-
-    document.getElementById('drawerQuickSubtaskItem').onclick = function () {
-      menu.remove();
-      // Scroll to subtasks section and click Add subtask
-      window._showSubtaskInput();
-    };
-
-    document.getElementById('drawerQuickLinkItem').onclick = function () {
-      menu.remove();
-      // Show the link dialog
-      window._showLinkDialog();
-    };
 
     if (isOwner) {
       // Move to another board
-      document.getElementById('drawerMoveItem').onclick = function () {
+      var drawerMoveItem = document.getElementById('drawerMoveItem'); if (drawerMoveItem) drawerMoveItem.onclick = function () {
         menu.remove();
         // Build list of other spaces (boards) excluding current
         var currentIssue = (S.data.issues || []).find(function(i){ return i.id === issueId; });
@@ -5154,7 +5561,7 @@ function bindDrawerEdits(issue) {
             overlay.remove();
             try {
               await api('/api/issues/' + issueId, 'PUT', { space_id: sp.id, sprint_id: null });
-              closeDrawer();
+              goBackToSavedPage();
               await refreshData();
               if (S.currentTab) renderTab(S.currentTab);
               toast('Issue moved to ' + sp.name);
@@ -5170,18 +5577,52 @@ function bindDrawerEdits(issue) {
       };
 
       // Delete issue
-      document.getElementById('drawerDeleteItem').onclick = async function () {
+      var drawerDeleteItem = document.getElementById('drawerDeleteItem'); if (drawerDeleteItem) drawerDeleteItem.onclick = async function () {
         menu.remove();
-        if (!confirm('Delete this issue? This cannot be undone.')) return;
-        try {
-          await api('/api/issues/' + issueId, 'DELETE');
-          closeDrawer();
-          await refreshData();
-          if (S.currentTab) renderTab(S.currentTab);
-          toast('Issue deleted');
-        } catch (err) {
-          toast('Failed to delete issue', 'error');
+        // Only owner and admin can delete
+        var role = (S.currentUserObj || {}).role;
+        if (role !== 'owner' && role !== 'admin') {
+          toast('Only owners and admins can delete issues', 'error');
+          return;
         }
+        // Show confirmation modal
+        var confirmModal = document.createElement('div');
+        confirmModal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center';
+        confirmModal.innerHTML = '<div style="background:#fff;border-radius:8px;padding:28px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2)">' +
+          '<h3 style="margin:0 0 8px;color:#172b4d;font-size:18px">Delete Issue</h3>' +
+          '<p style="color:#42526e;margin:0 0 16px">Are you sure you want to delete this issue? This action cannot be undone.</p>' +
+          '<p style="color:#42526e;margin:0 0 16px">Type <strong>delete</strong> to confirm:</p>' +
+          '<input id="deleteConfirmInput" type="text" placeholder="Type delete here..." style="width:100%;padding:8px 12px;border:1px solid #dfe1e6;border-radius:4px;font-size:14px;box-sizing:border-box;margin-bottom:16px">' +
+          '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+          '<button id="deleteCancelBtn" style="padding:8px 16px;border:1px solid #dfe1e6;border-radius:4px;background:#fff;cursor:pointer;font-size:14px">Cancel</button>' +
+          '<button id="deleteConfirmBtn" style="padding:8px 16px;border:none;border-radius:4px;background:#de350b;color:#fff;cursor:pointer;font-size:14px;font-weight:600">Delete</button>' +
+          '</div></div>';
+        document.body.appendChild(confirmModal);
+        document.getElementById('deleteConfirmInput').focus();
+        document.getElementById('deleteCancelBtn').onclick = function() { confirmModal.remove(); };
+        confirmModal.onclick = function(e) { if (e.target === confirmModal) confirmModal.remove(); };
+        document.getElementById('deleteConfirmBtn').onclick = async function() {
+          var val = document.getElementById('deleteConfirmInput').value.trim().toLowerCase();
+          if (val !== 'delete') {
+            document.getElementById('deleteConfirmInput').style.border = '1px solid #de350b';
+            document.getElementById('deleteConfirmInput').placeholder = 'Please type "delete" to confirm';
+            return;
+          }
+          confirmModal.remove();
+          try {
+            await api('/api/issues/' + issueId, 'DELETE');
+            toast('Issue deleted successfully');
+            // Close drawer and go back
+            var drawer = document.getElementById('issueDrawer');
+            if (drawer) drawer.setAttribute('hidden', '');
+            S.drawerIssueId = null;
+            window.history.replaceState({}, '', '/');
+            await refreshData();
+            renderCurrentView();
+          } catch (err) {
+            toast('Failed to delete issue', 'error');
+          }
+        };
       };
     }
 
@@ -5537,7 +5978,19 @@ function _renderActivityTab(tab, issue) {
       '<span style="font-size:11px;color:var(--text3)">' + fmtDateTime(cm.created_at) + '</span>' +
       '<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:var(--bg3);color:var(--text3)">Comment</span>' +
       '</div>' +
-      '<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">' + esc(cm.body) + '</div>' +
+      '<div style="font-size:13px;line-height:1.5;color:#172b4d;white-space:pre-wrap">' + (function(body) {
+        // Highlight @mentions
+        var html = esc(body).replace(/@([\w][\w.]*(?:\s[\w][\w.]*)?)/g, '<span style="color:#0052cc;font-weight:600">@$1</span>');
+        // Render inline images [img:name|url]
+        html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+          return '<div style="margin-top:8px"><img src="' + url + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" onclick="window.open(this.src)" title="' + fname + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + fname + '</div></div>';
+        });
+        // Render inline file links [file:name|url]
+        html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+          return '<div style="margin-top:6px"><a href="' + url + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + fname + '</a></div>';
+        });
+        return html;
+      })(cm.body) + '</div>' +
       '</div></div>';
   }
 
@@ -5746,7 +6199,7 @@ function renderDrawerCustomFields(cfValues, issueId, spaceId) {
     if (ftype === 'text') {
       inputHtml = '<input type="text" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '" placeholder="—">';
     } else if (ftype === 'textarea') {
-      inputHtml = '<textarea class="input input-sm" data-cf-id="' + fid + '" rows="2" placeholder="—">' + esc(val) + '</textarea>';
+      inputHtml = '<textarea class="input input-sm" data-cf-id="' + fid + '" rows="8" placeholder="—">' + esc(val) + '</textarea>';
     } else if (ftype === 'number') {
       inputHtml = '<input type="number" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '" placeholder="—">';
     } else if (ftype === 'date') {
@@ -5754,7 +6207,7 @@ function renderDrawerCustomFields(cfValues, issueId, spaceId) {
     } else if (ftype === 'checkbox') {
       inputHtml = '<input type="checkbox" data-cf-id="' + fid + '" ' + (val === 'true' ? 'checked' : '') + '>';
     } else if (ftype === 'select' || ftype === 'multi_select') {
-      var mopts = (Array.isArray(field.options) ? field.options : (field.options || []));
+      var mopts = (Array.isArray(field.options) ? field.options : (typeof field.options === 'string' ? JSON.parse(field.options || '[]') : (field.options || [])));
       var selected = val ? val.split(',').map(function(s){return s.trim();}).filter(Boolean) : [];
       var isMultiSel = ftype === 'multi_select';
       var displayVal = selected.length ? esc(selected.join(', ')) : '';
@@ -6002,6 +6455,8 @@ function resetIssueForm() {
   $('issueId').value = '';
   $('issueSpaceId').value = S.currentSpace || '';
   $('issueParentId').value = '';
+  // Populate space dropdown with current space selected
+  if (window._populateIssueSpaceDropdown) window._populateIssueSpaceDropdown(S.currentSpace || '');
   $('issueTitleInput').value = '';
   $('issueType').value = 'task';
   $('issuePriority').value = 'medium';
@@ -6009,7 +6464,7 @@ function resetIssueForm() {
   $('issueLabels').value = '';
   $('issueStartDate').value = fmtDateISO(new Date()); // default to today
   $('issueDueDate').value = '';
-  $('issueDescription').value = '';
+  var descEl = $('issueDescription'); if (descEl) { if (descEl.value !== undefined) descEl.value = ''; else descEl.innerHTML = ''; }
   _selectedFiles = [];
   _renderAttachmentFileList();
   var fi = $('issueAttachments');
@@ -6031,6 +6486,35 @@ function populateIssueFormSelects() {
 
 async function handleIssueSubmit(e) {
   e.preventDefault();
+  var titleVal = $('issueTitleInput') && $('issueTitleInput').value.trim();
+  if (titleVal == null || titleVal == '') {
+    toast('Please fill in the Title — it is mandatory', 'error');
+    $('issueTitleInput').focus();
+    $('issueTitleInput').style.border = '2px solid #e53e3e';
+    setTimeout(function(){ $('issueTitleInput').style.border = ''; }, 3000);
+    return;
+  }
+  var spaceVal = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || (S.data && S.data.spaces && S.data.spaces[0] && S.data.spaces[0].id);
+  if (spaceVal == null || spaceVal == '') {
+    toast('Please select a Space — it is mandatory', 'error');
+    return;
+  }
+  var teamVal = $('issueTeamField') && $('issueTeamField').value;
+  if (teamVal == null || teamVal == '') {
+    toast('Please select a Team — it is mandatory', 'error');
+    $('issueTeamField').focus();
+    $('issueTeamField').style.border = '2px solid #e53e3e';
+    setTimeout(function(){ $('issueTeamField').style.border = ''; }, 3000);
+    return;
+  }
+  var productVal = $('issueProductTypeField') && $('issueProductTypeField').value;
+  if (productVal == null || productVal == '') {
+    toast('Please select a Product Type — it is mandatory', 'error');
+    $('issueProductTypeField').focus();
+    $('issueProductTypeField').style.border = '2px solid #e53e3e';
+    setTimeout(function(){ $('issueProductTypeField').style.border = ''; }, 3000);
+    return;
+  }
   var startVal = $('issueStartDate').value;
   // Validate due date does not exceed sprint end date
   var dueVal = $('issueDueDate').value;
@@ -6051,8 +6535,10 @@ async function handleIssueSubmit(e) {
   }
   var id = $('issueId').value;
   var parentId = $('issueParentId').value || null;
+  // Ensure space_id is set
+  var resolvedSpace = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || (S.data && S.data.spaces && S.data.spaces[0] && S.data.spaces[0].id);
   var payload = {
-    space_id: $('issueSpaceId').value || S.currentSpace,
+    space_id: resolvedSpace,
     title: $('issueTitleInput').value,
     type: $('issueType').value,
     priority: $('issuePriority').value,
@@ -6063,9 +6549,44 @@ async function handleIssueSubmit(e) {
     labels: $('issueLabels').value,
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
-    description: $('issueDescription').value,
+    description: await (async function(){
+      var el = $('issueDescription');
+      if (!el) return '';
+      var html = el.tagName === "TEXTAREA" || el.tagName === "INPUT" ? el.value : el.innerHTML;
+      // Upload any base64/blob images in description
+      var imgs = el.querySelectorAll ? el.querySelectorAll('img[src^="data:"],img[src^="blob:"]') : [];
+      for (var i = 0; i < imgs.length; i++) {
+        try {
+          var imgEl = imgs[i];
+          var resp = await fetch(imgEl.src);
+          var blob = await resp.blob();
+          var fd = new FormData();
+          fd.append('files', blob, 'image-' + Date.now() + '.png');
+          var spaceId = $('issueSpaceId').value || S.currentSpace;
+          // Upload to temp endpoint and get URL
+          var uploadResp = await fetch('/api/upload-temp', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() },
+            body: fd
+          });
+          if (uploadResp.ok) {
+            var uploadData = await uploadResp.json();
+            if (uploadData.url) {
+              imgEl.src = uploadData.url;
+            }
+          }
+        } catch(e) {}
+      }
+      return el.tagName === "TEXTAREA" || el.tagName === "INPUT" ? el.value : el.innerHTML;
+    })(),
     original_estimate: $('issueEstimate') ? parseEstimate($('issueEstimate').value) : 0,
-    status: 'To Do'
+    status: 'To Do',
+    _customFields: (function() {
+      var cfs = {};
+      var fields = document.querySelectorAll('#issueCustomFieldsContainer .cf-field');
+      fields.forEach(function(f) { if (f.value) cfs[f.dataset.cfId] = f.value; });
+      return cfs;
+    })()
   };
   if (parentId) payload.parent_id = parentId;
 
@@ -6079,7 +6600,29 @@ async function handleIssueSubmit(e) {
   } else {
     var submitBtn = $('issueSubmitBtn');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+    try {
     var created = await api('/api/issues', 'POST', payload);
+    // Save custom field values
+    if (created && created.id) {
+      // Save dynamic custom fields
+      var cfFields = document.querySelectorAll('#issueCustomFieldsContainer .cf-field');
+      cfFields.forEach(function(f) {
+        if (f.value && f.dataset.cfId) {
+          api('/api/issues/' + created.id + '/field-values/' + f.dataset.cfId, 'PUT', { value: f.value }).catch(function(){});
+        }
+      });
+      // Save static Team and Product Type fields
+      var spaceId = $('issueSpaceId').value || S.currentSpace;
+      var teamVal = $('issueTeamField') && $('issueTeamField').value;
+      var productVal = $('issueProductTypeField') && $('issueProductTypeField').value;
+      if (teamVal || productVal) {
+        var cfs = (S.data.custom_fields || []).filter(function(f){ return f.space_id == spaceId; });
+        var teamCF = cfs.find(function(f){ return f.name === 'Team'; });
+        var productCF = cfs.find(function(f){ return f.name === 'Product Type'; });
+        if (teamCF && teamVal) await api('/api/issues/' + created.id + '/field-values/' + teamCF.id, 'PUT', { value: teamVal }).catch(function(){});
+        if (productCF && productVal) await api('/api/issues/' + created.id + '/field-values/' + productCF.id, 'PUT', { value: productVal }).catch(function(){});
+      }
+    }
     // Upload any attached files
     if (created && created.id && _selectedFiles.length) {
       var fd = new FormData();
@@ -6093,6 +6636,7 @@ async function handleIssueSubmit(e) {
       } catch(e) { toast('Issue created but attachments failed to upload', 'warning'); }
     }
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save'; }
+    } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Failed to create issue: " + e.message, "error"); return; }
     closeModal('modal-issue');
     await refreshData();
     if (parentId && S.drawerIssueId === parentId) {
@@ -6103,7 +6647,12 @@ async function handleIssueSubmit(e) {
     }
     if (created && created.id && !parentId) {
       toast('Issue created — opening in new tab…');
-      setTimeout(function() { openIssuePage(created.id); }, 300);
+      // Wait for custom fields to be saved before opening
+      setTimeout(async function() {
+        await new Promise(r => setTimeout(r, 500));
+        var fresh = await api('/api/issues/' + created.id);
+        openIssuePage(created.id);
+      }, 300);
     } else {
       toast('Issue created');
     }
@@ -6236,9 +6785,9 @@ function renderNotifBadge() {
   var badge = $('notifBadge');
   if (unread > 0) {
     badge.textContent = unread > 99 ? '99+' : String(unread);
-    badge.removeAttribute('hidden');
+    badge.classList.add('visible'); badge.removeAttribute('hidden');
   } else {
-    badge.setAttribute('hidden', '');
+    badge.classList.remove('visible'); badge.setAttribute('hidden',''); badge.textContent = '';
   }
 }
 
@@ -6253,23 +6802,32 @@ var _notifTypeIcon = {
 
 function renderNotifPanel() {
   var notifs = _filterNotifsByPrefs(S.data.notifications || []);
-  if (!notifs.length) {
-    $('notifList').innerHTML = '<p class="text-muted" style="padding:1rem">No notifications</p>';
+  var unread = notifs.filter(function(n){ return !n.is_read; }).length;
+  var badge = document.getElementById('notifCountBadge');
+  if (badge) { if (unread > 0) { badge.textContent = unread; badge.removeAttribute('hidden'); } else { badge.setAttribute('hidden', ''); } }
+  if (notifs.length === 0) {
+    $('notifList').innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;padding:40px 20px;color:var(--text3)"><div style="font-size:32px;margin-bottom:12px">&#128276;</div><div style="font-size:14px;font-weight:600;color:var(--text2)">All caught up!</div><div style="font-size:13px;margin-top:4px">No new notifications</div></div>';
     return;
   }
-  var sorted = notifs.slice().sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+  var sorted = notifs.slice().sort(function(a,b){ return new Date(b.created_at)-new Date(a.created_at); });
+  var tIcons = { comment_added:'&#128172;', issue_assigned:'&#128100;', status_changed:'&#128260;', sprint_started:'&#128640;', sprint_completed:'&#9989;', issue_created:'&#128203;', mention:'@' };
+  var tColors = { comment_added:'#0129AC', issue_assigned:'#7c3aed', status_changed:'#059669', sprint_started:'#d97706', sprint_completed:'#059669', issue_created:'#0129AC', mention:'#dc2626' };
   var html = '';
-  var limit = Math.min(sorted.length, 30);
+  var limit = Math.min(sorted.length, 50);
   for (var i = 0; i < limit; i++) {
     var n = sorted[i];
-    var icon = _notifTypeIcon[n.type] || '🔔';
-    html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" onclick="window._markNotifRead(\'' + n.id + '\')" style="display:flex;gap:10px;align-items:flex-start">' +
-      '<span style="font-size:16px;flex-shrink:0;margin-top:2px">' + icon + '</span>' +
+    var icon = tIcons[n.type] || '&#128276;';
+    var color = tColors[n.type] || '#0129AC';
+    var isU = !n.is_read;
+    var bg = isU ? 'var(--bg3)' : 'transparent';
+    html += '<div onclick="window._markNotifRead(\'' + n.id + '\',\'' + encodeURIComponent(n.link||'') + '\')" style="display:flex;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);background:' + bg + '">' +
+      '<div style="width:36px;height:36px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">' + icon + '</div>' +
       '<div style="flex:1;min-width:0">' +
-      '<div class="notif-text" style="font-weight:' + (n.is_read ? '400' : '600') + '">' + esc(n.title || 'Notification') + '</div>' +
-      (n.body ? '<div style="font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(n.body) + '</div>' : '') +
-      '<div class="text-muted" style="font-size:11px;margin-top:2px">' + relativeTime(n.created_at) + '</div>' +
-      '</div></div>';
+      '<div style="font-size:13px;font-weight:' + (isU?'600':'400') + ';color:var(--text);line-height:1.4">' + esc(n.title||'Notification') + '</div>' +
+      (n.body ? '<div style="font-size:12px;color:var(--text2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(n.body) + '</div>' : '') +
+      '<div style="font-size:11px;color:var(--text3);margin-top:4px">' + relativeTime(n.created_at) + '</div>' +
+      '</div>' + (isU ? '<div style="width:8px;height:8px;border-radius:50%;background:#0129AC;flex-shrink:0;margin-top:8px"></div>' : '') +
+      '</div>';
   }
   $('notifList').innerHTML = html;
 }
@@ -6289,6 +6847,17 @@ async function markAllRead() {
 // ═══════════════════════════════════════════════════════════
 // EVENT BINDINGS
 // ═══════════════════════════════════════════════════════════
+document.addEventListener('click', function(e) {
+  var subitem = e.target.closest('.space-subitem');
+  if (subitem) {
+    e.stopPropagation();
+    e.preventDefault();
+    var tab = subitem.dataset.tab;
+    var spaceId = subitem.dataset.spaceId;
+    if (tab && spaceId) navigateToSpace(spaceId, tab);
+  }
+});
+
 document.addEventListener('DOMContentLoaded', function () {
   initTheme();
   init();
@@ -6311,7 +6880,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Sidebar toggle
-  $('sidebarToggle').addEventListener('click', function () {
+  if ($('sidebarToggle')) $('sidebarToggle').addEventListener('click', function () {
     $('sidebar').classList.toggle('sidebar-collapsed');
   });
 
@@ -6329,28 +6898,72 @@ document.addEventListener('DOMContentLoaded', function () {
   // Global create (button removed from sidebar — keep guard in case it's re-added)
   var _gcb = $('globalCreateBtn');
   if (_gcb) _gcb.addEventListener('click', function () {
-    if (S.currentSpace) {
-      resetIssueForm();
-      $('issueSpaceId').value = S.currentSpace;
-      $('issueModalTitle').textContent = 'Create Issue';
-      populateIssueFormSelects();
-      openModal('modal-issue');
-    } else {
-      openSpaceModal();
-    }
+    resetIssueForm();
+    $('issueSpaceId').value = S.currentSpace || '';
+    $('issueModalTitle').textContent = 'Create Issue';
+    window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(S.currentSpace);
+    if (window._onIssueSpaceChange) window._onIssueSpaceChange(S.currentSpace || '');
+    populateIssueFormSelects();
+    openModal('modal-issue');
   });
 
   // Top bar create issue
+  // Populate space dropdown in create issue modal
+  window._populateIssueSpaceDropdown = function(selectedSpaceId) {
+    var sel = $('issueSpaceSelect');
+    if (!sel) return;
+    var spaces = S.data && S.data.spaces || [];
+    // Filter spaces based on user membership
+    var mySpaces = spaces.filter(function(sp) {
+      if (!S.data.space_members) return true;
+      return S.data.space_members.some(function(m){ return m.space_id === sp.id && m.user_id === S.currentUser; })
+        || (S.currentUserObj && (S.currentUserObj.role === 'owner' || S.currentUserObj.role === 'admin'));
+    });
+    sel.innerHTML = '<option value="">— Select a space —</option>' +
+      mySpaces.map(function(sp) {
+        return '<option value="' + sp.id + '"' + (sp.id === selectedSpaceId ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
+      }).join('');
+    if (selectedSpaceId) sel.value = selectedSpaceId;
+    // Update sprint dropdown and custom fields when space changes
+    window._onIssueSpaceChange = function(spaceId) {
+      $('issueSpaceId').value = spaceId;
+      // Update sprints
+      var sprints = (S.data.sprints || []).filter(function(sp){ return sp.space_id === spaceId; });
+      var sprintSel = $('issueSprint');
+      if (sprintSel) {
+        sprintSel.innerHTML = '<option value="">None</option>' +
+          sprints.map(function(sp){ return '<option value="' + sp.id + '">' + esc(sp.name) + '</option>'; }).join('');
+      }
+      // Load custom fields for this space
+      var cfContainer = $('issueCustomFieldsContainer');
+      if (!cfContainer) return;
+      var cfs = (S.data.custom_fields || []).filter(function(f){ return f.space_id == spaceId && f.name !== "Team" && f.name !== "Product Type"; });
+      cfContainer.innerHTML = cfs.map(function(f) {
+        var opts = Array.isArray(f.options) ? f.options : (typeof f.options === 'string' ? JSON.parse(f.options) : []);
+        if (f.field_type === 'select') {
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' *' : '') + '</label>' +
+            '<select class="input cf-field" data-cf-id="' + f.id + '">' +
+            '<option value="">— Select —</option>' +
+            opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
+            '</select></div>';
+        } else if (f.field_type === 'text') {
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' *' : '') + '</label>' +
+            '<input type="text" class="input cf-field" data-cf-id="' + f.id + '"></div>';
+        }
+        return '';
+      }).join('');
+    };
+  };
   $('createIssueBtn').addEventListener('click', function () {
-    if (S.currentSpace) {
-      resetIssueForm();
-      $('issueSpaceId').value = S.currentSpace;
-      $('issueModalTitle').textContent = 'Create Issue';
-      populateIssueFormSelects();
-      openModal('modal-issue');
-    } else {
-      toast('Select a space first', 'error');
-    }
+    resetIssueForm();
+    $('issueSpaceId').value = S.currentSpace || '';
+    $('issueModalTitle').textContent = 'Create Issue';
+    window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(S.currentSpace);
+    if (window._onIssueSpaceChange) window._onIssueSpaceChange(S.currentSpace || '');
+    populateIssueFormSelects();
+    openModal('modal-issue');
   });
 
   // Create sprint
@@ -6372,6 +6985,15 @@ document.addEventListener('DOMContentLoaded', function () {
     if (panel.hasAttribute('hidden')) {
       panel.removeAttribute('hidden');
       renderNotifPanel();
+      // Mark all as read when panel opens and clear badge immediately
+      if (S.data && S.data.notifications) {
+        S.data.notifications.forEach(function(n){ n.is_read = true; });
+      }
+      var badge = $('notifBadge');
+      if (badge) badge.setAttribute('hidden', '');
+      markAllRead().then(function() {
+        renderNotifBadge();
+      });
     } else {
       panel.setAttribute('hidden', '');
     }
@@ -6519,15 +7141,15 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
-  // Sidebar section collapse toggles
-  qsa('.sidebar-collapse-toggle').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var content = btn.closest('.sidebar-section').querySelector('.sidebar-section-content');
-      if (content) {
-        content.classList.toggle('collapsed');
-        btn.textContent = content.classList.contains('collapsed') ? '\u25B8' : '\u25BE';
-      }
-    });
+  // Sidebar section collapse toggles - use event delegation
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.sidebar-collapse-toggle');
+    if (!btn) return;
+    var content = btn.closest('.sidebar-section').querySelector('.sidebar-section-content');
+    if (content) {
+      content.classList.toggle('collapsed');
+      btn.textContent = content.classList.contains('collapsed') ? '\u25B8' : '\u25BE';
+    }
   });
 });
 
@@ -6548,20 +7170,23 @@ async function renderUserManagement() {
 
   var users = [];
   try { users = await api('/api/users'); } catch (e) { return; }
+  var totalActive = users.filter(function(u){ return u.is_active !== false; }).length;
+  var pendingInvites = [];
+  try { var allInvites = await api('/api/auth/invitations'); var regEmails = users.map(function(u){ return u.email.toLowerCase(); }); pendingInvites = (allInvites||[]).filter(function(inv){ return inv.status==='pending' && !regEmails.includes(inv.email.toLowerCase()); }); } catch(e) {}
 
   var rows = users.map(function (u) {
     var statusBadge = u.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-muted">Inactive</span>';
     var lastLogin = u.last_login ? relativeTime(u.last_login) : 'Never';
-    return '<tr>' +
-      '<td><div style="display:flex;align-items:center;gap:10px">' +
-      '<div class="user-avatar-sm" style="background:' + (u.color || '#6366f1') + '">' + initials(u.name) + '</div>' +
-      '<div><div style="font-weight:600">' + esc(u.name) + '</div><div style="font-size:12px;color:var(--muted)">' + esc(u.email) + '</div></div>' +
+    return '<tr style="border-bottom:1px solid #f4f5f7" onmouseover="this.style.background=\'#f8f9fa\'" onmouseout="this.style.background=\'\'">' +
+      '<td style="padding:12px 20px;min-width:250px;max-width:300px"><div style="display:flex;align-items:center;gap:12px">' +
+      '<div class="user-avatar-sm" style="background:' + (u.color || '#6366f1') + ';flex-shrink:0">' + initials(u.name) + '</div>' +
+      '<div style="overflow:hidden"><div style="font-weight:600;color:#172b4d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.name) + '</div><div style="font-size:12px;color:#6b778c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.email) + '</div></div>' +
       '</div></td>' +
       '<td><select class="input input-sm um-role-sel" data-uid="' + u.id + '" ' + (u.id === me.id ? 'disabled' : '') + '>' +
       ['owner','admin','member'].map(function(r){ return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+cap(r)+'</option>'; }).join('') +
       '</select></td>' +
-      '<td>' + statusBadge + '</td>' +
-      '<td>' + lastLogin + '</td>' +
+      '<td style="padding:14px 16px">' + statusBadge + '</td>' +
+      '<td style="padding:14px 16px;font-size:13px;color:var(--text2)">' + lastLogin + '</td>' +
       '<td>' +
       (u.id !== me.id ? '<button class="btn btn-sm btn-outline um-toggle-btn" data-uid="' + u.id + '" data-active="' + u.is_active + '">' + (u.is_active ? 'Deactivate' : 'Activate') + '</button> ' : '') +
       '<button class="btn btn-sm btn-outline um-pwd-btn" data-uid="' + u.id + '" data-uname="' + esc(u.name) + '">Reset PW</button>' +
@@ -6570,14 +7195,27 @@ async function renderUserManagement() {
   }).join('');
 
   view.innerHTML =
-    '<div class="view-content" style="padding:24px 32px">' +
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">' +
-    '<div><h2 style="margin:0;font-size:22px;font-weight:700">User Management</h2>' +
-    '<p style="margin:4px 0 0;color:var(--muted)">' + users.length + ' users in your organization</p></div>' +
-    '<button class="btn btn-primary" onclick="openInviteUserModal()">+ Invite User</button>' +
+    '<div style="padding:0">' +
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px">' +
+    '<div>' +
+    '<h2 style="margin:0 0 6px;font-size:22px;font-weight:700;color:var(--text)">User Management</h2>' +
+    '<p style="margin:0 0 10px;color:var(--text2);font-size:14px">Manage all users, roles and access in your organization.</p>' +
+    '<div style="display:flex;gap:16px;flex-wrap:wrap">' +
+    '<div style="display:flex;align-items:center;gap:6px;background:var(--bg3);padding:6px 14px;border-radius:20px;font-size:13px"><span style="font-weight:700;color:var(--text)">' + users.length + '</span><span style="color:var(--text3)">Registered</span></div>' +
+    '<div style="display:flex;align-items:center;gap:6px;background:#dcfce7;padding:6px 14px;border-radius:20px;font-size:13px"><span style="font-weight:700;color:#166534">' + totalActive + '</span><span style="color:#166534">Active</span></div>' +
+    (pendingInvites.length ? '<div style="display:flex;align-items:center;gap:6px;background:#fef3c7;padding:6px 14px;border-radius:20px;font-size:13px"><span style="font-weight:700;color:#92400e">' + pendingInvites.length + '</span><span style="color:#92400e">Pending</span></div>' : '') +
     '</div>' +
-    '<div class="table-container"><table class="data-table"><thead><tr>' +
-    '<th>User</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th>' +
+    '</div>' +
+    '<button onclick="openInviteUserModal()" style="background:#0129AC;color:#fff;border:none;padding:9px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">+ Invite User</button>' +
+    '</div>' +
+    '<div style="margin-bottom:14px"><input type="text" id="userSearchInput" placeholder="Search by name or email..." oninput="window._filterUsers(this.value)" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text);font-size:14px;box-sizing:border-box;outline:none"></div>' +
+    '<div id="userTableWrap" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
+    '<table style="width:100%;border-collapse:collapse;table-layout:fixed"><thead><tr style="background:var(--bg3)">' +
+    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:30%">User</th>' +
+    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:15%">Role</th>' +
+    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:12%">Status</th>' +
+    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:15%">Last Login</th>' +
+    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:28%">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '</div>';
 
@@ -6705,6 +7343,7 @@ async function renderAdminSettings(section) {
     case 'global-custom-fields': await renderAdminCustomFields(content); break;
     case 'email-settings': await renderAdminEmailSettings(content); break;
     case 'audit-log':      await renderAdminAuditLog(content); break;
+    case 'deleted-tickets': await renderDeletedTickets(content); break;
     default: content.innerHTML = '';
   }
 }
@@ -6929,7 +7568,7 @@ async function renderAdminUsers(el) {
   try { invites = await api('/api/auth/invitations'); } catch(e) { invites = []; }
 
   if (!users.length) {
-    el.innerHTML = '<div class="admin-section-header"><h2>👥 User Management</h2><p>Manage all users, roles and access.</p></div>' +
+    el.innerHTML = '<div class="admin-section-header"><h2>User Management</h2><p>Manage all users, roles and access.</p></div>' +
       '<div class="admin-card" style="padding:24px;text-align:center;color:var(--text3)">No users found. Try refreshing the page.</div>';
     return;
   }
@@ -6941,24 +7580,21 @@ async function renderAdminUsers(el) {
   });
 
   var userRows = users.map(function(u) {
-    var statusBadge = u.is_active !== false
-      ? '<span class="badge badge-success">Active</span>'
-      : '<span class="badge badge-muted">Inactive</span>';
-    var lastLogin = u.last_login ? relativeTime(u.last_login) : 'Never';
-    return '<tr>' +
-      '<td><div style="display:flex;align-items:center;gap:10px">' +
-      '<div class="user-avatar-sm" style="background:' + (u.color||'#6366f1') + '">' + initials(u.name) + '</div>' +
-      '<div><div style="font-weight:600;font-size:13px">' + esc(u.name) + '</div>' +
-      '<div style="font-size:11px;color:var(--text3)">' + esc(u.email) + '</div></div></div></td>' +
-      '<td><select class="input input-sm um-role-sel" data-uid="' + u.id + '">' +
-      ['owner','admin','member'].map(function(r){ return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+cap(r)+'</option>'; }).join('') +
-      '</select></td>' +
-      '<td>' + statusBadge + '</td>' +
-      '<td style="font-size:12px;color:var(--text3)">' + lastLogin + '</td>' +
-      '<td>' +
-      (u.id!==me.id ? '<button class="btn btn-sm btn-outline um-toggle-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-active="'+u.is_active+'">'+(u.is_active!==false?'Deactivate':'Activate')+'</button> ' : '') +
-      '<button class="btn btn-sm btn-outline um-pwd-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'">Reset PW</button>' +
-      '</td></tr>';
+    var isActive = u.is_active !== false;
+    var sb = isActive ? '<span style="background:#dcfce7;color:#166534;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px">Active</span>' : '<span style="background:#f1f5f9;color:#64748b;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px">Inactive</span>';
+    var ll = u.last_login ? relativeTime(u.last_login) : 'Never';
+    var av = '<div style="width:38px;height:38px;border-radius:50%;background:' + (u.color||'#0129AC') + ';display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:13px;flex-shrink:0">' + initials(u.name) + '</div>';
+    var info = '<div><div style="font-weight:600;font-size:14px;color:var(--text)">' + esc(u.name) + '</div><div style="font-size:12px;color:var(--text3);margin-top:2px">' + esc(u.email) + '</div></div>';
+    var rolesel = '<select class="input input-sm um-role-sel" data-uid="' + u.id + '" style="font-size:13px;height:30px;border-radius:6px;padding:0 8px;min-width:110px"' + (u.id===me.id?' disabled':'') + '>' + ['owner','admin','member'].map(function(r){ return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+cap(r)+'</option>'; }).join('') + '</select>';
+    var toggleBtn = u.id!==me.id ? '<button class="btn btn-sm um-toggle-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-active="'+u.is_active+'" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:#fff;border:none;background:'+(isActive?'#ef4444':'#22c55e')+'">'+(isActive?'Deactivate':'Activate')+'</button>' : '';
+    var pwdBtn = '<button class="btn btn-sm um-pwd-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#0129AC;cursor:pointer;color:#fff">Reset PW</button>';
+    var delBtn = u.id!==me.id ? '<button class="btn btn-sm um-delete-user-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-email="'+esc(u.email)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#dc2626;cursor:pointer;color:#fff">Delete</button>' : '';
+    return '<tr style="border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">' +
+      '<td style="padding:14px 16px"><div style="display:flex;align-items:center;gap:12px">' + av + info + '</div></td>' +
+      '<td style="padding:14px 16px">' + rolesel + '</td>' +
+      '<td style="padding:14px 16px">' + sb + '</td>' +
+      '<td style="padding:14px 16px;font-size:13px;color:var(--text2)">' + ll + '</td>' +
+      '<td style="padding:14px 16px"><div style="display:flex;gap:6px;flex-wrap:wrap">' + toggleBtn + pwdBtn + delBtn + '</div></td></tr>';
   }).join('');
 
   var inviteRows = pendingInvites.map(function(inv) {
@@ -6973,9 +7609,9 @@ async function renderAdminUsers(el) {
       '<td><span style="font-size:12px;color:var(--text3)">' + cap(inv.role||'member') + '</span></td>' +
       '<td><span class="badge" style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44">✉️ Invited</span></td>' +
       '<td>' + expiresStr + '</td>' +
-      '<td style="display:flex;gap:6px">' +
-      '<button class="btn btn-sm btn-outline um-resend-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'">Resend</button>' +
-      '<button class="btn btn-sm btn-outline um-cancel-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'">Cancel</button>' +
+      '<td style="padding:8px 16px;white-space:nowrap">' +
+      '<button class="btn btn-sm um-resend-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#f59e0b;cursor:pointer;color:#fff;margin-right:4px">↺ Resend</button>' +
+      '<button class="btn btn-sm um-cancel-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#ef4444;cursor:pointer;color:#fff">✕ Delete</button>' +
       '</td>' +
       '</tr>';
   }).join('');
@@ -6983,21 +7619,29 @@ async function renderAdminUsers(el) {
   var totalActive = users.filter(function(u){ return u.is_active!==false; }).length;
 
   el.innerHTML =
-    '<div class="admin-section-header">' +
-    '<h2>👥 User Management</h2>' +
-    '<p>Manage all users, roles and access in your organization.</p>' +
+    '<div style="padding:24px 0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:12px">' +
+    '<h2 style="margin:0;font-size:22px;font-weight:700;color:var(--text)">User Management</h2>' +
+    '<div style="display:flex;align-items:center;gap:10px">' +
+    '<input type="text" id="userSearchInput" placeholder="Search users..." oninput="window._filterUsers(this.value)" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text);font-size:13px;width:220px;outline:none">' +
+    '<button onclick="openInviteUserModal()" style="background:#0129AC;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">+ Invite User</button>' +
     '</div>' +
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-    '<div style="font-size:13px;color:var(--text3)">' +
-    users.length + ' registered · ' + totalActive + ' active' +
-    (pendingInvites.length ? ' · <span style="color:#f59e0b">' + pendingInvites.length + ' pending invite' + (pendingInvites.length>1?'s':'') + '</span>' : '') +
     '</div>' +
-    '<button class="btn btn-primary btn-sm" onclick="openInviteUserModal()">+ Invite User</button>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 20px">' +
+    '<div style="display:flex;align-items:center;gap:6px;background:var(--bg3);color:var(--text);font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + users.length + ' Registered</div>' +
+    '<div style="display:flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + totalActive + ' Active</div>' +
+    '<div style="display:flex;align-items:center;gap:6px;background:#f1f5f9;color:#64748b;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + (users.length - totalActive) + ' Inactive</div>' +
+    (pendingInvites.length ? '<div style="display:flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + pendingInvites.length + ' Pending Invites</div>' : '') +
     '</div>' +
-    '<div class="admin-card" style="padding:0;overflow:hidden">' +
-    '<table class="data-table"><thead><tr>' +
-    '<th>User</th><th>Role</th><th>Status</th><th>Last Login / Expiry</th><th>Actions</th>' +
-    '</tr></thead><tbody>' + userRows + inviteRows + '</tbody></table></div>';
+    '<div style="background:#fff;border:1px solid #dfe1e6;border-radius:8px;overflow-x:auto;box-shadow:0 1px 4px rgba(0,0,0,0.06);-webkit-overflow-scrolling:touch">' +
+    '<table style="width:100%;min-width:900px;border-collapse:collapse;table-layout:fixed">' +
+    '<thead><tr style="background:#f4f5f7;border-bottom:2px solid #dfe1e6">' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:28%">User</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:15%">Role</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:12%">Status</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:15%">Last Login</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:30%">Actions</th>' +
+    '</tr></thead><tbody>' + userRows + inviteRows + '</tbody></table></div></div>';
 
   qsa('.um-role-sel').forEach(function(sel) {
     sel.addEventListener('change', async function() {
@@ -7023,6 +7667,21 @@ async function renderAdminUsers(el) {
   });
   qsa('.um-pwd-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { openResetPasswordModal(btn.dataset.uid, btn.dataset.uname); });
+  });
+  qsa('.um-delete-user-btn').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      var name = btn.dataset.uname || 'this user';
+      var email = btn.dataset.email || '';
+      var ok = await confirmDialog('Permanently delete ' + name + ' (' + email + ')? This cannot be undone.');
+      if (!ok) return;
+      try {
+        await api('/api/users/' + btn.dataset.uid, 'DELETE');
+        popupAlert('User Deleted', name + ' has been permanently removed.', 'warning');
+        renderAdminSettings('user-management');
+      } catch(e) {
+        popupAlert('Error', 'Could not delete user: ' + (e.message || 'Unknown error'), 'error');
+      }
+    });
   });
   qsa('.um-resend-invite-btn').forEach(function(btn) {
     btn.addEventListener('click', async function() {
@@ -7332,3 +7991,618 @@ async function renderAdminAuditLog(el) {
     '<div style="padding:32px;text-align:center;color:var(--text3)">No audit history yet. Changes to issues will appear here.</div>') +
     '</div>';
 }
+
+// ── Image paste in description (base64 inline) ─────────────
+document.addEventListener('paste', function(e) {
+  var active = document.activeElement;
+  if (!active || (active.id !== 'drawerDesc' && active.id !== 'drawerFixDesc')) return;
+  var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') === -1) continue;
+    e.preventDefault();
+    var file = items[i].getAsFile();
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var base64 = ev.target.result;
+      var img = document.createElement('img');
+      img.src = base64;
+      img.style.maxWidth = '100%';
+      img.style.borderRadius = '4px';
+      img.style.margin = '8px 0';
+      img.style.display = 'block';
+      // Insert at cursor position
+      var sel = window.getSelection();
+      if (sel.rangeCount) {
+        var range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(img);
+        // Move cursor after image
+        range.setStartAfter(img);
+        range.setEndAfter(img);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else {
+        active.appendChild(img);
+      }
+      // Autosave with innerHTML to preserve image
+      var field = active.id === 'drawerDesc' ? 'description' : 'fix_description';
+      autoSave(field, active.innerHTML.trim());
+    };
+    reader.readAsDataURL(file);
+    break;
+  }
+});
+
+// ── Clickable issue type badge (like Jira) ─────────────────
+document.addEventListener('click', function(e) {
+  var typeEl = document.getElementById('drawerType');
+  if (!typeEl || !typeEl.contains(e.target)) return;
+  // Remove existing menu
+  var old = document.getElementById('typeDropdownMenu');
+  if (old) { old.remove(); return; }
+  var types = ['epic','story','task','bug','subtask'];
+  var icons = {
+    epic: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#9747FF;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">E</span>',
+    story: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#36B37E;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">S</span>',
+    task: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#0052CC;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">T</span>',
+    bug: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#FF5630;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">B</span>',
+    subtask: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#0065FF;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">ST</span>'
+  };
+  var rect = typeEl.getBoundingClientRect();
+  var menu = document.createElement('div');
+  menu.id = 'typeDropdownMenu';
+  menu.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:' + rect.left + 'px;' +
+    'background:var(--bg2);border:1px solid var(--border);border-radius:6px;' +
+    'box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:9999;min-width:160px;padding:4px;';
+  body.light && (menu.style.background = '#fff');
+  types.forEach(function(t) {
+    var item = document.createElement('div');
+    item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:13px;border-radius:4px;display:flex;align-items:center;gap:8px;';
+    item.innerHTML = '<span>' + icons[t] + '</span><span>' + (t.charAt(0).toUpperCase() + t.slice(1)) + '</span>';
+    item.onmouseover = function() { this.style.background = 'var(--bg3)'; };
+    item.onmouseout = function() { this.style.background = ''; };
+    item.onclick = function() {
+      menu.remove();
+      // Update badge immediately
+      typeEl.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+      typeEl.className = 'badge badge-type badge-type-' + t;
+      // Save via autoSave
+      if (window._drawerAutoSave) window._drawerAutoSave('type', t);
+      else {
+        var issueId = window.S && S.drawerIssueId;
+        if (issueId) {
+          fetch('/api/issues/' + issueId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken() },
+            body: JSON.stringify({ type: t })
+          }).then(function() { toast('Type updated'); });
+        }
+      }
+    };
+    menu.appendChild(item);
+  });
+  document.body.appendChild(menu);
+  // Close on outside click
+  setTimeout(function() {
+    document.addEventListener('click', function handler(ev) {
+      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', handler); }
+    });
+  }, 100);
+});
+
+// ── All Work inline edit functions ─────────────────────────
+function _awRemoveMenu() {
+  var m = document.getElementById('_awInlineMenu');
+  if (m) m.remove();
+}
+
+function _awShowMenu(e, items, onSelect) {
+  _awRemoveMenu();
+  var menu = document.createElement('div');
+  menu.id = '_awInlineMenu';
+  menu.style.cssText = 'position:fixed;top:'+(e.clientY+4)+'px;left:'+e.clientX+'px;background:#ffffff;border:1px solid #dfe1e6;border-radius:4px;box-shadow:0 8px 16px rgba(9,30,66,0.25);z-index:9999;min-width:240px;padding:6px 0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-height:300px;overflow-y:auto;';
+  items.forEach(function(item) {
+    var div = document.createElement('div');
+    div.style.cssText = 'padding:8px 16px;cursor:pointer;font-size:14px;border-radius:0;display:flex;align-items:center;gap:4px;color:#172b4d;border-left:3px solid transparent;';
+    div.innerHTML = item.html;
+    div.onmouseover = function(){ this.style.background='#f4f5f7'; this.style.borderLeftColor='#0052cc'; };
+    div.onmouseout = function(){ this.style.background=''; this.style.borderLeftColor='transparent'; };
+    div.onclick = function(ev) { ev.stopPropagation(); _awRemoveMenu(); onSelect(item.value); };
+    menu.appendChild(div);
+  });
+  document.body.appendChild(menu);
+  setTimeout(function() {
+    document.addEventListener('click', function h() { _awRemoveMenu(); document.removeEventListener('click', h); });
+  }, 100);
+}
+
+function awInlineAssignee(e, issueId, current) {
+  e.stopPropagation();
+  function showAssigneeMenu(members) {
+    members = members.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+    var items = [{ value: '', html: '<span style="font-size:14px;color:#172b4d;flex:1">Unassigned</span>' + (!current?'<span style="color:#0052cc;font-weight:700">&#10003;</span>':'') }].concat(
+      members.map(function(m) {
+        var check = String(m.id) === String(current) ? '<span style="color:#0052cc;font-weight:700">&#10003;</span>' : '';
+        return { value: m.id, html: avatarHtml(m,24) + '<span style="font-size:14px;color:#172b4d;margin-left:8px;flex:1">' + esc(m.name) + '</span>' + check };
+      })
+    );
+    _awShowMenu(e, items, function(val) {
+      api('/api/issues/' + issueId, 'PUT', { assignee_id: val || null }).then(function() {
+        refreshData().then(renderAllWork);
+        toast('Assignee updated');
+      });
+    });
+  }
+  // Try S.data.users first
+  var members = (window.S && S.data && S.data.users) || [];
+  if (members.length) {
+    showAssigneeMenu(members);
+  } else {
+    // Fetch directly from API
+    api('/api/data').then(function(data) {
+      if (data && data.users) {
+        S.data = S.data || {};
+        S.data.users = data.users;
+        showAssigneeMenu(data.users);
+      } else {
+        showAssigneeMenu([]);
+      }
+    });
+  }
+}
+
+// ── Jira-like status button ─────────────────────────────────
+var STATUS_BTN_STYLES = {
+  'To Do':      'background:#dfe1e6;color:#42526e',
+  'In Progress':'background:#0052cc;color:#ffffff',
+  'In Review':  'background:#ff991f;color:#ffffff',
+  'Done':       'background:#00875a;color:#ffffff'
+};
+
+function updateStatusBtn(status) {
+  var btn = document.getElementById('drawerStatusBtn');
+  var lbl = document.getElementById('drawerStatusLabel');
+  if (!btn || !lbl) return;
+  lbl.textContent = status || 'To Do';
+  var s = STATUS_BTN_STYLES[status] || STATUS_BTN_STYLES['To Do'];
+  var parts = s.split(';');
+  parts.forEach(function(p) {
+    var kv = p.split(':');
+    if (kv.length === 2) btn.style[kv[0].trim()] = kv[1].trim();
+  });
+}
+
+function toggleStatusDropdown() {
+  var statuses = ['To Do','In Progress','In Review','Done'];
+  var current = document.getElementById('drawerStatus').value;
+  var btn = document.getElementById('drawerStatusBtn');
+  var old = document.getElementById('_statusBtnMenu');
+  if (old) { old.remove(); return; }
+  var rect = btn.getBoundingClientRect();
+  var menu = document.createElement('div');
+  menu.id = '_statusBtnMenu';
+  menu.style.cssText = 'position:fixed;top:'+(rect.bottom+4)+'px;left:'+rect.left+'px;background:#fff;border:1px solid #dfe1e6;border-radius:4px;box-shadow:0 8px 16px rgba(9,30,66,0.25);z-index:9999;min-width:200px;padding:6px 0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;';
+  statuses.forEach(function(s) {
+    var item = document.createElement('div');
+    item.style.cssText = 'padding:8px 16px;cursor:pointer;font-size:14px;color:#172b4d;display:flex;align-items:center;justify-content:space-between;border-left:3px solid transparent;';
+    item.innerHTML = '<span>' + s + '</span>' + (s === current ? '<span style="color:#0052cc;font-weight:700">✓</span>' : '');
+    item.onmouseover = function(){ this.style.background='#f4f5f7'; this.style.borderLeftColor='#0052cc'; };
+    item.onmouseout = function(){ this.style.background=''; this.style.borderLeftColor='transparent'; };
+    item.onclick = function() {
+      menu.remove();
+      var sel = document.getElementById('drawerStatus');
+      sel.value = s;
+      sel.dispatchEvent(new Event('change'));
+      updateStatusBtn(s);
+    };
+    menu.appendChild(item);
+  });
+  document.body.appendChild(menu);
+  setTimeout(function() {
+    document.addEventListener('click', function h(ev) {
+      if (!menu.contains(ev.target) && ev.target.id !== 'drawerStatusBtn') {
+        menu.remove(); document.removeEventListener('click', h);
+      }
+    });
+  }, 100);
+}
+
+function awInlineStatus(e, issueId, current) {
+  e.stopPropagation();
+  var statuses = ['To Do','In Progress','In Review','Done'];
+  var items = statuses.map(function(s) {
+    var check = s === current ? '<span style="color:#0052cc;font-weight:700;margin-left:auto">&#10003;</span>' : '';
+    return { value: s, html: '<span style="font-size:14px;color:#172b4d;flex:1">' + s + '</span>' + check };
+  });
+  _awShowMenu(e, items, function(val) {
+    api('/api/issues/' + issueId, 'PUT', { status: val }).then(function() {
+      refreshData().then(renderAllWork);
+      toast('Status updated');
+    });
+  });
+}
+
+function awInlinePriority(e, issueId, current) {
+  e.stopPropagation();
+  var priorities = ['highest','high','medium','low','lowest'];
+  var items = priorities.map(function(p) {
+    var check = p === current ? '<span style="color:#0052cc;font-weight:700;margin-left:auto">&#10003;</span>' : '';
+    return { value: p, html: '<span style="font-size:14px;color:#172b4d;flex:1;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' + cap(p) + '</span>' + check };
+  });
+  _awShowMenu(e, items, function(val) {
+    api('/api/issues/' + issueId, 'PUT', { priority: val }).then(function() {
+      refreshData().then(renderAllWork);
+      toast('Priority updated');
+    });
+  });
+}
+
+// ── Rich text toolbar show/hide ─────────────────────────
+document.addEventListener('click', function(e) {
+  if (e.target.id === 'drawerDesc') {
+    var tb = document.getElementById('drawerDescToolbar');
+    if (tb) tb.classList.add('active');
+  }
+});
+document.addEventListener('focusout', function(e) { // focusout
+  if (e.target.id === 'drawerDesc') {
+    setTimeout(function() {
+      var tb = document.getElementById('drawerDescToolbar');
+      if (tb && !tb.contains(document.activeElement)) {
+        tb.classList.remove('active');
+      }
+    }, 200);
+  }
+});
+
+function richInsertLink(elId) {
+  var url = prompt('Enter URL:');
+  if (url) document.execCommand('createLink', false, url);
+}
+
+function richInsertImage(elId) {
+  var url = prompt('Enter image URL:');
+  if (url) document.execCommand('insertImage', false, url);
+}
+
+// ── Copy issue link ─────────────────────────────────────
+function copyDrawerLink() {
+  // Use current issue key saved when drawer opened
+  var issueKey = window._currentIssueKey || (window.S && S.drawerIssueId);
+  var url = window.location.origin + '/?issue=' + encodeURIComponent(issueKey);
+  navigator.clipboard.writeText(url).then(function() {
+    toast('Link copied!');
+  }).catch(function() {
+    var el = document.createElement('input');
+    el.value = url;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    toast('Link copied!');
+  });
+}
+
+// ── Browser back button support ─────────────────────────
+window.addEventListener("popstate", function(e) {
+  if (window._navigatingBack) return;
+  window._navigatingBack = true;
+  goBackToSavedPage();
+});
+
+
+
+
+
+
+// ── Back button from issue ──────────────────────────────
+function goBackFromIssue() {
+  _exitIssuePage();
+  history.replaceState(null, '', window.location.pathname);
+  var returnTab = S._prevTab || window._issueReturnTab || 'allwork';
+  var returnSpace = S._prevSpace || window._issueReturnSpace || S.currentSpace;
+  window._issueReturnTab = null;
+  window._issueReturnSpace = null;
+  if (returnSpace) {
+    S.currentSpace = returnSpace;
+    // Show space nav
+    var spaceNavEl = $('spaceNav');
+    if (spaceNavEl) spaceNavEl.removeAttribute('hidden');
+    qsa('.space-item').forEach(function(el) {
+      el.classList.toggle('active', el.dataset.spaceId === returnSpace);
+    });
+    renderTab(returnTab);
+  } else {
+    navigateTo('home');
+  }
+}
+
+// Copy issue URL and number to clipboard
+window._copyIssueUrl = function() {
+  var issueKey = $('drawerKey') && $('drawerKey').textContent;
+  if (!issueKey) return;
+  var url = window.location.origin + '/?issue=' + encodeURIComponent(issueKey);
+  navigator.clipboard.writeText(url).then(function() {
+    toast('Copied: ' + issueKey);
+  }).catch(function(err) {
+    alert('Failed to copy');
+  });
+};
+
+// Description paste handler - clean formatting
+(function() {
+  function initDescPaste() {
+    var descEl = document.getElementById("issueDescription");
+    if (descEl == null || descEl._pasteInit) return;
+    descEl._pasteInit = true;
+    descEl.addEventListener('paste', function(e) {
+      e.preventDefault();
+      // Handle image paste
+      var items = e.clipboardData && e.clipboardData.items;
+      if (items) {
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf('image') !== -1) {
+            var file = items[i].getAsFile();
+            if (file) {
+              var reader = new FileReader();
+              reader.onload = function(ev) {
+                var img = document.createElement('img');
+                img.src = ev.target.result;
+                img.style.maxWidth = '100%';
+                img.style.borderRadius = '4px';
+                img.style.margin = '4px 0';
+                img.style.display = 'block';
+                var sel = window.getSelection();
+                if (sel.rangeCount) {
+                  var range = sel.getRangeAt(0);
+                  range.deleteContents();
+                  range.insertNode(img);
+                  range.setStartAfter(img);
+                  range.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                }
+              };
+              reader.readAsDataURL(file);
+              return;
+            }
+          }
+        }
+      }
+      var text = '';
+      if (e.clipboardData) {
+        var html = e.clipboardData.getData('text/html');
+        if (html) {
+          var tmp = document.createElement("div"); tmp.innerHTML = html;
+          tmp.querySelectorAll("*").forEach(function(el) { el.removeAttribute("class"); el.removeAttribute("id"); var s=el.getAttribute("style")||""; var k=""; if(s.includes("bold"))k+="font-weight:bold;"; if(s.includes("italic"))k+="font-style:italic;"; if(s.includes("underline"))k+="text-decoration:underline;"; if(k)el.setAttribute("style",k); else el.removeAttribute("style"); });
+          tmp.querySelectorAll("span:empty").forEach(function(s){s.remove();});
+          text = tmp.innerHTML;
+        } else {
+          text = e.clipboardData.getData("text/plain");
+          // Auto-convert URLs to clickable links
+          text = text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+          text = text.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" style="color:#0129AC;text-decoration:underline" target="_blank">$1</a>');
+          text = text.replace(/\n\n+/g,"<br><br>").replace(/\n/g,"<br>");
+        }
+      }
+      document.execCommand('insertHTML', false, text);
+    });
+  }
+  // Init on modal open
+  var origOpen = window.openModal;
+  window.openModal = function(id) {
+    origOpen && origOpen(id);
+    if (id === 'modal-issue') setTimeout(initDescPaste, 100);
+  };
+})();
+
+// Description Save/Cancel buttons
+(function() {
+  function initDescButtons() {
+    var descEl = document.getElementById('issueDescription');
+    var btnDiv = document.getElementById('descActionBtns');
+    descEl._btnInit = true;
+    var originalContent = '';
+    descEl.addEventListener('focus', function() {
+      originalContent = descEl.innerHTML;
+      btnDiv.style.display = 'flex';
+    });
+    window._saveDesc = function() {
+      btnDiv.style.display = 'none';
+    };
+    window._cancelDesc = function() {
+      descEl.innerHTML = originalContent;
+      btnDiv.style.display = 'none';
+    };
+  }
+  var origOpen = window.openModal;
+  window.openModal = function(id) {
+    origOpen && origOpen(id);
+    if (id === 'modal-issue') setTimeout(initDescButtons, 150);
+  };
+})();
+
+// Show/hide description toolbars on focus
+(function() {
+  function initDescToolbars() {
+    var fields = [
+      { field: 'drawerDesc', toolbar: 'drawerDescToolbar' },
+      { field: 'drawerFixDesc', toolbar: 'drawerFixDescToolbar' }
+    ];
+    fields.forEach(function(item) {
+      var el = document.getElementById(item.field); if(!el) return;
+      var tb = document.getElementById(item.toolbar);
+      el._tbInit = true;
+      if(tb) tb.classList.remove('active');
+      el.addEventListener('focus', function() { if(tb) tb.classList.add('active'); }); el.addEventListener('blur', function() { setTimeout(function(){ if(tb) tb.classList.remove('active'); }, 200); });
+    });
+  }
+  var origOpen = window.openDrawer;
+  window.openDrawer = function(id) {
+    origOpen && origOpen(id);
+    setTimeout(initDescToolbars, 500);
+  };
+  document.addEventListener('DOMContentLoaded', function() { setTimeout(initDescToolbars, 500); });
+})();
+// Auto-linkify URLs
+(function(){
+  function linkify(el,field){
+    if(!el||el._lf)return;
+    el._lf=true;
+    el.addEventListener("blur",function(){
+      var h=el.innerHTML;
+      var h2=h.replace(/(?<!href=")(https?:\/\/[^\s<]+)/g,"<a href=\"\" style=\"color:#0129AC;text-decoration:underline\" target=\"_blank\">\<\/a>");
+      if(h2!==h){el.innerHTML=h2;autoSave(field,h2.trim());}
+    });
+  }
+  function init(){
+    linkify(document.getElementById("drawerDesc"),"description");
+    linkify(document.getElementById("drawerFixDesc"),"fix_description");
+  }
+  var o=window.openDrawer;
+  window.openDrawer=function(id){o&&o(id);setTimeout(init,700);};
+  document.addEventListener("DOMContentLoaded",function(){setTimeout(init,700);});
+})();
+
+// Capture Team and Product Type
+document.addEventListener('DOMContentLoaded', function() {
+  const submitBtn = document.querySelector('[onclick*="submitIssueForm"]') || document.querySelector('button[type="submit"]');
+  
+  if (submitBtn) {
+    const originalClick = submitBtn.onclick;
+    submitBtn.onclick = function(e) {
+      const team = document.getElementById('issueTeam')?.value || '';
+      const productType = document.getElementById('issueProductType')?.value || '';
+      const createdAt = new Date().toISOString();
+      
+      window.issueTeamValue = team;
+      window.issueProductTypeValue = productType;
+      window.issueCreatedAt = createdAt;
+      
+      console.log('Team:', team, 'Product Type:', productType);
+      
+      if (originalClick) return originalClick.call(this, e);
+    };
+  }
+  
+  const forms = document.querySelectorAll('form');
+  forms.forEach(form => {
+    form.addEventListener('submit', function(e) {
+      const team = document.getElementById('issueTeam')?.value || '';
+      const productType = document.getElementById('issueProductType')?.value || '';
+      
+      if (e.target.method && e.target.method.toUpperCase() === 'POST') {
+        const formData = new FormData(e.target);
+        formData.append('team', team);
+        formData.append('productType', productType);
+        formData.append('createdAt', new Date().toISOString());
+      }
+    });
+  });
+});
+
+var _gsTimer=null;
+window._globalSearch=function(query){
+  var box=document.getElementById("globalSearchResults");
+  if(!box)return;
+  var q=(query||"").trim();
+  if(q.length<2){box.style.display="none";return;}
+  box.innerHTML="<div style=\"padding:12px 16px;color:var(--text3);font-size:13px\">Searching...</div>";
+  box.style.display="block";
+  clearTimeout(_gsTimer);
+  _gsTimer=setTimeout(async function(){
+    try{
+      var r=await api("/api/issues/search?q="+encodeURIComponent(q));
+      if(!r||!r.length){box.innerHTML="<div style=\"padding:12px 16px;color:var(--text3);font-size:13px\">No results found</div>";return;}
+      box.innerHTML=r.slice(0,15).map(function(i){
+        var sc=i.status==="Done"?"#36b37e":i.status==="In Progress"?"#0129AC":"#42526e";
+        return "<div onclick=\"window._gsg(\x27"+i.id+"\x27)\" style=\"padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px\">"+"<span style=\"font-size:11px;font-weight:700;color:#0129AC;min-width:70px\">"+i.key+"</span>"+"<span style=\"flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">"+i.title+"</span>"+"<span style=\"font-size:11px;color:"+sc+";font-weight:600\">"+i.status+"</span></div>";
+      }).join("");
+    }catch(e){box.innerHTML="<div style=\"padding:12px\">Error</div>";}
+  },300);
+};
+window._gsg=function(id){
+  var b=document.getElementById("globalSearchResults");
+  var inp=document.getElementById("globalSearchInput");
+  if(b)b.style.display="none";
+  if(inp)inp.value="";
+  openIssuePage(id);
+};
+document.addEventListener("click",function(e){
+  var b=document.getElementById("globalSearchResults");
+  var inp=document.getElementById("globalSearchInput");
+  if(b&&inp&&e.target!==inp&&!b.contains(e.target))b.style.display="none";
+});
+
+async function renderDeletedTickets(el) {
+  el.innerHTML = '<div style="padding:20px;color:var(--text3)">Loading deleted tickets...</div>';
+  try {
+    var tickets = await api('/api/issues/deleted');
+    if (!tickets || !tickets.length) {
+      el.innerHTML = '<div style="padding:24px;color:var(--text3);text-align:center;font-size:14px">No deleted tickets found.</div>';
+      return;
+    }
+    var html = '<div style="padding:0 0 16px"><h3 style="margin:0 0 4px;font-size:16px">Deleted Tickets</h3><p style="color:var(--text3);font-size:13px;margin:0">' + tickets.length + ' ticket(s) in bin</p></div>';
+    html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+    html += '<thead><tr style="background:var(--bg3);color:var(--text2)"><th style="padding:10px 12px;text-align:left">Key</th><th style="padding:10px 12px;text-align:left">Title</th><th style="padding:10px 12px;text-align:left">Status</th><th style="padding:10px 12px;text-align:left">Deleted At</th><th style="padding:10px 12px;text-align:left">Action</th></tr></thead><tbody>';
+    tickets.forEach(function(t) {
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:10px 12px;font-weight:700;color:#0129AC">' + esc(t.key||'') + '</td>' +
+        '<td style="padding:10px 12px">' + esc(t.title||'No title') + '</td>' +
+        '<td style="padding:10px 12px">' + esc(t.status||'') + '</td>' +
+        '<td style="padding:10px 12px;color:var(--text3);font-size:12px">' + fmtDateTime(t.deleted_at) + '</td>' +
+        '<td style="padding:10px 12px"><button class="btn btn-sm btn-outline" onclick="window._restoreTicket(\'' + t.id + '\',this)">∩ Restore</button></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+    window._restoreTicket = async function(id, btn) {
+      btn.disabled = true; btn.textContent = 'Restoring...';
+      try {
+        await api('/api/issues/' + id + '/restore', 'POST');
+        toast('Ticket restored successfully', 'success');
+        await refreshData();
+        renderDeletedTickets(el);
+      } catch(e) {
+        toast('Failed to restore ticket', 'error');
+        btn.disabled = false; btn.textContent = '∩ Restore';
+      }
+    };
+  } catch(err) {
+    el.innerHTML = '<div style="padding:20px;color:red">Error loading deleted tickets</div>';
+  }
+}
+
+window._filterUsers = function(query) {
+  var q = (query||'').trim().toLowerCase();
+  var tables = document.querySelectorAll('table');
+  var found = false;
+  tables.forEach(function(table) {
+    var rows = table.querySelectorAll('tbody tr');
+    if (rows.length === 0) return;
+    rows.forEach(function(row) {
+      var text = row.textContent.toLowerCase();
+      var show = q === '' || text.includes(q);
+      row.style.display = show ? '' : 'none';
+      if (show) found = true;
+    });
+    // Show no results message
+    var noRes = table.parentNode.querySelector('.user-no-results');
+    if (q && !found) {
+      if (!noRes) {
+        noRes = document.createElement('div');
+        noRes.className = 'user-no-results';
+        noRes.style.cssText = 'padding:32px;text-align:center;color:var(--text3);font-size:14px';
+        noRes.textContent = 'No users found for "' + query + '"';
+        table.parentNode.appendChild(noRes);
+      } else {
+        noRes.style.display = '';
+        noRes.textContent = 'No users found for "' + query + '"';
+      }
+    } else if (noRes) {
+      noRes.style.display = 'none';
+    }
+  });
+};

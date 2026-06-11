@@ -47,11 +47,11 @@ const storage = multer ? multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, uid() + '-' + file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_'))
 }) : null;
-const upload = multer ? multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } }) : null;
+const upload = multer ? multer({ storage, limits: { fileSize: Infinity, files: Infinity } }) : null;
 
 const pool = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false } })
-  : new Pool({ host: 'localhost', port: 5432, database: 'sprintboard', user: 'postgres', password: 'postgres' });
+  : new Pool({ host: 'sprint-postgres', port: 5432, database: 'sprintboard', user: 'postgres', password: 'postgres' });
 pool.on('error', (err) => { console.error('[pg pool error] Client lost connection:', err.message); });
 const q = (text, params) => pool.query(text, params);
 const https = require('https');
@@ -92,7 +92,7 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
   const p = sid ? [sid] : [];
   const [sprints, issues, worklogs, comments, cf, filters, notifs, ifv] = await Promise.all([
     q('SELECT * FROM sprints' + sf1, p),
-    q('SELECT * FROM issues' + sf1, p),
+    q('SELECT * FROM issues' + (sf1 ? sf1 + ' AND deleted_at IS NULL' : ' WHERE deleted_at IS NULL'), p),
     q(`SELECT w.* FROM worklogs w${sid ? ' JOIN issues i ON w.issue_id=i.id WHERE i.space_id=$1' : ''}`, p),
     q(`SELECT c.* FROM comments c${sid ? ' JOIN issues i ON c.issue_id=i.id WHERE i.space_id=$1' : ''}`, p),
     q('SELECT * FROM custom_fields' + sf1, p),
@@ -314,7 +314,7 @@ app.get('/api/issues', wrap(async (req, res) => {
     LEFT JOIN users rep ON rep.id=i.reporter_id
     LEFT JOIN spaces s ON s.id=i.space_id
     LEFT JOIN issues p ON p.id=i.parent_id${w}
-    ORDER BY i.position, i.created_at`, params);
+    ORDER BY i.key DESC`, params);
   res.json(r.rows);
 }));
 
@@ -362,8 +362,11 @@ app.get('/api/issues/:id', wrap(async (req, res) => {
 
 app.post('/api/issues', wrap(async (req, res) => {
   const b = req.body;
+  if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
   const cnt = (await q("SELECT COUNT(*)::int AS c FROM issues WHERE space_id=$1", [b.space_id])).rows[0].c;
-  const spaceKey = (await q('SELECT key FROM spaces WHERE id=$1', [b.space_id])).rows[0].key;
+  const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [b.space_id])).rows[0];
+  if (!spaceKeyRow) return res.status(400).json({ error: 'Invalid space_id' });
+  const spaceKey = spaceKeyRow.key;
   const key = `${spaceKey}-${cnt + 1}`;
   const id = uid();
   const r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
@@ -1044,7 +1047,7 @@ app.get('/auth/microsoft', (req, res) => {
     response_mode: 'query',
     state
   });
-  res.redirect(`https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/authorize?${params}`);
+  res.redirect(`https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/authorize?${params}&prompt=login`);
 });
 
 app.get('/api/auth/callback/microsoft', wrap(async (req, res) => {

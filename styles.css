@@ -26,7 +26,7 @@
   --purple: #818cf8;
   --sidebar-w: 260px;
   --topbar-h: 52px;
-  --drawer-w: 720px;
+  --drawer-w: 100vw;
   --radius: 6px;
   --radius-lg: 10px;
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
@@ -1323,7 +1323,7 @@ body.light .report-card {
    ------------------------------------------------------------ */
 .issue-drawer { position: fixed; inset: 0; z-index: 200; }
 .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200; }
-.drawer-panel { position: fixed; top: 0; right: 0; bottom: 0; width: var(--drawer-w); max-width: 92vw; background: var(--bg2); z-index: 201; display: flex; flex-direction: column; box-shadow: -6px 0 30px rgba(0,0,0,.25); animation: slideIn .2s ease-out; }
+.drawer-panel { position: fixed; inset: 0; width: 100vw; max-width: 100vw; background: var(--bg2); z-index: 99999; display: flex; flex-direction: column; box-shadow: -6px 0 30px rgba(0,0,0,.25); animation: slideIn .2s ease-out; }
 body.light .drawer-panel { background: #ffffff; }
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
@@ -1350,8 +1350,8 @@ body.issue-page .drawer-panel {
   border-radius: 0;
   flex: 1;
 }
-body.issue-page .drawer-main { max-width: 760px; margin: 0 auto; padding: 32px 40px; }
-body.issue-page .drawer-sidebar { width: 320px; flex-shrink: 0; }
+body.issue-page .drawer-main { max-width: 100%; margin: 0; padding: 32px 40px; flex: 1; overflow-y: auto; min-width: 0; }
+body.issue-page .drawer-sidebar { width: 380px; flex-shrink: 0; border-left: 1px solid var(--border); padding: 24px 28px; background: var(--bg2); overflow-y: auto; }
 body.issue-page .drawer-close-btn { display: none !important; }
 body.issue-page .drawer-topbar {
   padding: 14px 40px;
@@ -1373,7 +1373,7 @@ body.light.issue-page .drawer-topbar { background: #fff; }
 .drawer-close-btn { font-size: 18px; }
 
 /* Body layout */
-.drawer-body { flex: 1; display: flex; overflow: hidden; }
+.drawer-body { flex: 1; display: flex; overflow: hidden; flex-direction: row; min-height: 0; }
 .drawer-main { flex: 1; padding: 20px 24px; overflow-y: auto; }
 .drawer-sidebar { width: 300px; padding: 16px 20px; overflow-y: auto; flex-shrink: 0; border-left: 1px solid var(--border); background: var(--bg3); }
 body.light .drawer-sidebar { background: #f7f8fa; }
@@ -3084,3 +3084,7 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 .prm-color-sw { display:inline-block; width:24px; height:24px; border-radius:4px; cursor:pointer; border:2px solid transparent; transition:transform .1s,border-color .1s; }
 .prm-color-sw:hover { transform:scale(1.2); }
 .prm-color-sw.active { border-color:#fff; box-shadow:0 0 0 2px var(--accent,#4d90e0); }
+
+/* Description toolbar - hidden by default, show on focus */
+.rich-toolbar { display: none !important; }
+.rich-toolbar.active { display: flex !important; }

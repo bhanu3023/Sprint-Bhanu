@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SprintBoard — Neutara Technologies</title>
+  <link rel="icon" type="image/png" href="assets/neutara-logo.png">
+  <link rel="apple-touch-icon" href="assets/neutara-logo.png">
   <link rel="stylesheet" href="styles.css">
   <script>
     // Pick up OAuth token from URL param after Microsoft SSO redirect
@@ -26,9 +28,11 @@
   <!-- 1. Loading Overlay -->
   <div id="loadingOverlay" class="loading-overlay">
     <div class="loading-content">
-      <div class="spinner"></div>
-      <h1 class="loading-title">SprintBoard Enterprise</h1>
-      <p id="loadingMsg" class="loading-msg">Initializing workspace...</p>
+      <div class="logo-spinner-wrap" style="position:relative;width:80px;height:80px;display:flex;align-items:center;justify-content:center">
+        <svg style="position:absolute;top:0;left:0;width:80px;height:80px;animation:spin 1.2s linear infinite" viewBox="0 0 80 80"><circle cx="40" cy="40" r="36" fill="none" stroke="#174F96" stroke-width="4" stroke-dasharray="180 40" stroke-linecap="round"/></svg>
+        <img src="assets/neutara-logo.png" style="width:48px;height:48px;object-fit:contain;border-radius:8px">
+      </div>
+      <p id="loadingMsg" class="loading-msg" style="display:none">Initializing workspace...</p>
     </div>
   </div>
 
@@ -64,16 +68,16 @@
 
       <nav class="sidebar-nav">
         <div class="nav-section">
-          <a class="nav-item" data-view="home"><span class="nav-icon">🏠</span> Home</a>
-          <a class="nav-item" data-view="yourwork"><span class="nav-icon">📋</span> Your Work</a>
-          <a class="nav-item" data-view="global-reports"><span class="nav-icon">📊</span> Reports</a>
-          <a class="nav-item" data-view="worklog-report"><span class="nav-icon">⏱️</span> Work Log</a>
-          <a class="nav-item" data-view="product-roadmap"><span class="nav-icon">🗺️</span> Product Roadmap</a>
+          <a class="nav-item" data-view="home"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span> Home</a>
+          <a class="nav-item" data-view="yourwork"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg></span> Assigned to me</a>
+          <a class="nav-item" data-view="global-reports"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg></span> Reports</a>
+          <a class="nav-item" data-view="worklog-report"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span> Work Log</a>
+          <a class="nav-item" data-view="product-roadmap"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg></span> Product Roadmap</a>
         </div>
 
         <div class="sidebar-section">
           <div class="sidebar-section-header">
-            <span class="sidebar-section-label">FAVORITES</span>
+            <span class="sidebar-section-label">STARRED</span>
             <button class="btn-icon sidebar-collapse-toggle" aria-label="Toggle favorites">▾</button>
           </div>
           <div id="favSpaces" class="sidebar-section-content"></div>
@@ -87,22 +91,12 @@
           <div id="spacesList" class="sidebar-section-content"></div>
         </div>
 
-        <div id="spaceNav" class="sidebar-section" hidden>
-          <div class="sidebar-section-header">
-            <span class="sidebar-section-label">CURRENT SPACE</span>
-          </div>
-          <a class="nav-item" data-tab="summary"><span class="nav-icon">📋</span> Summary</a>
-          <a class="nav-item" data-tab="backlog"><span class="nav-icon">📦</span> Backlog</a>
-          <a class="nav-item" data-tab="sprint"><span class="nav-icon">🏃</span> Active Sprint</a>
-          <a class="nav-item" data-tab="reports"><span class="nav-icon">📈</span> Reports</a>
-          <a class="nav-item" data-tab="allwork"><span class="nav-icon">📄</span> All Work</a>
-          <a class="nav-item" data-tab="space-settings"><span class="nav-icon">⚙️</span> Settings</a>
-        </div>
+        <div id="spaceNav" hidden></div>
       </nav>
 
       <div class="sidebar-footer">
         <div id="sidebarUserFooter" class="sidebar-user-footer"></div>
-        <button class="btn-icon" id="themeToggle" aria-label="Toggle theme">🌙</button>
+        <button class="btn-icon" id="themeToggle" aria-label="Toggle theme"><svg id="themeToggleIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
       </div>
     </aside>
 
@@ -116,11 +110,17 @@
           <nav id="breadcrumb" class="breadcrumb"></nav>
         </div>
         <div class="topbar-right">
-          <button class="btn-icon topbar-notif-btn" id="notifBtn" aria-label="Notifications">
-            🔔
+          <button class="btn-icon topbar-notif-btn" id="notifBtn" aria-label="Notifications" style="position:relative;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
             <span class="notif-badge" id="notifBadge" hidden>0</span>
           </button>
-          <button class="btn-icon" id="themeToggleTop" aria-label="Toggle theme">🌙</button>
+          <button class="btn-icon" id="themeToggleTop" aria-label="Toggle theme" style="position:relative;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:0">
+            <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="stroke:#42526e"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          </button>
           <button class="btn btn-primary btn-sm" id="createIssueBtn">+ Create Issue</button>
         </div>
       </header>
@@ -137,7 +137,7 @@
       <!-- Space Header -->
       <div id="spaceHeader" class="space-header" hidden>
         <div class="space-header-left">
-          <span id="spaceIcon" class="space-icon"></span>
+          <span id="spaceIcon" class="space-icon" style="display:none"></span>
           <h2 id="spaceName" class="space-name-title"></h2>
           <span id="spaceKey" class="badge badge-muted"></span>
         </div>
@@ -177,7 +177,7 @@
 
         <!-- Your Work View -->
         <div class="view" id="view-yourwork" hidden>
-          <h1 class="view-title">Your Work</h1>
+          <h1 class="view-title">Assigned to me</h1>
           <div class="tabs">
             <button class="tab active" data-yourwork-tab="assigned">Assigned to Me</button>
             <button class="tab" data-yourwork-tab="reported">Reported by Me</button>
@@ -234,7 +234,7 @@
             <div class="wlr-filter-group">
               <label class="wlr-filter-label">User</label>
               <div class="aw-ms-wrap">
-                <button class="aw-ms-btn" id="wlrUserBtn" onclick="window._wlrToggle('user')">All Users <span class="aw-ms-count" id="wlrUserCount" hidden></span><span class="aw-ms-arrow">▾</span></button>
+                <button class="aw-ms-btn" id="wlrUserBtn" onclick="window._wlrToggle('user')">Assignees <span class="aw-ms-count" id="wlrUserCount" hidden></span><span class="aw-ms-arrow">▾</span></button>
                 <div class="aw-ms-panel" id="wlrUserPanel" hidden></div>
               </div>
             </div>
@@ -257,12 +257,12 @@
           <!-- Group by toggle -->
           <div class="wlr-groupby-bar">
             <span class="wlr-groupby-label">Group by:</span>
-            <button class="wlr-gb-btn active" data-wlr-group="user">👤 User</button>
-            <button class="wlr-gb-btn" data-wlr-group="space">🗂 Space</button>
-            <button class="wlr-gb-btn" data-wlr-group="date">📅 Date</button>
-            <button class="wlr-gb-btn" data-wlr-group="none">📋 All Entries</button>
-            <button class="wlr-gb-btn" data-wlr-group="timesheet">🗒️ Timesheet</button>
-            <button class="wlr-gb-btn" data-wlr-group="pivot">⊞ Pivot</button>
+            <button class="wlr-gb-btn active" data-wlr-group="user">Assignee</button>
+            <button class="wlr-gb-btn" data-wlr-group="space">Space</button>
+            <button class="wlr-gb-btn" data-wlr-group="date">Date</button>
+            <button class="wlr-gb-btn" data-wlr-group="none">All Entries</button>
+            <button class="wlr-gb-btn" data-wlr-group="timesheet">Timesheet</button>
+            <button class="wlr-gb-btn" data-wlr-group="pivot">Pivot</button>
           </div>
 
           <!-- Results -->
@@ -326,11 +326,11 @@
         <div class="view" id="view-product-roadmap" hidden>
           <div class="prm-header">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-              <h1 class="view-title" style="margin:0">🗺️ Product Roadmap</h1>
+              <h1 class="view-title" style="margin:0">Product Roadmap</h1>
               <div class="prm-view-toggle">
-                <button class="prm-vt-btn active" data-prm-view="timeline" onclick="window._prmSetView('timeline')">📅 Timeline</button>
-                <button class="prm-vt-btn" data-prm-view="list"     onclick="window._prmSetView('list')">📋 List</button>
-                <button class="prm-vt-btn" data-prm-view="board"    onclick="window._prmSetView('board')">🗂 Board</button>
+                <button class="prm-vt-btn active" data-prm-view="timeline" onclick="window._prmSetView('timeline')">Timeline</button>
+                <button class="prm-vt-btn" data-prm-view="list"     onclick="window._prmSetView('list')">List</button>
+                <button class="prm-vt-btn" data-prm-view="board"    onclick="window._prmSetView('board')">Board</button>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -417,8 +417,8 @@
         <!-- Space: Summary -->
         <div class="view" id="view-summary" hidden>
           <div id="summaryStats" class="stats-row"></div>
-          <div id="summaryWidgets" class="widgets-grid"></div>
           <div id="summaryCharts" class="charts-row"></div>
+          <div id="summaryWidgets" class="widgets-grid"></div>
         </div>
 
         <!-- Space: Backlog -->
@@ -458,7 +458,7 @@
         <div class="view" id="view-allwork" hidden>
           <!-- Filter bar -->
           <div class="aw-filter-bar">
-            <input type="text" class="input input-sm" id="allWorkSearch" placeholder="🔍 Search title, key..." style="width:200px" oninput="renderAllWork()">
+            <input type="text" class="input input-sm" id="allWorkSearch" placeholder="🔍 Search title, key..." style="width:200px" oninput="renderAllWork()"><span id="awTicketCount" style="font-size:13px;font-weight:600;color:var(--text2);border:1px solid var(--border);border-radius:12px;padding:2px 12px;margin-left:8px;white-space:nowrap;align-self:center;"></span>
             <button class="aw-filter-toggle-btn" id="awFilterBtn" onclick="window._awToggleFilterPanel()">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right:5px"><path d="M1 3h14v1.5L9 10v5l-2-1V10L1 4.5V3z"/></svg>Filter
             </button>
@@ -524,8 +524,10 @@
         <!-- Drawer Top Bar -->
         <div class="drawer-topbar">
           <div class="drawer-topbar-left">
+            <button onclick="goBackFromIssue()" style="background:none;border:none;cursor:pointer;font-size:13px;color:#172b4d;display:flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;font-weight:600" onmouseover="this.style.background='#f4f5f7'" onmouseout="this.style.background='none'"><span style="font-size:18px;line-height:1">&#8592;</span> Back</button>
             <div id="drawerParentBreadcrumb" class="drawer-parent-crumb" style="display:none"></div>
             <span id="drawerKey" class="drawer-issue-key"></span>
+            <button class="btn-icon" onclick="copyDrawerLink()" title="Copy link" style="font-size:13px;padding:2px 6px">&#128279;</button>
             <span id="drawerType" class="drawer-type-badge"></span>
           </div>
           <div class="drawer-topbar-right">
@@ -551,6 +553,26 @@
               <div class="drawer-section-body">
                 <div class="drawer-detail-row">
                   <span class="drawer-detail-label">Description</span>
+                  <div id="drawerDescToolbar" class="rich-toolbar" style="display:none">
+                    <button onclick="document.execCommand('bold')" title="Bold"><b>B</b></button>
+                    <button onclick="document.execCommand('italic')" title="Italic"><i>I</i></button>
+                    <button onclick="document.execCommand('underline')" title="Underline"><u>U</u></button>
+                    <span class="rich-sep"></span>
+                    <button onclick="document.execCommand('insertUnorderedList')" title="Bullet List">&#8226;&#8212;</button>
+                    <button onclick="document.execCommand('insertOrderedList')" title="Numbered List">1&#8212;</button>
+                    <span class="rich-sep"></span>
+                    <button onclick="richInsertLink('drawerDesc')" title="Link">&#128279;</button>
+                    <button onclick="richInsertImage('drawerDesc')" title="Image">&#128444;</button>
+                    <span class="rich-sep"></span>
+                    <select onchange="document.execCommand('fontSize',false,this.value);this.value=''" title="Font Size">
+                      <option value="">Tt</option>
+                      <option value="1">Small</option>
+                      <option value="3">Normal</option>
+                      <option value="5">Large</option>
+                      <option value="7">Huge</option>
+                    </select>
+                    <button onclick="document.execCommand('removeFormat')" title="Clear Format">&#10006;</button>
+                  </div>
                   <div id="drawerDesc" class="drawer-desc" contenteditable="true" data-placeholder="Add a description..."></div>
                 </div>
                 <div class="drawer-detail-row">
@@ -611,17 +633,31 @@
                 </div>
                 <div id="drawerCommentBox" class="drawer-comment-box">
                   <div id="drawerCommentAvatar" class="drawer-comment-avatar"></div>
-                  <div class="drawer-comment-form" style="position:relative">
-                    <textarea id="drawerCommentInput" class="input" placeholder="Add a comment... (type @ to mention someone)" rows="2"></textarea>
+                  <div class="drawer-comment-form jira-comment-form" style="position:relative">
+                    <!-- Jira-style toolbar -->
+                    <div class="jira-comment-toolbar" id="drawerCommentToolbar">
+                      <button type="button" onclick="document.execCommand('bold')" title="Bold" class="jira-toolbar-btn"><b>B</b></button>
+                      <button type="button" onclick="document.execCommand('italic')" title="Italic" class="jira-toolbar-btn"><i>I</i></button>
+                      <button type="button" onclick="document.execCommand('underline')" title="Underline" class="jira-toolbar-btn"><u>U</u></button>
+                      <span class="jira-toolbar-divider"></span>
+                      <button type="button" onclick="document.execCommand('insertUnorderedList')" title="Bullet list" class="jira-toolbar-btn">☰</button>
+                      <button type="button" onclick="document.execCommand('insertOrderedList')" title="Numbered list" class="jira-toolbar-btn">1.</button>
+                      <span class="jira-toolbar-divider"></span>
+                      <button type="button" onclick="window._insertCommentCode()" title="Code" class="jira-toolbar-btn">&lt;/&gt;</button>
+                    </div>
+                    <!-- Comment input -->
+                    <textarea id="drawerCommentInput" class="jira-comment-input" placeholder="Add a comment... (type @ to mention someone)" rows="3" style="resize:vertical;width:100%;border:none;outline:none;font-size:14px;line-height:1.6;padding:10px 12px;background:transparent;font-family:inherit"></textarea>
                     <!-- @mention dropdown -->
                     <div id="mentionDropdown" style="display:none;position:absolute;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;max-height:200px;overflow-y:auto;"></div>
                     <div id="drawerCommentFileList" class="comment-file-list"></div>
-                    <div class="drawer-comment-actions">
+                    <div class="drawer-comment-actions jira-comment-actions">
                       <label class="btn btn-outline btn-sm comment-attach-btn" title="Attach file (max 500 MB)">
                         📎 Attach
                         <input type="file" id="drawerCommentAttach" multiple style="display:none">
                       </label>
-                      <button class="btn btn-primary btn-sm" id="drawerCommentSubmit">Comment</button>
+                      <div style="flex:1"></div>
+                      <button class="btn btn-secondary btn-sm" id="drawerCommentCancel">Cancel</button>
+                      <button class="btn btn-primary btn-sm" id="drawerCommentSubmit">Save</button>
                     </div>
                   </div>
                 </div>
@@ -636,10 +672,10 @@
               <h4 class="drawer-sidebar-heading">Details</h4>
               <table class="drawer-fields-table">
                 <tbody>
-                  <tr><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option></select></td></tr>
-                  <tr><td class="dfl">Priority</td><td class="dfv"><select id="drawerPriority" class="drawer-select"><option value="highest">Highest</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></td></tr>
-                  <tr><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select"></select></td></tr>
-                  <tr><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select"></select></td></tr>
+                  <tr><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
+                  <tr><td class="dfl">Priority</td><td class="dfv"><select id="drawerPriority" class="drawer-select" size="1"><option value="highest">Highest</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></td></tr>
+                  <tr><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
+                  <tr><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>
                   <tr><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select"></select></td></tr>
                   <tr><td class="dfl">Labels</td><td class="dfv"><input type="text" id="drawerLabels" class="drawer-input" placeholder="Add labels..."></td></tr>
                   <tr><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—"></td></tr>
@@ -793,6 +829,12 @@
           <input type="hidden" id="issueId">
           <input type="hidden" id="issueSpaceId">
           <input type="hidden" id="issueParentId">
+          <div class="form-group" id="issueSpaceGroup">
+            <label class="form-label" for="issueSpaceSelect">Space</label>
+            <select id="issueSpaceSelect" class="input" onchange="document.getElementById('issueSpaceId').value=this.value;window._onIssueSpaceChange&&window._onIssueSpaceChange(this.value)">
+              <option value="">— Select a space —</option>
+            </select>
+          </div>
           <div class="form-group">
             <label class="form-label" for="issueTitleInput">Title</label>
             <input type="text" id="issueTitleInput" class="input" required>
@@ -840,6 +882,17 @@
             </div>
           </div>
           <div class="form-group">
+          <div class="form-row">
+            <div class="form-group">
+                <option value="Dev">Dev</option>
+                <option value="Infra">Infra</option>
+              </select>
+            </div>
+            <div class="form-group">
+                <option value="Infrastructure">Infrastructure</option>
+              </select>
+            </div>
+          </div>
             <label class="form-label" for="issueLabels">Labels</label>
             <input type="text" id="issueLabels" class="input" placeholder="Comma-separated labels">
           </div>
@@ -856,6 +909,19 @@
           <div class="form-group">
             <label class="form-label" for="issueDescription">Description</label>
             <textarea id="issueDescription" class="input" rows="4"></textarea>
+          </div>
+          <div id="issueCustomFieldsContainer"></div>
+          <div class="form-row">
+            <div class="form-group">
+                <option value="QA">QA</option>
+                <option value="Infra">Infra</option>
+              </select>
+            </div>
+            <div class="form-group">
+                <option value="Message">Message</option>
+                <option value="Email">Email</option>
+              </select>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Attachments <span style="font-size:11px;color:var(--text3);font-weight:400">(max 500 MB per file)</span></label>
