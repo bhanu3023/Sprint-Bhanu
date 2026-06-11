@@ -5326,7 +5326,7 @@ function bindDrawerEdits(issue) {
   (function() {
     var textarea = $('drawerCommentInput');
     var dropdown = $('mentionDropdown');
-    var mentionStart = -1; // caret position where @ was typed
+    var mentionStart = -1;
 
     function getMembers() {
       return window._drawerMembers || S.data.users || [];
@@ -5337,51 +5337,104 @@ function bindDrawerEdits(issue) {
       mentionStart = -1;
     }
 
+    // Returns all text before the caret inside a contenteditable element
+    function getTextBeforeCaret(el) {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return '';
+      var r = sel.getRangeAt(0).cloneRange();
+      r.selectNodeContents(el);
+      r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+      return r.toString();
+    }
+
+    function insertMentionAtCaret(name, userId) {
+      // e.preventDefault() on mousedown keeps focus so caret is still valid
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+
+      var caretRange = sel.getRangeAt(0);
+      var endNode = caretRange.endContainer;
+      var endOffset = caretRange.endOffset;
+
+      // Find the @ in the current text node (most common case)
+      var atPos = -1;
+      var atNode = null;
+      if (endNode.nodeType === 3) {
+        var textUpToCaret = endNode.textContent.substring(0, endOffset);
+        var idx = textUpToCaret.lastIndexOf('@');
+        if (idx !== -1) {
+          atPos = idx;
+          atNode = endNode;
+        }
+      }
+
+      // If @ wasn't found in the same text node, walk backwards
+      if (atNode === null) {
+        var walker = document.createTreeWalker(textarea, NodeFilter.SHOW_TEXT, null, false);
+        var nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        // build full text before caret
+        var fullText = getTextBeforeCaret(textarea);
+        var atIdx2 = fullText.lastIndexOf('@');
+        if (atIdx2 === -1) return;
+        // count chars to find the node containing @
+        var charCount = 0;
+        for (var ni = 0; ni < nodes.length; ni++) {
+          var nodeLen = nodes[ni] === endNode ? endOffset : nodes[ni].textContent.length;
+          if (charCount + nodeLen > atIdx2) {
+            atNode = nodes[ni];
+            atPos = atIdx2 - charCount;
+            break;
+          }
+          charCount += nodeLen;
+        }
+      }
+
+      if (!atNode) return;
+
+      // Select from @ to current caret position and delete it
+      var delRange = document.createRange();
+      delRange.setStart(atNode, atPos);
+      if (atNode === endNode) {
+        delRange.setEnd(endNode, endOffset);
+      } else {
+        delRange.setEnd(endNode, endOffset);
+      }
+      sel.removeAllRanges();
+      sel.addRange(delRange);
+      document.execCommand('delete', false, null);
+
+      // Insert mention chip + non-breaking space
+      var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
+      document.execCommand('insertHTML', false, chip);
+    }
+
     function showMention(query) {
       var members = getMembers().filter(function(m) {
         return !query || m.name.toLowerCase().indexOf(query.toLowerCase()) !== -1;
       });
       if (!members.length) { closeMention(); return; }
 
-      // Position dropdown just below textarea
-      var rect = textarea.getBoundingClientRect();
       dropdown.style.top = (textarea.offsetHeight + 2) + 'px';
       dropdown.style.display = 'block';
       dropdown.innerHTML = members.map(function(m) {
-        return '<div class="mention-item" data-id="' + m.id + '" data-name="' + m.name + '" ' +
+        return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
           'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
           'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
           '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
           initials(m.name) + '</div>' +
-          '<div>' +
-          '<div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
+          '<div><div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
           (m.email ? '<div style="font-size:11px;color:var(--text2)">' + esc(m.email) + '</div>' : '') +
           '</div></div>';
       }).join('');
 
-      // Use mousedown to preserve selection before blur
       dropdown.querySelectorAll('.mention-item').forEach(function(item) {
         item.addEventListener('mousedown', function(e) {
-          e.preventDefault();
+          e.preventDefault(); // keeps focus in textarea so selection is intact
           var name = item.dataset.name;
-          var isContentEditable = textarea.contentEditable === 'true';
-          if (isContentEditable) {
-            // Restore saved selection range
-            textarea.focus();
-            var sel = window.getSelection();
-            if (_savedRange && sel) {
-              sel.removeAllRanges();
-              sel.addRange(_savedRange);
-            }
-            var textBefore = _savedTextBefore || getTextBeforeCaret(textarea);
-            var atIdx2 = textBefore.lastIndexOf('@');
-            if (atIdx2 !== -1) {
-              var queryLen = textBefore.length - atIdx2;
-              for (var i = 0; i < queryLen; i++) {
-                document.execCommand('delete', false, null);
-              }
-            }
-            document.execCommand('insertText', false, '@' + name + ' ');
+          var id = item.dataset.id;
+          if (textarea.contentEditable === 'true') {
+            insertMentionAtCaret(name, id);
           } else {
             var val = textarea.value;
             var before = val.substring(0, mentionStart);
@@ -5396,27 +5449,11 @@ function bindDrawerEdits(issue) {
       });
     }
 
-    var _savedRange = null;
-    var _savedTextBefore = '';
-    if (textarea.contentEditable === 'true') {
-      textarea.addEventListener('keyup', function() {
-        var sel = window.getSelection();
-        if (sel && sel.rangeCount) {
-          _savedRange = sel.getRangeAt(0).cloneRange();
-          _savedTextBefore = getTextBeforeCaret(textarea);
-        }
-      });
-    }
     textarea.addEventListener('input', function() {
       var isContentEditable = textarea.contentEditable === 'true';
       var textBefore;
       if (isContentEditable) {
-        var sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return;
-        var range = sel.getRangeAt(0).cloneRange();
-        range.selectNodeContents(textarea);
-        range.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
-        textBefore = range.toString();
+        textBefore = getTextBeforeCaret(textarea);
       } else {
         textBefore = textarea.value.substring(0, textarea.selectionStart);
       }
@@ -5455,7 +5492,6 @@ function bindDrawerEdits(issue) {
       }
     });
 
-    // Close if clicking outside
     document.addEventListener('click', function(e) {
       if (!dropdown.contains(e.target) && e.target !== textarea) closeMention();
     });
