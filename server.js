@@ -399,11 +399,12 @@ app.post('/api/issues', wrap(async (req, res) => {
   const key = `${spaceKey}-${cnt + 1}`;
   const id = uid();
   const r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
-      assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
     [id, key, b.space_id, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
      b.type || 'task', b.priority || 'medium', b.assignee_id || null, b.reporter_id || null,
-     b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null, b.original_estimate || null]);
+     b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
+     b.original_estimate || null, b.team || null, b.product_type || null]);
   res.status(201).json(r.rows[0]);
 }));
 
