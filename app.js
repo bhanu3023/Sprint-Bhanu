@@ -6975,44 +6975,69 @@ document.addEventListener('DOMContentLoaded', function () {
         return '<option value="' + sp.id + '"' + (sp.id === selectedSpaceId ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
       }).join('');
     if (selectedSpaceId) sel.value = selectedSpaceId;
-    // Update sprint dropdown and custom fields when space changes
-    window._onIssueSpaceChange = function(spaceId) {
-      $('issueSpaceId').value = spaceId;
-      // Update sprints
-      var sprints = (S.data.sprints || []).filter(function(sp){ return sp.space_id === spaceId; });
-      var sprintSel = $('issueSprint');
-      if (sprintSel) {
-        sprintSel.innerHTML = '<option value="">None</option>' +
-          sprints.map(function(sp){ return '<option value="' + sp.id + '">' + esc(sp.name) + '</option>'; }).join('');
-      }
-      // Load custom fields for this space
-      var cfContainer = $('issueCustomFieldsContainer');
-      if (!cfContainer) return;
-      var cfs = (S.data.custom_fields || []).filter(function(f){ return f.space_id == spaceId && f.name !== "Team" && f.name !== "Product Type"; });
+  };
+  // Standalone space-change handler — always defined, called from every create-issue entry point
+  window._onIssueSpaceChange = function(spaceId) {
+    if ($('issueSpaceId')) $('issueSpaceId').value = spaceId || '';
+    // Update sprint dropdown
+    var sprints = (S.data.sprints || []).filter(function(sp){ return sp.space_id === spaceId; });
+    var sprintSel = $('issueSprint');
+    if (sprintSel) {
+      sprintSel.innerHTML = '<option value="">None</option>' +
+        sprints.map(function(sp){ return '<option value="' + sp.id + '">' + esc(sp.name) + '</option>'; }).join('');
+    }
+    // Render custom fields
+    var cfContainer = $('issueCustomFieldsContainer');
+    if (!cfContainer) return;
+    var cached = (S.data.custom_fields || []).filter(function(f){ return f.space_id == spaceId; });
+    function renderCF(cfs) {
+      var excluded = ['team', 'product type'];
+      cfs = cfs.filter(function(f){ return excluded.indexOf((f.name||'').toLowerCase()) < 0; });
       cfContainer.innerHTML = cfs.map(function(f) {
-        var opts = Array.isArray(f.options) ? f.options : (typeof f.options === 'string' ? JSON.parse(f.options) : []);
+        var opts = Array.isArray(f.options) ? f.options :
+          (typeof f.options === 'string' ? (function(){ try{ return JSON.parse(f.options); }catch(e){ return []; } })() : []);
         if (f.field_type === 'select') {
           return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' *' : '') + '</label>' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
             '<select class="input cf-field" data-cf-id="' + f.id + '">' +
             '<option value="">— Select —</option>' +
             opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
             '</select></div>';
         } else if (f.field_type === 'text') {
           return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' *' : '') + '</label>' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
             '<input type="text" class="input cf-field" data-cf-id="' + f.id + '"></div>';
+        } else if (f.field_type === 'number') {
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
+            '<input type="number" class="input cf-field" data-cf-id="' + f.id + '"></div>';
         }
         return '';
       }).join('');
-    };
+    }
+    if (cached.length) {
+      renderCF(cached);
+    } else if (spaceId) {
+      // Fetch from API if not in cache (e.g. coming from home/global view)
+      cfContainer.innerHTML = '';
+      api('/api/data?space_id=' + spaceId).then(function(data) {
+        if (data && data.custom_fields) {
+          // Merge into cache
+          S.data.custom_fields = (S.data.custom_fields || []).filter(function(f){ return f.space_id !== spaceId; }).concat(data.custom_fields);
+          renderCF(data.custom_fields);
+        }
+      }).catch(function(){});
+    } else {
+      cfContainer.innerHTML = '';
+    }
   };
+
   $('createIssueBtn').addEventListener('click', function () {
     resetIssueForm();
     $('issueSpaceId').value = S.currentSpace || '';
     $('issueModalTitle').textContent = 'Create Issue';
     window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(S.currentSpace);
-    if (window._onIssueSpaceChange) window._onIssueSpaceChange(S.currentSpace || '');
+    window._onIssueSpaceChange(S.currentSpace || '');
     populateIssueFormSelects();
     openModal('modal-issue');
   });
