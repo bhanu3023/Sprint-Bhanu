@@ -425,9 +425,19 @@ body.light .nav-divider {
 }
 
 body.light .topbar {
-  background: #ffffff;
-  border-bottom-color: #d0d7de;
+  background: #174F96;
+  border-bottom-color: #133f7a;
 }
+body.light .topbar .breadcrumb,
+body.light .topbar .breadcrumb-current,
+body.light .topbar .breadcrumb-sep { color: rgba(255,255,255,0.9); }
+body.light .topbar .breadcrumb-link { color: rgba(255,255,255,0.75); }
+body.light .topbar .breadcrumb-link:hover { color: #fff; text-decoration: underline; }
+body.light .topbar button,
+body.light .topbar .icon-btn,
+body.light .topbar .topbar-btn { color: rgba(255,255,255,0.85); }
+body.light .topbar button:hover,
+body.light .topbar .icon-btn:hover { color: #fff; background: rgba(255,255,255,0.12); }
 
 .topbar-left {
   display: flex;
