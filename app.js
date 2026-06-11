@@ -794,7 +794,17 @@ function renderTab(tab) {
     case 'backlog': renderBacklog(); break;
     case 'sprint': renderSprintBoard(); break;
     case 'reports': renderReports(); break;
-    case 'allwork': refreshData().then(async function() { await _initAwMultiSelects(); renderAllWork(); }); break;
+    case 'allwork': (async function() {
+      // Skip full refresh if data was loaded within last 30s for this space
+      var now = Date.now();
+      if (!S._dataLoadedAt || (now - S._dataLoadedAt) > 30000 || S._dataLoadedSpace !== S.currentSpace) {
+        await refreshData();
+        S._dataLoadedAt = now;
+        S._dataLoadedSpace = S.currentSpace;
+      }
+      await _initAwMultiSelects();
+      renderAllWork();
+    })(); break;
     case 'filters': renderFilters(); break;
     case 'space-settings': renderSpaceSettings(); break;
   }
@@ -3232,6 +3242,7 @@ window._addIssueToSprint = function (sprintId) {
   $('issueSpaceId').value = S.currentSpace;
   $('issueModalTitle').textContent = 'Create Issue';
   populateIssueFormSelects();
+  if (window._onIssueSpaceChange) window._onIssueSpaceChange(S.currentSpace || '');
   if (sprintId) $('issueSprint').value = sprintId;
   openModal('modal-issue');
 };
@@ -5032,6 +5043,8 @@ async function openDrawer(issueId) {
   $('drawerPoints').value = issue.story_points != null ? issue.story_points : '';
   $('drawerStartDate').value = fmtDateISO(issue.start_date);
   $('drawerDueDate').value = fmtDateISO(issue.due_date);
+  if ($('drawerTeam')) $('drawerTeam').value = issue.team || '';
+  if ($('drawerProductType')) $('drawerProductType').value = issue.product_type || '';
   // Estimate field removed
 
   var totalSpent = 0;
@@ -5110,11 +5123,13 @@ function startDrawerLiveSync(issueId) {
         }
         $('drawerReporter').value = fresh.reporter_id || '';
       }
-      if (activeId !== 'drawerSprint')    $('drawerSprint').value    = fresh.sprint_id  || '';
-      if (activeId !== 'drawerLabels')    $('drawerLabels').value    = fresh.labels     || '';
-      if (activeId !== 'drawerPoints')    $('drawerPoints').value    = fresh.story_points != null ? fresh.story_points : '';
-      if (activeId !== 'drawerStartDate') $('drawerStartDate').value = fresh.start_date ? fresh.start_date.slice(0,10) : '';
-      if (activeId !== 'drawerDueDate')   $('drawerDueDate').value   = fresh.due_date   ? fresh.due_date.slice(0,10)   : '';
+      if (activeId !== 'drawerSprint')      $('drawerSprint').value      = fresh.sprint_id   || '';
+      if (activeId !== 'drawerLabels')      $('drawerLabels').value      = fresh.labels      || '';
+      if (activeId !== 'drawerPoints')      $('drawerPoints').value      = fresh.story_points != null ? fresh.story_points : '';
+      if (activeId !== 'drawerStartDate')   $('drawerStartDate').value   = fresh.start_date  ? fresh.start_date.slice(0,10) : '';
+      if (activeId !== 'drawerDueDate')     $('drawerDueDate').value     = fresh.due_date    ? fresh.due_date.slice(0,10)   : '';
+      if (activeId !== 'drawerTeam'        && $('drawerTeam'))        $('drawerTeam').value        = fresh.team         || '';
+      if (activeId !== 'drawerProductType' && $('drawerProductType')) $('drawerProductType').value = fresh.product_type || '';
       if (activeId !== 'drawerTitle')     $('drawerTitle').textContent = fresh.title    || '';
       // Update time tracking, attachments, activity
       var timeSpentEl = document.querySelector('.drawer-time-spent');
@@ -5220,6 +5235,8 @@ function bindDrawerEdits(issue) {
   $('drawerPoints').oninput     = function () {
     autoSave('story_points', $('drawerPoints').value ? parseInt($('drawerPoints').value, 10) : null);
   };
+  if ($('drawerTeam'))        $('drawerTeam').onchange        = function () { autoSave('team',         $('drawerTeam').value || null); };
+  if ($('drawerProductType')) $('drawerProductType').onchange = function () { autoSave('product_type', $('drawerProductType').value || null); };
   $('drawerStartDate').onchange = function () {
     var val = $('drawerStartDate').value;
     autoSave('start_date', val || null);
@@ -5740,6 +5757,7 @@ window._showSubtaskInput = function() {
   $('issuePriority').value = 'medium';
   $('issueModalTitle').textContent = 'Create Subtask' + (parentIssue ? ' — linked to ' + (parentIssue.key || parentIssue.id) : '');
   populateIssueFormSelects();
+  if (window._onIssueSpaceChange) window._onIssueSpaceChange(spaceId || '');
   // Pre-fill sprint and assignee from parent
   if (parentIssue) {
     if (parentIssue.sprint_id) $('issueSprint').value = parentIssue.sprint_id;
