@@ -3273,7 +3273,7 @@ body.light .yw-table tbody tr:hover { background: #f6f8fa; }
   justify-content: space-between;
   padding: 28px 32px;
   margin: -24px -24px 28px;
-  background: linear-gradient(135deg, #0f1b35 0%, #1a2f5e 55%, #174F96 100%);
+  background: var(--bg2);
   border-bottom: 1px solid rgba(255,255,255,0.07);
   position: relative;
   overflow: hidden;
@@ -3282,8 +3282,12 @@ body.light .yw-table tbody tr:hover { background: #f6f8fa; }
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at 70% 50%, rgba(99,102,241,0.18) 0%, transparent 70%);
+  background: radial-gradient(ellipse at 70% 50%, rgba(255,255,255,0.04) 0%, transparent 70%);
   pointer-events: none;
+}
+body.light .db-hero {
+  background: #174F96;
+  border-bottom-color: #133f7a;
 }
 .db-greeting {
   font-size: 12px;
