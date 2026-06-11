@@ -177,13 +177,27 @@
 
         <!-- Your Work View -->
         <div class="view" id="view-yourwork" hidden>
-          <h1 class="view-title">Assigned to me</h1>
-          <div class="tabs">
-            <button class="tab active" data-yourwork-tab="assigned">Assigned to Me</button>
-            <button class="tab" data-yourwork-tab="reported">Reported by Me</button>
-            <button class="tab" data-yourwork-tab="recent">Recent</button>
+          <div class="yw-header">
+            <div class="yw-title-row">
+              <h1 class="yw-title">My Work</h1>
+              <div id="ywBadge" class="yw-badge"></div>
+            </div>
+            <div class="yw-tabs">
+              <button class="yw-tab active" data-yourwork-tab="assigned">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm5 5a5 5 0 0 0-10 0h10z"/></svg>
+                Assigned to Me
+              </button>
+              <button class="yw-tab" data-yourwork-tab="reported">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14 1a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4.414A2 2 0 0 0 3 11.586l-2 2V2a1 1 0 0 1 1-1h12zM2 0a2 2 0 0 0-2 2v12.793a.5.5 0 0 0 .854.353l2.853-2.853A1 1 0 0 1 4.414 12H14a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"/></svg>
+                Reported by Me
+              </button>
+              <button class="yw-tab" data-yourwork-tab="recent">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/></svg>
+                Recent
+              </button>
+            </div>
           </div>
-          <div id="yourWorkContent" class="table-container"></div>
+          <div id="yourWorkContent" class="yw-content"></div>
         </div>
 
         <!-- Global Reports View -->

@@ -1033,7 +1033,7 @@ function renderHome() {
 var _ywCache = null; // { assigned, reported, recent }
 
 function renderYourWork() {
-  var tabs = qsa('[data-yourwork-tab]');
+  var tabs = qsa('.yw-tab');
   tabs.forEach(function (t) {
     t.classList.toggle('active', t.dataset.yourworkTab === S.yourWorkTab);
     t.onclick = function () {
@@ -1042,45 +1042,60 @@ function renderYourWork() {
       renderYourWorkContent(_ywCache);
     };
   });
-  // Always fetch fresh from dedicated fast endpoint (cross-space, no space_id filter)
-  $('yourWorkContent').innerHTML = '<p class="text-muted">Loading…</p>';
+  $('yourWorkContent').innerHTML = '<div class="yw-empty"><p>Loading…</p></div>';
   api('/api/my-issues').then(function (data) {
     _ywCache = data;
+    // Update badge with assigned count
+    var badge = $('ywBadge');
+    if (badge) {
+      var n = (data.assigned || []).length;
+      badge.textContent = n;
+      badge.classList.toggle('visible', n > 0);
+    }
     renderYourWorkContent(data);
-  }).catch(function () {
-    $('yourWorkContent').innerHTML = '<p class="text-muted">Failed to load issues.</p>';
+  }).catch(function (e) {
+    $('yourWorkContent').innerHTML = '<div class="yw-empty">' +
+      '<svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 4.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 4.995z"/></svg>' +
+      '<h3>Could not load issues</h3><p>Please refresh the page or restart the server.</p></div>';
   });
 }
 
 function renderYourWorkContent(data) {
-  if (!data) { $('yourWorkContent').innerHTML = '<p class="text-muted">Loading…</p>'; return; }
-  var issues;
-  if (S.yourWorkTab === 'assigned') {
-    issues = data.assigned || [];
-  } else if (S.yourWorkTab === 'reported') {
-    issues = data.reported || [];
-  } else {
-    issues = data.recent || [];
+  if (!data) {
+    $('yourWorkContent').innerHTML = '<div class="yw-empty"><p>Loading…</p></div>';
+    return;
   }
+  var issues;
+  if (S.yourWorkTab === 'assigned') issues = data.assigned || [];
+  else if (S.yourWorkTab === 'reported') issues = data.reported || [];
+  else issues = data.recent || [];
 
   if (!issues.length) {
-    $('yourWorkContent').innerHTML = '<p class="text-muted placeholder-text">No issues found</p>';
+    var emptyMsg = S.yourWorkTab === 'assigned'
+      ? ['No issues assigned to you', 'Issues assigned to you will appear here.']
+      : S.yourWorkTab === 'reported'
+      ? ['No issues reported by you', 'Issues you create will appear here.']
+      : ['No recent activity', 'Recently updated issues will appear here.'];
+    $('yourWorkContent').innerHTML =
+      '<div class="yw-empty">' +
+      '<svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v13.5a.5.5 0 0 1-.777.416L8 13.101l-5.223 2.815A.5.5 0 0 1 2 15.5V2zm2-1a1 1 0 0 0-1 1v12.566l4.723-2.482a.5.5 0 0 1 .554 0L13 14.566V2a1 1 0 0 0-1-1H4z"/></svg>' +
+      '<h3>' + emptyMsg[0] + '</h3><p>' + emptyMsg[1] + '</p></div>';
     return;
   }
 
-  var html = '<table class="data-table"><thead><tr>' +
+  var html = '<table class="yw-table"><thead><tr>' +
     '<th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Space</th><th>Updated</th>' +
     '</tr></thead><tbody>';
   for (var i = 0; i < issues.length; i++) {
     var iss = issues[i];
-    html += '<tr class="clickable-row" onclick="openIssuePage(\'' + iss.id + '\')">' +
-      '<td class="issue-key">' + esc(issueKeyStr(iss)) + '</td>' +
-      '<td>' + esc(iss.title) + '</td>' +
-      '<td>' + typeIcon(iss.type) + ' ' + cap(iss.type) + '</td>' +
+    html += '<tr onclick="openIssuePage(\'' + iss.id + '\')">' +
+      '<td class="yw-key">' + esc(issueKeyStr(iss)) + '</td>' +
+      '<td class="yw-title-cell">' + esc(iss.title) + '</td>' +
+      '<td>' + typeIcon(iss.type) + ' <span style="font-size:12px;color:var(--text2)">' + cap(iss.type || '') + '</span></td>' +
       '<td>' + statusBadge(iss.status) + '</td>' +
       '<td>' + priorityBadge(iss.priority) + '</td>' +
-      '<td>' + esc(iss.space_name || '') + '</td>' +
-      '<td class="text-muted">' + relativeTime(iss.updated_at) + '</td></tr>';
+      '<td class="yw-space-cell">' + esc(iss.space_name || '') + '</td>' +
+      '<td class="yw-time-cell">' + relativeTime(iss.updated_at) + '</td></tr>';
   }
   html += '</tbody></table>';
   $('yourWorkContent').innerHTML = html;
