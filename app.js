@@ -5518,7 +5518,22 @@ function bindDrawerEdits(issue) {
     });
   }
     var _ci = $('drawerCommentInput');
-    var body = _ci ? (_ci.value !== undefined ? _ci.value.trim() : _ci.innerHTML.trim()) : '';
+    var body;
+    if (!_ci) { body = ''; }
+    else if (_ci.value !== undefined) {
+      body = _ci.value.trim();
+    } else {
+      // contenteditable: convert mention chips to plain @Name text, preserve line breaks
+      var _clone = _ci.cloneNode(true);
+      _clone.querySelectorAll('.mention-chip').forEach(function(chip) {
+        chip.replaceWith('@' + chip.textContent.replace(/^@/, ''));
+      });
+      _clone.querySelectorAll('br').forEach(function(br) { br.replaceWith('\n'); });
+      _clone.querySelectorAll('div,p').forEach(function(block) {
+        if (block.previousSibling) block.insertBefore(document.createTextNode('\n'), block.firstChild);
+      });
+      body = (_clone.textContent || '').trim();
+    }
     var commentBody = body;
     if (!body && !_commentFiles.length) return;
     // Disable button to prevent duplicate submissions
