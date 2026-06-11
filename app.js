@@ -6462,6 +6462,8 @@ function resetIssueForm() {
   $('issuePriority').value = 'medium';
   $('issuePoints').value = '';
   $('issueLabels').value = '';
+  if ($('issueTeam')) $('issueTeam').value = '';
+  if ($('issueProductType')) $('issueProductType').value = '';
   $('issueStartDate').value = fmtDateISO(new Date()); // default to today
   $('issueDueDate').value = '';
   var descEl = $('issueDescription'); if (descEl) { if (descEl.value !== undefined) descEl.value = ''; else descEl.innerHTML = ''; }
@@ -6499,22 +6501,8 @@ async function handleIssueSubmit(e) {
     toast('Please select a Space — it is mandatory', 'error');
     return;
   }
-  var teamVal = $('issueTeamField') && $('issueTeamField').value;
-  if (teamVal == null || teamVal == '') {
-    toast('Please select a Team — it is mandatory', 'error');
-    $('issueTeamField').focus();
-    $('issueTeamField').style.border = '2px solid #e53e3e';
-    setTimeout(function(){ $('issueTeamField').style.border = ''; }, 3000);
-    return;
-  }
-  var productVal = $('issueProductTypeField') && $('issueProductTypeField').value;
-  if (productVal == null || productVal == '') {
-    toast('Please select a Product Type — it is mandatory', 'error');
-    $('issueProductTypeField').focus();
-    $('issueProductTypeField').style.border = '2px solid #e53e3e';
-    setTimeout(function(){ $('issueProductTypeField').style.border = ''; }, 3000);
-    return;
-  }
+  var teamVal = $('issueTeam') ? $('issueTeam').value : '';
+  var productVal = $('issueProductType') ? $('issueProductType').value : '';
   var startVal = $('issueStartDate').value;
   // Validate due date does not exceed sprint end date
   var dueVal = $('issueDueDate').value;
@@ -6546,6 +6534,8 @@ async function handleIssueSubmit(e) {
     reporter_id: $('issueReporter').value || S.currentUser || null,
     sprint_id: $('issueSprint').value || null,
     story_points: $('issuePoints').value ? parseInt($('issuePoints').value, 10) : null,
+    team: $('issueTeam') ? ($('issueTeam').value || null) : null,
+    product_type: $('issueProductType') ? ($('issueProductType').value || null) : null,
     labels: $('issueLabels').value,
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
@@ -6611,17 +6601,7 @@ async function handleIssueSubmit(e) {
           api('/api/issues/' + created.id + '/field-values/' + f.dataset.cfId, 'PUT', { value: f.value }).catch(function(){});
         }
       });
-      // Save static Team and Product Type fields
-      var spaceId = $('issueSpaceId').value || S.currentSpace;
-      var teamVal = $('issueTeamField') && $('issueTeamField').value;
-      var productVal = $('issueProductTypeField') && $('issueProductTypeField').value;
-      if (teamVal || productVal) {
-        var cfs = (S.data.custom_fields || []).filter(function(f){ return f.space_id == spaceId; });
-        var teamCF = cfs.find(function(f){ return f.name === 'Team'; });
-        var productCF = cfs.find(function(f){ return f.name === 'Product Type'; });
-        if (teamCF && teamVal) await api('/api/issues/' + created.id + '/field-values/' + teamCF.id, 'PUT', { value: teamVal }).catch(function(){});
-        if (productCF && productVal) await api('/api/issues/' + created.id + '/field-values/' + productCF.id, 'PUT', { value: productVal }).catch(function(){});
-      }
+      // team and product_type are saved directly via payload
     }
     // Upload any attached files
     if (created && created.id && _selectedFiles.length) {
