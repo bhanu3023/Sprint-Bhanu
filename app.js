@@ -4119,14 +4119,20 @@ function renderAllWork() {
   var col = S.allWorkSort.col;
   var dir = S.allWorkSort.dir;
   issues.sort(function (a, b) {
-    var va = col === 'key' ? a.id : (col === 'assignee' ? (a.assignee_name || '') : a[col]);
-    var vb = col === 'key' ? b.id : (col === 'assignee' ? (b.assignee_name || '') : b[col]);
+    if (col === 'key') {
+      // Extract numeric part from key string e.g. "ENG-12" → 12
+      var na = parseInt((issueKeyStr(a) || '').replace(/^[^-]+-/, ''), 10) || 0;
+      var nb = parseInt((issueKeyStr(b) || '').replace(/^[^-]+-/, ''), 10) || 0;
+      return dir === 'asc' ? na - nb : nb - na;
+    }
+    var va = col === 'assignee' ? (a.assignee_name || '') : a[col];
+    var vb = col === 'assignee' ? (b.assignee_name || '') : b[col];
     if (va == null) va = '';
     if (vb == null) vb = '';
     if (typeof va === 'string') va = va.toLowerCase();
     if (typeof vb === 'string') vb = vb.toLowerCase();
-    if (va < vb) return dir === 'asc' ? 1 : -1;
-    if (va > vb) return dir === 'asc' ? -1 : 1;
+    if (va < vb) return dir === 'asc' ? -1 : 1;
+    if (va > vb) return dir === 'asc' ? 1 : -1;
     return 0;
   });
 
