@@ -1030,6 +1030,8 @@ function renderHome() {
 // ═══════════════════════════════════════════════════════════
 // YOUR WORK VIEW
 // ═══════════════════════════════════════════════════════════
+var _ywCache = null; // { assigned, reported, recent }
+
 function renderYourWork() {
   var tabs = qsa('[data-yourwork-tab]');
   tabs.forEach(function (t) {
@@ -1037,21 +1039,28 @@ function renderYourWork() {
     t.onclick = function () {
       S.yourWorkTab = t.dataset.yourworkTab;
       tabs.forEach(function (x) { x.classList.toggle('active', x.dataset.yourworkTab === S.yourWorkTab); });
-      renderYourWorkContent();
+      renderYourWorkContent(_ywCache);
     };
   });
-  renderYourWorkContent();
+  // Always fetch fresh from dedicated fast endpoint (cross-space, no space_id filter)
+  $('yourWorkContent').innerHTML = '<p class="text-muted">Loading…</p>';
+  api('/api/my-issues').then(function (data) {
+    _ywCache = data;
+    renderYourWorkContent(data);
+  }).catch(function () {
+    $('yourWorkContent').innerHTML = '<p class="text-muted">Failed to load issues.</p>';
+  });
 }
 
-function renderYourWorkContent() {
-  var allIssues = S.data.issues || [];
+function renderYourWorkContent(data) {
+  if (!data) { $('yourWorkContent').innerHTML = '<p class="text-muted">Loading…</p>'; return; }
   var issues;
   if (S.yourWorkTab === 'assigned') {
-    issues = allIssues.filter(function (i) { return i.assignee_id == S.currentUser; });
+    issues = data.assigned || [];
   } else if (S.yourWorkTab === 'reported') {
-    issues = allIssues.filter(function (i) { return i.reporter_id == S.currentUser; });
+    issues = data.reported || [];
   } else {
-    issues = allIssues.slice().sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); }).slice(0, 30);
+    issues = data.recent || [];
   }
 
   if (!issues.length) {
@@ -1064,14 +1073,13 @@ function renderYourWorkContent() {
     '</tr></thead><tbody>';
   for (var i = 0; i < issues.length; i++) {
     var iss = issues[i];
-    var space = getSpace(iss.space_id);
     html += '<tr class="clickable-row" onclick="openIssuePage(\'' + iss.id + '\')">' +
       '<td class="issue-key">' + esc(issueKeyStr(iss)) + '</td>' +
       '<td>' + esc(iss.title) + '</td>' +
       '<td>' + typeIcon(iss.type) + ' ' + cap(iss.type) + '</td>' +
       '<td>' + statusBadge(iss.status) + '</td>' +
       '<td>' + priorityBadge(iss.priority) + '</td>' +
-      '<td>' + esc(space ? space.name : '') + '</td>' +
+      '<td>' + esc(iss.space_name || '') + '</td>' +
       '<td class="text-muted">' + relativeTime(iss.updated_at) + '</td></tr>';
   }
   html += '</tbody></table>';
