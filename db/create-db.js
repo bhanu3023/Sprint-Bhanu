@@ -9,11 +9,8 @@ function hashPasswordSync(password) {
 }
 
 const pool = new Pool({
-  database: 'sprintboard',
-  user: 'postgres',
-  password: 'postgres',
-  host: 'localhost',
-  port: 5432,
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5433/sprintboard',
+  ssl: false,
 });
 
 const uid = () => crypto.randomUUID();
@@ -189,12 +186,13 @@ async function main() {
         key VARCHAR UNIQUE,
         title VARCHAR NOT NULL,
         description TEXT,
+        fix_description TEXT,
         type VARCHAR CHECK (type IN ('epic','story','task','bug','subtask')) DEFAULT 'task',
         status VARCHAR CHECK (status IN ('To Do','In Progress','In Review','Done')) DEFAULT 'To Do',
         priority VARCHAR CHECK (priority IN ('highest','high','medium','low','lowest')) DEFAULT 'medium',
         assignee_id VARCHAR REFERENCES users(id),
         reporter_id VARCHAR REFERENCES users(id),
-        points INTEGER,
+        story_points INTEGER,
         labels TEXT[] DEFAULT '{}',
         start_date DATE,
         due_date DATE,
@@ -202,7 +200,11 @@ async function main() {
         time_spent INTEGER DEFAULT 0,
         position INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
+        updated_at TIMESTAMP DEFAULT NOW(),
+        deleted_at TIMESTAMP,
+        deleted_by UUID,
+        team VARCHAR(50),
+        product_type VARCHAR(50)
       )
     `);
 
@@ -394,21 +396,21 @@ async function main() {
     console.log('👤 Seeding space members...');
     const memberships = [
       // Engineering: all 6 users
-      { space: spaceEng, user: sarah,  role: 'admin'   },
-      { space: spaceEng, user: alex,   role: 'manager' },
-      { space: spaceEng, user: jordan, role: 'member'  },
-      { space: spaceEng, user: maya,   role: 'member'  },
-      { space: spaceEng, user: liam,   role: 'member'  },
-      { space: spaceEng, user: priya,  role: 'member'  },
+      { space: spaceEng, user: sarah,  role: 'manager'  },
+      { space: spaceEng, user: alex,   role: 'manager'  },
+      { space: spaceEng, user: jordan, role: 'member'   },
+      { space: spaceEng, user: maya,   role: 'member'   },
+      { space: spaceEng, user: liam,   role: 'member'   },
+      { space: spaceEng, user: priya,  role: 'member'   },
       // Design System: 4 users
-      { space: spaceDsn, user: alex,   role: 'admin'   },
-      { space: spaceDsn, user: maya,   role: 'manager' },
-      { space: spaceDsn, user: priya,  role: 'member'  },
-      { space: spaceDsn, user: sarah,  role: 'member'  },
+      { space: spaceDsn, user: alex,   role: 'manager'  },
+      { space: spaceDsn, user: maya,   role: 'manager'  },
+      { space: spaceDsn, user: priya,  role: 'member'   },
+      { space: spaceDsn, user: sarah,  role: 'member'   },
       // Operations: 3 users
-      { space: spaceOps, user: jordan, role: 'admin'   },
-      { space: spaceOps, user: liam,   role: 'member'  },
-      { space: spaceOps, user: sarah,  role: 'viewer'  },
+      { space: spaceOps, user: jordan, role: 'manager'  },
+      { space: spaceOps, user: liam,   role: 'member'   },
+      { space: spaceOps, user: sarah,  role: 'viewer'   },
     ];
 
     for (const m of memberships) {

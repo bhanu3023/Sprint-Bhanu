@@ -553,31 +553,59 @@
               <div class="drawer-section-body">
                 <div class="drawer-detail-row">
                   <span class="drawer-detail-label">Description</span>
-                  <div id="drawerDescToolbar" class="rich-toolbar" style="display:none">
-                    <button onclick="document.execCommand('bold')" title="Bold"><b>B</b></button>
-                    <button onclick="document.execCommand('italic')" title="Italic"><i>I</i></button>
-                    <button onclick="document.execCommand('underline')" title="Underline"><u>U</u></button>
-                    <span class="rich-sep"></span>
-                    <button onclick="document.execCommand('insertUnorderedList')" title="Bullet List">&#8226;&#8212;</button>
-                    <button onclick="document.execCommand('insertOrderedList')" title="Numbered List">1&#8212;</button>
-                    <span class="rich-sep"></span>
-                    <button onclick="richInsertLink('drawerDesc')" title="Link">&#128279;</button>
-                    <button onclick="richInsertImage('drawerDesc')" title="Image">&#128444;</button>
-                    <span class="rich-sep"></span>
-                    <select onchange="document.execCommand('fontSize',false,this.value);this.value=''" title="Font Size">
-                      <option value="">Tt</option>
-                      <option value="1">Small</option>
-                      <option value="3">Normal</option>
-                      <option value="5">Large</option>
-                      <option value="7">Huge</option>
-                    </select>
-                    <button onclick="document.execCommand('removeFormat')" title="Clear Format">&#10006;</button>
+                  <div id="drawerDescEditor" class="jira-editor-wrap">
+                    <div id="drawerDescToolbar" class="jira-editor-toolbar">
+                      <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerDesc');this.value=''" title="Text style">
+                        <option value="">Normal text</option>
+                        <option value="h1">Heading 1</option>
+                        <option value="h2">Heading 2</option>
+                        <option value="h3">Heading 3</option>
+                        <option value="p">Normal text</option>
+                      </select>
+                      <span class="jira-tb-sep"></span>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('bold')" title="Bold"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('italic')" title="Italic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('underline')" title="Underline"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('strikeThrough')" title="Strikethrough"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.1 2.4 3.2 3.1H3"/><path d="M11.1 20.4c2.8 0 5.2-.7 5.2-3.8 0-1.6-1.1-2.5-3.3-3.4H21"/><line x1="3" y1="12" x2="21" y2="12"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('superscript')" title="Superscript"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 19 8-8"/><path d="m12 19-8-8"/><path d="M20 12h-4c0-1.5.442-2 1.5-2.5S20 8.334 20 7.002c0-.472-.17-.93-.484-1.29a2.105 2.105 0 0 0-2.617-.436c-.42.239-.738.614-.899 1.06"/></svg></button>
+                      <span class="jira-tb-sep"></span>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('insertUnorderedList')" title="Bullet list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('insertOrderedList')" title="Numbered list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richIndent('drawerDesc','indent')" title="Indent"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><path d="m3 12 5 3-5 3z"/><line x1="11" y1="12" x2="21" y2="12"/><line x1="11" y1="18" x2="21" y2="18"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richIndent('drawerDesc','outdent')" title="Outdent"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><path d="m11 12-5 3 5 3z"/><line x1="13" y1="12" x2="21" y2="12"/><line x1="13" y1="18" x2="21" y2="18"/></svg></button>
+                      <span class="jira-tb-sep"></span>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richInsertLink('drawerDesc')" title="Insert link"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richInsertCode('drawerDesc')" title="Inline code"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richInsertCodeBlock('drawerDesc')" title="Code block"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 9-3 3 3 3"/><path d="m14 9 3 3-3 3"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richInsertQuote('drawerDesc')" title="Block quote"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg></button>
+                      <span class="jira-tb-sep"></span>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('removeFormat')" title="Clear formatting"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M5 20h6"/><path d="M13 4l-8 16"/><line x1="17" y1="11" x2="22" y2="16"/><line x1="22" y1="11" x2="17" y2="16"/></svg></button>
+                    </div>
+                    <div id="drawerDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a description..."></div>
                   </div>
-                  <div id="drawerDesc" class="drawer-desc" contenteditable="true" data-placeholder="Add a description..."></div>
                 </div>
                 <div class="drawer-detail-row">
                   <span class="drawer-detail-label">Fix Description</span>
-                  <div id="drawerFixDesc" class="drawer-desc" contenteditable="true" data-placeholder="Add a fix description..."></div>
+                  <div id="drawerFixDescEditor" class="jira-editor-wrap">
+                    <div id="drawerFixDescToolbar" class="jira-editor-toolbar">
+                      <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerFixDesc');this.value=''" title="Text style">
+                        <option value="">Normal text</option>
+                        <option value="h1">Heading 1</option>
+                        <option value="h2">Heading 2</option>
+                        <option value="h3">Heading 3</option>
+                        <option value="p">Normal text</option>
+                      </select>
+                      <span class="jira-tb-sep"></span>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('bold')" title="Bold"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('italic')" title="Italic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('underline')" title="Underline"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('insertUnorderedList')" title="Bullet list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('insertOrderedList')" title="Numbered list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richInsertLink('drawerFixDesc')" title="Insert link"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+                      <button class="jira-tb-btn" onmousedown="event.preventDefault();richInsertCode('drawerFixDesc')" title="Inline code"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+                    </div>
+                    <div id="drawerFixDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a fix description..."></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -634,19 +662,35 @@
                 <div id="drawerCommentBox" class="drawer-comment-box">
                   <div id="drawerCommentAvatar" class="drawer-comment-avatar"></div>
                   <div class="drawer-comment-form jira-comment-form" style="position:relative">
-                    <!-- Jira-style toolbar -->
-                    <div class="jira-comment-toolbar" id="drawerCommentToolbar">
-                      <button type="button" onclick="document.execCommand('bold')" title="Bold" class="jira-toolbar-btn"><b>B</b></button>
-                      <button type="button" onclick="document.execCommand('italic')" title="Italic" class="jira-toolbar-btn"><i>I</i></button>
-                      <button type="button" onclick="document.execCommand('underline')" title="Underline" class="jira-toolbar-btn"><u>U</u></button>
-                      <span class="jira-toolbar-divider"></span>
-                      <button type="button" onclick="document.execCommand('insertUnorderedList')" title="Bullet list" class="jira-toolbar-btn">☰</button>
-                      <button type="button" onclick="document.execCommand('insertOrderedList')" title="Numbered list" class="jira-toolbar-btn">1.</button>
-                      <span class="jira-toolbar-divider"></span>
-                      <button type="button" onclick="window._insertCommentCode()" title="Code" class="jira-toolbar-btn">&lt;/&gt;</button>
+                    <!-- Jira-style rich comment editor -->
+                    <div class="jira-comment-editor-wrap" id="drawerCommentEditorWrap">
+                      <div class="jira-comment-toolbar" id="drawerCommentToolbar">
+                        <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerCommentInput');this.value=''" title="Text style">
+                          <option value="">Normal text</option>
+                          <option value="h1">Heading 1</option>
+                          <option value="h2">Heading 2</option>
+                          <option value="h3">Heading 3</option>
+                          <option value="p">Normal text</option>
+                        </select>
+                        <span class="jira-tb-sep"></span>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('bold')" title="Bold"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('italic')" title="Italic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('underline')" title="Underline"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('strikeThrough')" title="Strikethrough"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.1 2.4 3.2 3.1H3"/><path d="M11.1 20.4c2.8 0 5.2-.7 5.2-3.8 0-1.6-1.1-2.5-3.3-3.4H21"/><line x1="3" y1="12" x2="21" y2="12"/></svg></button>
+                        <span class="jira-tb-sep"></span>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('insertUnorderedList')" title="Bullet list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('insertOrderedList')" title="Numbered list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();richIndent('drawerCommentInput','indent')" title="Indent"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><path d="m3 12 5 3-5 3z"/><line x1="11" y1="12" x2="21" y2="12"/><line x1="11" y1="18" x2="21" y2="18"/></svg></button>
+                        <span class="jira-tb-sep"></span>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();richInsertLink('drawerCommentInput')" title="Insert link"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();richInsertCode('drawerCommentInput')" title="Inline code"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();richInsertCodeBlock('drawerCommentInput')" title="Code block"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 9-3 3 3 3"/><path d="m14 9 3 3-3 3"/></svg></button>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();richInsertQuote('drawerCommentInput')" title="Block quote"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg></button>
+                        <span class="jira-tb-sep"></span>
+                        <button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand('removeFormat')" title="Clear formatting"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M5 20h6"/><path d="M13 4l-8 16"/><line x1="17" y1="11" x2="22" y2="16"/><line x1="22" y1="11" x2="17" y2="16"/></svg></button>
+                      </div>
+                      <div id="drawerCommentInput" class="jira-comment-input jira-editor-body" contenteditable="true" data-placeholder="Add a comment... (type @ to mention someone)"></div>
                     </div>
-                    <!-- Comment input -->
-                    <textarea id="drawerCommentInput" class="jira-comment-input" placeholder="Add a comment... (type @ to mention someone)" rows="3" style="resize:vertical;width:100%;border:none;outline:none;font-size:14px;line-height:1.6;padding:10px 12px;background:transparent;font-family:inherit"></textarea>
                     <!-- @mention dropdown -->
                     <div id="mentionDropdown" style="display:none;position:absolute;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;max-height:200px;overflow-y:auto;"></div>
                     <div id="drawerCommentFileList" class="comment-file-list"></div>

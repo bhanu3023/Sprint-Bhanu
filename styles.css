@@ -1416,9 +1416,16 @@ body.light .drawer-sidebar { background: #f7f8fa; }
 /* Comment input box */
 .drawer-comment-box { display: flex; gap: 10px; margin-bottom: 16px; align-items: flex-start; }
 .drawer-comment-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; }
-.drawer-comment-form { flex: 1; }
+.drawer-comment-form { flex: 1; min-width: 0; }
 .drawer-comment-form textarea { width: 100%; min-height: 60px; resize: vertical; }
-.drawer-comment-actions { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
+.drawer-comment-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+
+/* Jira comment editor wrapper */
+.jira-comment-editor-wrap { border: 2px solid var(--border); border-radius: 6px; background: var(--bg); transition: border-color .15s; overflow: hidden; }
+.jira-comment-editor-wrap:focus-within { border-color: #0052cc; }
+.jira-comment-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 1px; padding: 5px 8px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+#drawerCommentInput.jira-editor-body { min-height: 80px; max-height: 300px; padding: 10px 12px; font-size: 14px; line-height: 1.6; color: var(--text); outline: none; overflow-y: auto; white-space: pre-wrap; word-break: break-word; background: var(--bg); }
+#drawerCommentInput.jira-editor-body:empty::before { content: attr(data-placeholder); color: var(--text3); font-style: italic; pointer-events: none; }
 .comment-attach-btn { cursor: pointer; }
 .comment-file-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .comment-file-tag { display: inline-flex; align-items: center; gap: 4px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 12px; color: var(--text2); }
@@ -3088,3 +3095,27 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 /* Description toolbar - hidden by default, show on focus */
 .rich-toolbar { display: none !important; }
 .rich-toolbar.active { display: flex !important; }
+
+/* ── Jira-style description editor ── */
+.jira-editor-wrap { border: 2px solid transparent; border-radius: 4px; transition: border-color .15s; background: transparent; }
+.jira-editor-wrap:focus-within { border-color: #0052cc; background: var(--bg); }
+.jira-editor-toolbar { display: none; align-items: center; gap: 1px; flex-wrap: wrap; padding: 4px 6px; background: var(--bg2); border-bottom: 1px solid var(--border); border-radius: 3px 3px 0 0; }
+.jira-editor-toolbar.active { display: flex; }
+.jira-tb-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 26px; border: none; background: transparent; border-radius: 3px; cursor: pointer; color: var(--text2); padding: 0; transition: background .1s, color .1s; }
+.jira-tb-btn:hover { background: var(--bg3); color: var(--text); }
+.jira-tb-btn.active-fmt { background: #e9f2ff; color: #0052cc; }
+.jira-tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; flex-shrink: 0; }
+.jira-tb-select { height: 26px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text2); font-size: 12px; padding: 0 6px; cursor: pointer; outline: none; max-width: 110px; }
+.jira-tb-select:hover { border-color: var(--text2); }
+.jira-editor-body { min-height: 80px; max-height: 400px; overflow-y: auto; padding: 10px 12px; font-size: 14px; line-height: 1.714; color: var(--text); outline: none; border-radius: 0 0 3px 3px; white-space: pre-wrap; word-break: break-word; }
+.jira-editor-body:empty::before { content: attr(data-placeholder); color: var(--text3); font-style: italic; pointer-events: none; }
+.jira-editor-body h1 { font-size: 20px; font-weight: 700; margin: 10px 0 4px; line-height: 1.3; }
+.jira-editor-body h2 { font-size: 16px; font-weight: 600; margin: 8px 0 4px; line-height: 1.3; }
+.jira-editor-body h3 { font-size: 14px; font-weight: 600; margin: 6px 0 2px; line-height: 1.4; }
+.jira-editor-body ul, .jira-editor-body ol { padding-left: 24px; margin: 4px 0; }
+.jira-editor-body li { margin: 2px 0; line-height: 1.6; }
+.jira-editor-body code { background: var(--bg3); padding: 1px 5px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 12px; color: #e74c3c; }
+.jira-editor-body pre { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; font-family: 'Courier New', monospace; font-size: 12px; overflow-x: auto; margin: 8px 0; white-space: pre-wrap; line-height: 1.6; }
+.jira-editor-body blockquote { border-left: 3px solid #0052cc; margin: 8px 0; padding: 4px 0 4px 14px; color: var(--text2); font-style: italic; }
+.jira-editor-body a { color: #0052cc; text-decoration: underline; }
+.jira-editor-body p { margin: 4px 0; }

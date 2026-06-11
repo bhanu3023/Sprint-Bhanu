@@ -5412,7 +5412,7 @@ function bindDrawerEdits(issue) {
     });
   }
     var _ci = $('drawerCommentInput');
-    var body = _ci ? _ci.value.trim() : '';
+    var body = _ci ? (_ci.value !== undefined ? _ci.value.trim() : _ci.innerHTML.trim()) : '';
     var commentBody = body;
     if (!body && !_commentFiles.length) return;
     // Disable button to prevent duplicate submissions
@@ -5464,7 +5464,7 @@ function bindDrawerEdits(issue) {
         _drawerIssueData.comments = (_drawerIssueData.comments || []).concat([tempComment]);
         renderDrawerActivity(_drawerIssueData);
       }
-      $('drawerCommentInput').value = '';
+      var _ci2 = $('drawerCommentInput'); if (_ci2) { if (_ci2.value !== undefined) _ci2.value = ''; else _ci2.innerHTML = ''; }
       // Re-enable button immediately
       submitBtn._submitting = false;
       submitBtn.disabled = false;
@@ -5472,7 +5472,7 @@ function bindDrawerEdits(issue) {
       // Post in background then refresh
       await api('/api/comments', 'POST', { issue_id: issueId, user_id: S.currentUser, body: commentBody });
     } else {
-      $('drawerCommentInput').value = '';
+      var _ci3 = $('drawerCommentInput'); if (_ci3) { if (_ci3.value !== undefined) _ci3.value = ''; else _ci3.innerHTML = ''; }
       // Re-enable button
       submitBtn._submitting = false;
       submitBtn.disabled = false;
@@ -8238,27 +8238,99 @@ function awInlinePriority(e, issueId, current) {
   });
 }
 
-// ── Rich text toolbar show/hide ─────────────────────────
-document.addEventListener('click', function(e) {
-  if (e.target.id === 'drawerDesc') {
-    var tb = document.getElementById('drawerDescToolbar');
-    if (tb) tb.classList.add('active');
-  }
-});
-document.addEventListener('focusout', function(e) { // focusout
-  if (e.target.id === 'drawerDesc') {
-    setTimeout(function() {
-      var tb = document.getElementById('drawerDescToolbar');
-      if (tb && !tb.contains(document.activeElement)) {
-        tb.classList.remove('active');
-      }
-    }, 200);
-  }
+// ── Jira-style editor toolbar show/hide ─────────────────
+var _jiraEditorPairs = [
+  { body: 'drawerDesc',         toolbar: 'drawerDescToolbar' },
+  { body: 'drawerFixDesc',      toolbar: 'drawerFixDescToolbar' },
+  { body: 'drawerCommentInput', toolbar: 'drawerCommentToolbar' }
+];
+
+document.addEventListener('focusin', function(e) {
+  _jiraEditorPairs.forEach(function(p) {
+    if (e.target.id === p.body) {
+      var tb = document.getElementById(p.toolbar);
+      if (tb) tb.classList.add('active');
+    }
+  });
 });
 
+document.addEventListener('focusout', function(e) {
+  _jiraEditorPairs.forEach(function(p) {
+    if (e.target.id === p.body) {
+      setTimeout(function() {
+        var tb = document.getElementById(p.toolbar);
+        var body = document.getElementById(p.body);
+        if (tb && body && !tb.contains(document.activeElement) && document.activeElement !== body) {
+          tb.classList.remove('active');
+        }
+      }, 150);
+    }
+  });
+});
+
+// Update toolbar button active states on selection change
+document.addEventListener('selectionchange', function() {
+  _jiraEditorPairs.forEach(function(p) {
+    var tb = document.getElementById(p.toolbar);
+    if (!tb || !tb.classList.contains('active')) return;
+    tb.querySelectorAll('.jira-tb-btn[title]').forEach(function(btn) {
+      var cmd = { 'Bold': 'bold', 'Italic': 'italic', 'Underline': 'underline', 'Strikethrough': 'strikeThrough' }[btn.title];
+      if (cmd) {
+        try { btn.classList.toggle('active-fmt', document.queryCommandState(cmd)); } catch(e) {}
+      }
+    });
+  });
+});
+
+function richFormatBlock(tag, elId) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  el.focus();
+  if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'p') {
+    document.execCommand('formatBlock', false, tag);
+  }
+}
+
+function richIndent(elId, dir) {
+  document.getElementById(elId) && document.getElementById(elId).focus();
+  document.execCommand(dir === 'indent' ? 'indent' : 'outdent');
+}
+
 function richInsertLink(elId) {
-  var url = prompt('Enter URL:');
-  if (url) document.execCommand('createLink', false, url);
+  var el = document.getElementById(elId);
+  if (el) el.focus();
+  var sel = window.getSelection();
+  var selectedText = sel && sel.toString() ? sel.toString() : '';
+  var url = prompt('Enter URL:', 'https://');
+  if (!url) return;
+  if (selectedText) {
+    document.execCommand('createLink', false, url);
+  } else {
+    var text = prompt('Link text:', url) || url;
+    document.execCommand('insertHTML', false, '<a href="' + url + '" target="_blank">' + text + '</a>');
+  }
+}
+
+function richInsertCode(elId) {
+  var el = document.getElementById(elId);
+  if (el) el.focus();
+  var sel = window.getSelection();
+  var text = sel && sel.toString() ? sel.toString() : 'code';
+  document.execCommand('insertHTML', false, '<code>' + text + '</code>');
+}
+
+function richInsertCodeBlock(elId) {
+  var el = document.getElementById(elId);
+  if (el) el.focus();
+  var sel = window.getSelection();
+  var text = sel && sel.toString() ? sel.toString() : 'Enter code here';
+  document.execCommand('insertHTML', false, '<pre>' + text + '</pre><p><br></p>');
+}
+
+function richInsertQuote(elId) {
+  var el = document.getElementById(elId);
+  if (el) el.focus();
+  document.execCommand('formatBlock', false, 'blockquote');
 }
 
 function richInsertImage(elId) {
