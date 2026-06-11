@@ -1,0 +1,493 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum GlobalRole {
+  SUPER_ADMIN
+  ADMIN
+  MEMBER
+}
+
+enum ProjectRole {
+  OWNER
+  ADMIN
+  SCRUM_MASTER
+  MEMBER
+  VIEWER
+}
+
+enum SprintStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+}
+
+enum IssueType {
+  EPIC
+  STORY
+  TASK
+  BUG
+  SUBTASK
+}
+
+enum Priority {
+  HIGHEST
+  HIGH
+  MEDIUM
+  LOW
+  LOWEST
+}
+
+enum StatusCategory {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum NotifType {
+  ISSUE_ASSIGNED
+  ISSUE_UPDATED
+  COMMENT_ADDED
+  MENTIONED
+  SPRINT_STARTED
+  SPRINT_COMPLETED
+  STATUS_CHANGED
+  MEMBER_ADDED
+}
+
+enum LinkType {
+  BLOCKS
+  IS_BLOCKED_BY
+  RELATES_TO
+  DUPLICATES
+  IS_DUPLICATED_BY
+  CLONES
+  IS_CLONED_BY
+}
+
+// ─── Auth / Users ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String
+  passwordHash String
+  avatarUrl    String?
+  avatarColor  String     @default("#6366F1")
+  role         GlobalRole @default(MEMBER)
+  isActive     Boolean    @default(true)
+  timezone     String     @default("UTC")
+  bio          String?
+  jobTitle     String?
+  department   String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Auth relations
+  accounts Account[]
+  sessions Session[]
+
+  // App relations
+  projectMembers    ProjectMember[]
+  assignedIssues    Issue[]         @relation("AssignedIssues")
+  reportedIssues    Issue[]         @relation("ReportedIssues")
+  comments          Comment[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  watchedIssues     IssueWatcher[]
+  ownedProjects     Project[]       @relation("ProjectOwner")
+  uploadedAttachments Attachment[]
+
+  @@map("users")
+}
+
+// NextAuth models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expires   DateTime
+  createdAt DateTime @default(now())
+
+  @@map("password_reset_tokens")
+}
+
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+model Project {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  name         String
+  description  String?
+  avatarColor  String   @default("#6366F1")
+  avatarUrl    String?
+  issueCounter Int      @default(0)
+  ownerId      String
+  isArchived   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  owner           User            @relation("ProjectOwner", fields: [ownerId], references: [id])
+  members         ProjectMember[]
+  sprints         Sprint[]
+  issues          Issue[]
+  columns         BoardColumn[]
+  workflowStatuses WorkflowStatus[]
+  workflowTransitions WorkflowTransition[]
+  labels          Label[]
+  auditLogs       AuditLog[]
+  slaPolicy       SlaPolicy?
+  projectFields   ProjectField[]
+
+  @@map("projects")
+}
+
+model ProjectField {
+  id        String  @id @default(cuid())
+  projectId String
+  fieldKey  String
+  isEnabled Boolean @default(true)
+  order     Int     @default(0)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, fieldKey])
+  @@map("project_fields")
+}
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  projectId String
+  userId    String
+  role      ProjectRole @default(MEMBER)
+  joinedAt  DateTime    @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+// ─── Board ────────────────────────────────────────────────────────────────────
+
+model BoardColumn {
+  id        String @id @default(cuid())
+  projectId String
+  name      String
+  order     Int
+  color     String @default("#E2E8F0")
+  wipLimit  Int?
+  statusId  String
+
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status  WorkflowStatus @relation(fields: [statusId], references: [id])
+  issues  Issue[]
+
+  @@map("board_columns")
+}
+
+// ─── Sprints ──────────────────────────────────────────────────────────────────
+
+model Sprint {
+  id          String       @id @default(cuid())
+  projectId   String
+  name        String
+  goal        String?
+  status      SprintStatus @default(PLANNED)
+  startDate   DateTime?
+  endDate     DateTime?
+  completedAt DateTime?
+  order       Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issues  Issue[]
+
+  @@map("sprints")
+}
+
+// ─── Workflow ─────────────────────────────────────────────────────────────────
+
+model WorkflowStatus {
+  id        String         @id @default(cuid())
+  projectId String
+  name      String
+  category  StatusCategory @default(TODO)
+  color     String         @default("#64748B")
+  order     Int            @default(0)
+  isDefault Boolean        @default(false)
+
+  project     Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issues      Issue[]
+  columns     BoardColumn[]
+  fromTransitions WorkflowTransition[] @relation("FromStatus")
+  toTransitions   WorkflowTransition[] @relation("ToStatus")
+
+  @@unique([projectId, name])
+  @@map("workflow_statuses")
+}
+
+model WorkflowTransition {
+  id           String      @id @default(cuid())
+  projectId    String
+  fromStatusId String
+  toStatusId   String
+  name         String
+  requiredRole ProjectRole?
+
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromStatus WorkflowStatus @relation("FromStatus", fields: [fromStatusId], references: [id], onDelete: Cascade)
+  toStatus   WorkflowStatus @relation("ToStatus", fields: [toStatusId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, fromStatusId, toStatusId])
+  @@map("workflow_transitions")
+}
+
+// ─── Labels ───────────────────────────────────────────────────────────────────
+
+model Label {
+  id        String @id @default(cuid())
+  projectId String
+  name      String
+  color     String @default("#64748B")
+
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issues  IssueLabel[]
+
+  @@unique([projectId, name])
+  @@map("labels")
+}
+
+model IssueLabel {
+  issueId String
+  labelId String
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  label Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([issueId, labelId])
+  @@map("issue_labels")
+}
+
+// ─── Issues ───────────────────────────────────────────────────────────────────
+
+model Issue {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  projectId   String
+  sprintId    String?
+  columnId    String?
+  parentId    String?
+  epicId      String?
+  statusId    String
+  type        IssueType @default(TASK)
+  priority    Priority  @default(MEDIUM)
+  title       String
+  description String?   @db.Text
+  storyPoints Int?
+  assigneeId  String?
+  reporterId  String
+  dueDate     DateTime?
+  order       Float     @default(0)
+  // SLA tracking
+  slaResponseDeadline   DateTime?
+  slaResolutionDeadline DateTime?
+  slaResponseBreached   Boolean   @default(false)
+  slaResolutionBreached Boolean   @default(false)
+  slaResponseMet        DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sprint     Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  column     BoardColumn?   @relation(fields: [columnId], references: [id], onDelete: SetNull)
+  status     WorkflowStatus @relation(fields: [statusId], references: [id])
+  assignee   User?          @relation("AssignedIssues", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reporter   User           @relation("ReportedIssues", fields: [reporterId], references: [id])
+  parent     Issue?         @relation("Subtasks", fields: [parentId], references: [id], onDelete: SetNull)
+  subtasks   Issue[]        @relation("Subtasks")
+  epic       Issue?         @relation("EpicIssues", fields: [epicId], references: [id], onDelete: SetNull)
+  epicIssues Issue[]        @relation("EpicIssues")
+
+  labels      IssueLabel[]
+  comments    Comment[]
+  attachments Attachment[]
+  watchers    IssueWatcher[]
+  auditLogs   AuditLog[]
+  sourceLinkType IssueLink[] @relation("SourceIssue")
+  targetLinkType IssueLink[] @relation("TargetIssue")
+
+  @@map("issues")
+}
+
+model IssueWatcher {
+  issueId String
+  userId  String
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([issueId, userId])
+  @@map("issue_watchers")
+}
+
+model IssueLink {
+  id       String   @id @default(cuid())
+  sourceId String
+  targetId String
+  linkType LinkType @default(RELATES_TO)
+
+  source Issue @relation("SourceIssue", fields: [sourceId], references: [id], onDelete: Cascade)
+  target Issue @relation("TargetIssue", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, targetId, linkType])
+  @@map("issue_links")
+}
+
+// ─── Comments ─────────────────────────────────────────────────────────────────
+
+model Comment {
+  id        String   @id @default(cuid())
+  issueId   String
+  authorId  String
+  body      String   @db.Text
+  isEdited  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  issue  Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
+}
+
+// ─── Attachments ──────────────────────────────────────────────────────────────
+
+model Attachment {
+  id         String   @id @default(cuid())
+  issueId    String
+  uploaderId String
+  filename   String
+  mimeType   String
+  size       Int
+  url        String
+  createdAt  DateTime @default(now())
+
+  issue    Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  uploader User  @relation(fields: [uploaderId], references: [id])
+
+  @@map("attachments")
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      NotifType
+  title     String
+  body      String
+  link      String?
+  isRead    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// ─── SLA ──────────────────────────────────────────────────────────────────────
+
+model SlaPolicy {
+  id        String @id @default(cuid())
+  projectId String @unique
+  name      String @default("Default SLA")
+
+  // Response time targets in hours per priority
+  highestResponseHours Int @default(1)
+  highResponseHours    Int @default(4)
+  mediumResponseHours  Int @default(8)
+  lowResponseHours     Int @default(24)
+  lowestResponseHours  Int @default(72)
+
+  // Resolution time targets in hours per priority
+  highestResolutionHours Int @default(4)
+  highResolutionHours    Int @default(24)
+  mediumResolutionHours  Int @default(72)
+  lowResolutionHours     Int @default(168)
+  lowestResolutionHours  Int @default(336)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("sla_policies")
+}
+
+// ─── Audit Logs ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  projectId  String?
+  issueId    String?
+  entityType String
+  entityId   String
+  action     String
+  changes    Json?
+  createdAt  DateTime @default(now())
+
+  actor   User     @relation(fields: [actorId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  issue   Issue?   @relation(fields: [issueId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
