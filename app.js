@@ -3622,7 +3622,7 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
 
   window._rptChangeSprint = async function(sprintId) {
     window._lastSelectedSprintId = sprintId;
-    var cont = $("reportContent") || c;
+    var cont = c; // always use the container this report was rendered into
     try {
       var d = await api("/api/reports/sprint/" + sprintId);
       renderBurndownReport(cont, d, allSprints);
