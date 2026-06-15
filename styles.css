@@ -1479,6 +1479,52 @@ body.issue-page .drawer-topbar {
 }
 body.light.issue-page .drawer-topbar { background: #fff; }
 
+/* Global Search */
+.topbar-search-wrap {
+  position: relative; display: flex; align-items: center; gap: 8px;
+  background: var(--bg2); border: 1.5px solid var(--border); border-radius: 8px;
+  padding: 0 10px; width: 320px; transition: border-color .15s, box-shadow .15s;
+}
+.topbar-search-wrap:focus-within {
+  border-color: var(--accent); box-shadow: 0 0 0 3px rgba(1,41,172,.12);
+}
+.topbar-search-icon { color: var(--text3); flex-shrink: 0; }
+.topbar-search-input {
+  flex: 1; border: none; background: transparent; outline: none;
+  font-size: 13px; color: var(--text); height: 34px; min-width: 0;
+}
+.topbar-search-input::placeholder { color: var(--text3); }
+.topbar-search-kbd {
+  font-size: 10px; color: var(--text3); background: var(--bg3);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+  flex-shrink: 0; font-family: inherit;
+}
+.topbar-search-wrap:focus-within .topbar-search-kbd { display: none; }
+.gs-drop {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18); z-index: 9999;
+  max-height: 420px; overflow-y: auto;
+}
+.gs-section-label {
+  font-size: 10px; font-weight: 700; color: var(--text3); letter-spacing: .06em;
+  text-transform: uppercase; padding: 10px 14px 4px;
+}
+.gs-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+  cursor: pointer; transition: background .1s; border-radius: 6px; margin: 0 4px;
+}
+.gs-item:hover { background: var(--bg2); }
+.gs-item-key {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  font-family: 'Courier New', monospace; white-space: nowrap; min-width: 60px;
+}
+.gs-item-title { flex: 1; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-item-meta { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.gs-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--text3); }
+body.light .gs-drop { background: #fff; }
+body.light .topbar-search-wrap { background: #f6f8fa; }
+
 /* Top bar */
 .drawer-topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .drawer-topbar-left { display: flex; align-items: center; gap: 10px; }

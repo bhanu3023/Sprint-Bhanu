@@ -8797,6 +8797,140 @@ window._copyIssueUrl = function() {
 })();
 
 // Capture Team and Product Type
+// ═══════════════════════════════════════════════════════════
+// GLOBAL SEARCH
+// ═══════════════════════════════════════════════════════════
+(function() {
+  var _gsTimer = null;
+  var _gsActive = false;
+
+  function gsInit() {
+    var input = $('globalSearchInput');
+    var drop = $('globalSearchDrop');
+    if (!input || !drop) return;
+
+    // Open on focus
+    input.addEventListener('focus', function() {
+      _gsActive = true;
+      if (input.value.trim().length >= 1) gsSearch(input.value.trim());
+      else gsShowRecent();
+    });
+
+    input.addEventListener('input', function() {
+      clearTimeout(_gsTimer);
+      var q = input.value.trim();
+      if (!q) { gsShowRecent(); return; }
+      _gsTimer = setTimeout(function() { gsSearch(q); }, 180);
+    });
+
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { gsClose(); input.blur(); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); gsFocusItem(0); }
+    });
+
+    // Keyboard shortcut: press / to focus search
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA' && !document.activeElement.isContentEditable) {
+        e.preventDefault();
+        input.focus();
+        input.select();
+      }
+    });
+
+    // Close on outside click
+    document.addEventListener('mousedown', function(e) {
+      var wrap = $('globalSearchWrap');
+      if (wrap && !wrap.contains(e.target)) gsClose();
+    });
+  }
+
+  function gsClose() {
+    var drop = $('globalSearchDrop');
+    if (drop) drop.setAttribute('hidden', '');
+    _gsActive = false;
+  }
+
+  function gsShowRecent() {
+    var drop = $('globalSearchDrop');
+    if (!drop) return;
+    var issues = (S.data && S.data.issues || [])
+      .slice().sort(function(a,b){ return new Date(b.updated_at)-new Date(a.updated_at); })
+      .slice(0, 8);
+    if (!issues.length) { drop.setAttribute('hidden',''); return; }
+    drop.innerHTML = '<div class="gs-section-label">Recent Issues</div>' + issues.map(gsItemHtml).join('');
+    drop.removeAttribute('hidden');
+    gsBindItems();
+  }
+
+  function gsSearch(q) {
+    var drop = $('globalSearchDrop');
+    if (!drop) return;
+    var lower = q.toLowerCase();
+    var issues = (S.data && S.data.issues || []).filter(function(i) {
+      return (issueKeyStr(i) || '').toLowerCase().indexOf(lower) !== -1 ||
+             (i.title || '').toLowerCase().indexOf(lower) !== -1 ||
+             (i.status || '').toLowerCase().indexOf(lower) !== -1;
+    }).slice(0, 12);
+    if (!issues.length) {
+      drop.innerHTML = '<div class="gs-empty">No issues found for "' + esc(q) + '"</div>';
+      drop.removeAttribute('hidden');
+      return;
+    }
+    drop.innerHTML = '<div class="gs-section-label">Issues</div>' + issues.map(function(i){ return gsItemHtml(i, q); }).join('');
+    drop.removeAttribute('hidden');
+    gsBindItems();
+  }
+
+  function gsItemHtml(issue) {
+    var key = esc(issueKeyStr(issue));
+    var title = esc(issue.title || '');
+    var space = esc(issue.space_name || '');
+    var statCol = STATUS_COLORS[issue.status] || '#6b7280';
+    return '<div class="gs-item" data-issue-id="' + issue.id + '">' +
+      '<span class="gs-item-key">' + key + '</span>' +
+      '<span class="gs-item-title">' + title + '</span>' +
+      '<span class="gs-item-meta" style="display:flex;align-items:center;gap:5px">' +
+        '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + statCol + '"></span>' +
+        space +
+      '</span>' +
+    '</div>';
+  }
+
+  function gsBindItems() {
+    var drop = $('globalSearchDrop');
+    if (!drop) return;
+    drop.querySelectorAll('.gs-item').forEach(function(el) {
+      el.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        var id = el.dataset.issueId;
+        var issue = (S.data && S.data.issues || []).find(function(i){ return String(i.id) === String(id); });
+        gsClose();
+        $('globalSearchInput').value = '';
+        if (issue) openIssuePage(issue.id, issue.key);
+      });
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') el.dispatchEvent(new MouseEvent('mousedown'));
+        if (e.key === 'ArrowDown') { e.preventDefault(); var n = el.nextElementSibling; if (n && n.classList.contains('gs-item')) n.focus(); }
+        if (e.key === 'ArrowUp')   { e.preventDefault(); var p = el.previousElementSibling; if (p && p.classList.contains('gs-item')) p.focus(); else $('globalSearchInput').focus(); }
+      });
+      el.setAttribute('tabindex', '0');
+    });
+  }
+
+  function gsFocusItem(idx) {
+    var drop = $('globalSearchDrop');
+    if (!drop || drop.hasAttribute('hidden')) return;
+    var items = drop.querySelectorAll('.gs-item');
+    if (items[idx]) items[idx].focus();
+  }
+
+  document.addEventListener('DOMContentLoaded', gsInit);
+  // Also init after app data loads
+  var _gsOrigInit = window._afterDataLoad;
+  window._gsLateInit = function() { gsInit(); };
+  setTimeout(function(){ gsInit(); }, 1200);
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
   const submitBtn = document.querySelector('[onclick*="submitIssueForm"]') || document.querySelector('button[type="submit"]');
   

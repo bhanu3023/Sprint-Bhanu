@@ -110,6 +110,12 @@
           <button class="btn-icon" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
           <nav id="breadcrumb" class="breadcrumb"></nav>
         </div>
+        <div class="topbar-search-wrap" id="globalSearchWrap">
+          <svg class="topbar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="globalSearchInput" class="topbar-search-input" placeholder="Search issues, keys…" autocomplete="off">
+          <kbd class="topbar-search-kbd">/</kbd>
+          <div id="globalSearchDrop" class="gs-drop" hidden></div>
+        </div>
         <div class="topbar-right">
           <div class="notif-btn-wrap">
             <button class="btn-icon topbar-notif-btn" id="notifBtn" aria-label="Notifications" style="position:relative;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center">
