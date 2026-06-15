@@ -997,8 +997,9 @@ function renderHome() {
   var greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   var me = S.currentUserObj;
   var firstName = me && me.name ? me.name.split(' ')[0] : 'there';
-  var greetEl = $('dbGreeting'); if (greetEl) greetEl.textContent = greet;
-  var nameEl = $('dbUserName'); if (nameEl) nameEl.textContent = firstName + ' 👋';
+  var greetEl = $('dbGreeting'); if (greetEl) greetEl.textContent = 'Hello,';
+  var fullName = me && me.name ? me.name : 'there';
+  var nameEl = $('dbUserName'); if (nameEl) nameEl.textContent = fullName;
 
   // Stat cards
   function dbStat(label, value, color, rgb, svgPath, onclick) {

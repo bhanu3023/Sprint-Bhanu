@@ -3606,18 +3606,18 @@ body.light .db-hero {
   border-bottom-color: #011e87;
 }
 .db-greeting {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.55);
-  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(255,255,255,0.75);
+  margin-bottom: 2px;
 }
 .db-username {
   font-size: 24px;
-  font-weight: 800;
+  font-weight: 600;
   color: #fff;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.2px;
 }
 
 /* Stat Cards */
