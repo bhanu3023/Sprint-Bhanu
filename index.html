@@ -73,6 +73,7 @@
           <a class="nav-item" data-view="global-reports"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg></span> Reports</a>
           <a class="nav-item" data-view="worklog-report"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span> Work Log</a>
           <a class="nav-item" data-view="product-roadmap"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg></span> Product Roadmap</a>
+          <a class="nav-item" data-view="spaces"><span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span> Spaces</a>
         </div>
 
         <div class="sidebar-section">
@@ -196,6 +197,23 @@
             </div>
           </div>
 
+        </div>
+
+        <!-- Spaces View -->
+        <div class="view" id="view-spaces" hidden>
+          <div class="spaces-view-wrap">
+            <div class="spaces-view-header">
+              <div class="spaces-view-title-row">
+                <h1 class="spaces-view-title">Spaces</h1>
+                <span id="spacesViewCount" class="yw-badge"></span>
+              </div>
+              <div class="spaces-view-actions">
+                <input type="text" id="spacesViewSearch" class="input input-sm" placeholder="Search spaces…" oninput="window._filterSpacesView(this.value)" style="width:220px">
+                <button class="btn btn-primary btn-sm" id="spacesViewCreateBtn">+ Create Space</button>
+              </div>
+            </div>
+            <div id="spacesViewGrid" class="db-spaces-grid"></div>
+          </div>
         </div>
 
         <!-- Your Work View -->

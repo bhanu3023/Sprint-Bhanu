@@ -3213,6 +3213,22 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 .jira-editor-body a { color: #0052cc; text-decoration: underline; }
 
 /* ------------------------------------------------------------
+   SPACES VIEW
+   ------------------------------------------------------------ */
+.spaces-view-wrap { padding: 28px 32px; }
+.spaces-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.spaces-view-title-row { display: flex; align-items: center; gap: 10px; }
+.spaces-view-title { font-size: 22px; font-weight: 700; color: var(--text); margin: 0; }
+.spaces-view-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ------------------------------------------------------------
    YOUR WORK / ASSIGNED TO ME — LUXURY REDESIGN
    ------------------------------------------------------------ */
 .yw-header {
