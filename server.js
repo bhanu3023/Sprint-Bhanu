@@ -132,13 +132,15 @@ app.get('/api/my-issues', requireAuth, wrap(async (req, res) => {
        LEFT JOIN users a ON a.id = i.assignee_id
        WHERE i.reporter_id = $1 AND i.deleted_at IS NULL
        ORDER BY i.updated_at DESC`, [userId]),
-    q(`SELECT i.*, s.name AS space_name, s.key AS project_key,
+    q(`SELECT DISTINCT i.*, s.name AS space_name, s.key AS project_key,
               a.name AS assignee_name, a.color AS assignee_color
        FROM issues i
        LEFT JOIN spaces s ON s.id = i.space_id
        LEFT JOIN users a ON a.id = i.assignee_id
+       LEFT JOIN comments c ON c.issue_id = i.id AND c.user_id = $1
        WHERE i.deleted_at IS NULL
-       ORDER BY i.updated_at DESC LIMIT 30`)
+         AND (i.assignee_id = $1 OR i.reporter_id = $1 OR c.id IS NOT NULL)
+       ORDER BY i.updated_at DESC LIMIT 20`, [userId])
   ]);
   res.json({ assigned: assigned.rows, reported: reported.rows, recent: recent.rows });
 }));
