@@ -7219,6 +7219,16 @@ document.addEventListener('DOMContentLoaded', function () {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
             '<input type="number" class="input cf-field" data-cf-id="' + f.id + '"></div>';
+        } else if (f.field_type === 'multiselect') {
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
+            '<select class="input cf-field" data-cf-id="' + f.id + '" data-multi="1" multiple style="min-height:80px">' +
+            opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
+            '</select></div>';
+        } else if (f.field_type === 'textarea') {
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
+            '<textarea class="input cf-field" data-cf-id="' + f.id + '" rows="3"></textarea></div>';
         }
         return '';
       }).join('');
