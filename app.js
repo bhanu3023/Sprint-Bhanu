@@ -3560,69 +3560,111 @@ async function renderReportContent(type, selectedSprintId) {
 
 function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
-  // Works with /api/reports/sprint/:id response:
-  // { sprint, total, done, in_progress, points_completed, points_remaining }
   var sprint = data.sprint || {};
   var total = Number(data.total) || 0;
   var done = Number(data.done) || 0;
   var inProgress = Number(data.in_progress) || 0;
+  var toDo = Math.max(0, total - done - inProgress);
   var remaining = total - done;
   var ptsDone = Number(data.points_completed) || 0;
   var ptsLeft = Number(data.points_remaining) || 0;
+  var completionPct = total ? Math.round((done / total) * 100) : 0;
 
-  // Use passed sprintSelectorHtml or build own
   var selectorHtml = sprintSelectorHtml || (allSprints && allSprints.length > 1
-    ? '<div style="margin-bottom:12px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
+    ? '<div class="rpt-sprint-selector"><label>Sprint</label>' +
       '<select class="input input-sm" onchange="window._rptChangeSprint(this.value)">' +
       (allSprints || []).map(function(sp) {
         return '<option value="' + sp.id + '"' + (sp.id === sprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
       }).join('') + '</select></div>'
     : '');
 
-  // Visual progress bar showing Done / In Progress / Remaining
-  var chartH = 140;
+  // Donut SVG
+  var r = 54, cx = 70, cy = 70, circ = 2 * Math.PI * r;
+  var donePct = total ? done / total : 0;
+  var ipPct = total ? inProgress / total : 0;
+  var todoPct = total ? toDo / total : 0;
+  var doneLen = donePct * circ, ipLen = ipPct * circ, todoLen = todoPct * circ;
+  var doneOff = 0, ipOff = -doneLen, todoOff = -(doneLen + ipLen);
+  var donutSvg = '<svg width="140" height="140" viewBox="0 0 140 140">' +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--bg2)" stroke-width="16"/>' +
+    (total ? (
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#10b981" stroke-width="16" stroke-dasharray="' + doneLen + ' ' + (circ - doneLen) + '" stroke-dashoffset="' + (circ * 0.25) + '" stroke-linecap="round"/>' +
+      (ipLen > 0 ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#0052cc" stroke-width="16" stroke-dasharray="' + ipLen + ' ' + (circ - ipLen) + '" stroke-dashoffset="' + (circ * 0.25 - doneLen) + '" stroke-linecap="round"/>' : '') +
+      (todoLen > 0 ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#42526e" stroke-width="16" stroke-dasharray="' + todoLen + ' ' + (circ - todoLen) + '" stroke-dashoffset="' + (circ * 0.25 - doneLen - ipLen) + '" stroke-linecap="round"/>' : '')
+    ) : '') +
+    '<text x="' + cx + '" y="' + (cy - 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text)">' + completionPct + '%</text>' +
+    '<text x="' + cx + '" y="' + (cy + 14) + '" text-anchor="middle" font-size="11" fill="var(--text2)">Complete</text>' +
+    '</svg>';
+
+  // Vertical bar chart
+  var chartH = 120;
   var segments = [
-    { label: 'Done', count: done, color: STATUS_COLORS['Done'] },
-    { label: 'In Progress', count: inProgress, color: STATUS_COLORS['In Progress'] },
-    { label: 'To Do', count: Math.max(0, remaining - inProgress), color: STATUS_COLORS['To Do'] }
+    { label: 'Done', count: done, color: '#10b981' },
+    { label: 'In Progress', count: inProgress, color: '#0052cc' },
+    { label: 'To Do', count: toDo, color: '#42526e' }
   ];
+  var maxSeg = Math.max.apply(null, segments.map(function(s){ return s.count; })) || 1;
   var barCols = segments.map(function(seg) {
-    var h = total ? Math.round((seg.count / total) * chartH) : 0;
-    return '<div class="rpt-bd-day" title="' + esc(seg.label) + ': ' + seg.count + '">' +
-      '<div style="height:' + chartH + 'px;width:40px;display:flex;align-items:flex-end">' +
-      '<div style="width:100%;height:' + h + 'px;background:' + seg.color + ';border-radius:4px 4px 0 0"></div>' +
+    var h = Math.max(total ? Math.round((seg.count / maxSeg) * chartH) : 0, seg.count > 0 ? 4 : 0);
+    return '<div class="rpt-bd-col">' +
+      '<div class="rpt-bd-count">' + seg.count + '</div>' +
+      '<div class="rpt-bd-barwrap" style="height:' + chartH + 'px">' +
+      '<div class="rpt-bd-bar2" style="height:' + h + 'px;background:' + seg.color + '"></div>' +
       '</div>' +
-      '<div class="rpt-bd-label">' + esc(seg.label) + '</div>' +
-      '<div class="rpt-bd-label" style="font-weight:600;color:var(--text)">' + seg.count + '</div>' +
+      '<div class="rpt-bd-chip" style="background:' + seg.color + '20;color:' + seg.color + '">' + esc(seg.label) + '</div>' +
       '</div>';
   }).join('');
 
-  // Ideal burn line: a simple gradient bar from left (full) to right (zero)
-  var progressPct = total ? Math.round((done / total) * 100) : 0;
-  var progressBar = '<div style="margin:16px 0 8px">' +
-    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:4px">' +
-    '<span>Progress</span><span>' + progressPct + '%</span></div>' +
-    '<div style="height:8px;background:var(--bg2);border-radius:4px;overflow:hidden">' +
-    '<div style="height:100%;width:' + progressPct + '%;background:' + STATUS_COLORS['Done'] + ';border-radius:4px;transition:width .3s"></div>' +
+  // Stacked progress bar
+  var donePctW = total ? (done / total * 100).toFixed(1) : 0;
+  var ipPctW = total ? (inProgress / total * 100).toFixed(1) : 0;
+  var todoPctW = total ? (toDo / total * 100).toFixed(1) : 0;
+  var stackedBar = '<div class="rpt-stacked-wrap">' +
+    '<div class="rpt-stacked-bar">' +
+    (done > 0 ? '<div style="width:' + donePctW + '%;background:#10b981" title="Done: ' + done + '"></div>' : '') +
+    (inProgress > 0 ? '<div style="width:' + ipPctW + '%;background:#0052cc" title="In Progress: ' + inProgress + '"></div>' : '') +
+    (toDo > 0 ? '<div style="width:' + todoPctW + '%;background:#42526e" title="To Do: ' + toDo + '"></div>' : '') +
+    '</div>' +
+    '<div class="rpt-stacked-legend">' +
+    '<span><i style="background:#10b981"></i>Done (' + done + ')</span>' +
+    '<span><i style="background:#0052cc"></i>In Progress (' + inProgress + ')</span>' +
+    '<span><i style="background:#42526e"></i>To Do (' + toDo + ')</span>' +
     '</div></div>';
 
-  c.innerHTML = '<div class="report-chart">' +
+  // Points row
+  var ptsTotalPts = ptsDone + ptsLeft;
+  var ptsPct = ptsTotalPts ? Math.round((ptsDone / ptsTotalPts) * 100) : 0;
+  var ptsRow = '<div class="rpt-pts-row">' +
+    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#10b981">' + ptsDone + '</div><div class="rpt-pts-label">Pts Done</div></div>' +
+    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#f59e0b">' + ptsLeft + '</div><div class="rpt-pts-label">Pts Left</div></div>' +
+    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#174F96">' + ptsTotalPts + '</div><div class="rpt-pts-label">Total Pts</div></div>' +
+    '</div>';
+
+  c.innerHTML = '<div class="rpt-rich-wrap">' +
+    '<div class="rpt-rich-header">' +
+    '<div class="rpt-rich-title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>Sprint Report</div>' +
+    '<div class="rpt-rich-sprint">' + esc(sprint.name || 'Sprint') + '</div>' +
     selectorHtml +
-    '<h4>Burn Down: ' + esc(sprint.name || '') + '</h4>' +
-    '<div class="report-stats-row">' +
-    statCard('Total', total, '#174F96') +
-    statCard('Done', done, STATUS_COLORS['Done']) +
-    statCard('Remaining', remaining, STATUS_COLORS['In Progress']) +
-    statCard('Pts Completed', ptsDone, STATUS_COLORS['Done']) +
-    statCard('Pts Remaining', ptsLeft, STATUS_COLORS['In Progress']) +
     '</div>' +
-    progressBar +
-    '<div class="rpt-bd-wrap">' + barCols + '</div>' +
+    '<div class="rpt-rich-body">' +
+    '<div class="rpt-rich-donut-col">' + donutSvg +
+    '<div class="rpt-rich-donut-stats">' +
+    '<div class="rpt-ds-row"><span class="rpt-ds-dot" style="background:#10b981"></span><span class="rpt-ds-lbl">Done</span><span class="rpt-ds-val">' + done + '</span></div>' +
+    '<div class="rpt-ds-row"><span class="rpt-ds-dot" style="background:#0052cc"></span><span class="rpt-ds-lbl">In Progress</span><span class="rpt-ds-val">' + inProgress + '</span></div>' +
+    '<div class="rpt-ds-row"><span class="rpt-ds-dot" style="background:#42526e"></span><span class="rpt-ds-lbl">To Do</span><span class="rpt-ds-val">' + toDo + '</span></div>' +
+    '<div class="rpt-ds-row rpt-ds-total"><span class="rpt-ds-lbl">Total</span><span class="rpt-ds-val">' + total + '</span></div>' +
+    '</div></div>' +
+    '<div class="rpt-rich-chart-col">' +
+    '<div class="rpt-bd-chart">' + barCols + '</div>' +
+    stackedBar +
+    ptsRow +
+    '</div>' +
+    '</div>' +
     '</div>';
 
   window._rptChangeSprint = async function(sprintId) {
     window._lastSelectedSprintId = sprintId;
-    var cont = c; // always use the container this report was rendered into
+    var cont = c;
     try {
       var d = await api("/api/reports/sprint/" + sprintId);
       renderBurndownReport(cont, d, allSprints);
