@@ -888,11 +888,18 @@ function renderSidebar() {
     ? spaces.map(spaceNavItem).join('')
     : '<p class="text-muted sidebar-empty">No spaces</p>';
 
-  // Bind space clicks
+  // Bind space clicks — toggle collapse if already active
   qsa('.space-item').forEach(function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
-      navigateToSpace(el.dataset.spaceId);
+      var spaceId = el.dataset.spaceId;
+      if (String(S.currentSpace) === String(spaceId)) {
+        // Already open — collapse by going back to home
+        S.currentSpace = null;
+        navigateTo('home');
+      } else {
+        navigateToSpace(spaceId);
+      }
     });
   });
 
