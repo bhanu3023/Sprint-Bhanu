@@ -1178,11 +1178,14 @@ function renderYourWorkContent(data) {
 
   // Issue card rows
   var rows = issues.map(function(iss) {
+    var iid = iss.id;
     var pColor = PRIORITY_COLORS[iss.priority] || PRIORITY_COLORS['medium'];
     var spaceInitial = (iss.space_name || '?').charAt(0).toUpperCase();
     var spaceColor = ['#174F96','#10b981','#8b5cf6','#f59e0b','#ef4444','#06b6d4'][
       (iss.space_name || '').charCodeAt(0) % 6];
-    return '<div class="yw-card" onclick="openIssuePage(\'' + iss.id + '\')">' +
+    var statusClick = 'event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + esc(iss.status || '') + '\')';
+    var priorityClick = 'event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + esc(iss.priority || '') + '\')';
+    return '<div class="yw-card" onclick="openIssuePage(\'' + iid + '\')">' +
       '<div class="yw-card-priority-strip" style="background:' + pColor + '"></div>' +
       '<div class="yw-card-key">' + esc(issueKeyStr(iss)) + '</div>' +
       '<div class="yw-card-main">' +
@@ -1198,11 +1201,8 @@ function renderYourWorkContent(data) {
         '</div>' +
       '</div>' +
       '<div class="yw-card-right">' +
-        statusBadge(iss.status) +
-        '<div class="yw-card-priority">' +
-          '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + pColor + '"></span>' +
-          '<span style="font-size:11px;color:var(--text2)">' + cap(iss.priority || 'Medium') + '</span>' +
-        '</div>' +
+        '<span onclick="' + statusClick + '" style="cursor:pointer">' + statusBadge(iss.status) + '</span>' +
+        '<span onclick="' + priorityClick + '" style="cursor:pointer">' + priorityBadge(iss.priority) + '</span>' +
         '<span class="yw-card-time">' + relativeTime(iss.updated_at) + '</span>' +
       '</div>' +
     '</div>';
