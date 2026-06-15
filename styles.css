@@ -1,7 +1,7 @@
 /* ============================================================
    Neutara Project Management — styles.css
    A Jira-like SPA with dark (default) and light modes.
-   Brand color: #174F96
+   Brand color: #0129ac
    ============================================================ */
 
 /* ------------------------------------------------------------
@@ -44,8 +44,8 @@ body.light {
   --text: #1f2328;
   --text2: #57606a;
   --text3: #8b949e;
-  --accent: #174F96;
-  --accent2: #1560b0;
+  --accent: #0129ac;
+  --accent2: #0138c4;
   --accent-bg: rgba(23, 79, 150, 0.08);
   --success: #059669;
   --warning: #d97706;
@@ -318,8 +318,8 @@ body.light ::-webkit-scrollbar-thumb {
    SIDEBAR — Light Mode Overrides
    ------------------------------------------------------------ */
 body.light .sidebar {
-  background: #174F96;
-  border-right-color: #133f7a;
+  background: #0129ac;
+  border-right-color: #011e87;
 }
 
 body.light .sidebar-header {
@@ -328,7 +328,7 @@ body.light .sidebar-header {
 }
 
 body.light .workspace-name {
-  color: #174F96;
+  color: #0129ac;
 }
 
 body.light .sidebar-label {
@@ -1338,7 +1338,7 @@ body.light .report-card {
 /* Burndown chart - legacy */
 .rpt-bd-wrap { display:flex; gap:4px; align-items:flex-end; padding:8px 0 4px; overflow-x:auto; }
 .rpt-bd-day { display:flex; flex-direction:column; align-items:center; flex-shrink:0; width:32px; }
-.rpt-bd-bar { background:#174F96; width:20px; border-radius:3px 3px 0 0; min-height:2px; }
+.rpt-bd-bar { background:#0129ac; width:20px; border-radius:3px 3px 0 0; min-height:2px; }
 .rpt-bd-ideal-dot { position:absolute; left:50%; transform:translateX(-50%); width:6px; height:6px; background:#ef4444; border-radius:50%; }
 .rpt-bd-label { font-size:9px; color:var(--text2); margin-top:3px; white-space:nowrap; }
 
@@ -1346,7 +1346,7 @@ body.light .report-card {
 .rpt-rich-wrap { background:var(--bg); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
 .rpt-rich-header { display:flex; align-items:center; gap:12px; padding:16px 24px; border-bottom:1px solid var(--border); background:var(--bg2); flex-wrap:wrap; }
 .rpt-rich-title { display:flex; align-items:center; gap:7px; font-size:14px; font-weight:700; color:var(--text); }
-.rpt-rich-title svg { color:#174F96; }
+.rpt-rich-title svg { color:#0129ac; }
 .rpt-rich-sprint { font-size:13px; color:var(--text2); background:var(--bg); border:1px solid var(--border); border-radius:20px; padding:3px 12px; margin-right:auto; }
 .rpt-sprint-selector { display:flex; align-items:center; gap:8px; }
 .rpt-sprint-selector label { font-size:12px; color:var(--text2); white-space:nowrap; }
@@ -1542,7 +1542,7 @@ body.light .drawer-sidebar { background: #f7f8fa; }
 .jira-comment-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 1px; padding: 5px 8px; background: var(--bg2); border-bottom: 1px solid var(--border); }
 #drawerCommentInput.jira-editor-body { min-height: 80px; max-height: 300px; padding: 10px 12px; font-size: 14px; line-height: 1.6; color: var(--text); outline: none; overflow-y: auto; white-space: pre-wrap; word-break: break-word; background: var(--bg); }
 #drawerCommentInput.jira-editor-body:empty::before { content: attr(data-placeholder); color: var(--text3); font-style: italic; pointer-events: none; }
-.mention-chip { display: inline-block; background: #e8f0fe; color: #174F96; border-radius: 4px; padding: 0 5px; font-weight: 600; font-size: 13px; cursor: default; user-select: none; }
+.mention-chip { display: inline-block; background: #e8f0fe; color: #0129ac; border-radius: 4px; padding: 0 5px; font-weight: 600; font-size: 13px; cursor: default; user-select: none; }
 body:not(.light) .mention-chip { background: #1e3a5f; color: #7eb8f7; }
 .mention-item.focused { background: var(--bg3); }
 .comment-attach-btn { cursor: pointer; }
@@ -2722,7 +2722,7 @@ body.light .chart-card { background: #ffffff; border-color: #d0d7de; }
 .space-name-title { font-size: 18px; font-weight: 700; }
 body.light .space-header { background: #ffffff; border-bottom-color: #d0d7de; }
 .sidebar-workspace-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body.light .sidebar-workspace-name { color: #174F96; }
+body.light .sidebar-workspace-name { color: #0129ac; }
 .sidebar-create-btn { width: calc(100% - 24px); margin: 8px 12px; }
 .sidebar-search { margin: 4px 12px; }
 .sidebar-search input { width: 100%; }
@@ -2847,7 +2847,7 @@ body.light .settings-tabs .tab-btn.active { color: var(--accent); border-bottom-
 body.light .admin-settings-nav { border-right-color: #d0d7de; }
 body.light .admin-nav-item { color: #57606a; }
 body.light .admin-nav-item:hover { background: #f7f8fa; color: #1f2328; }
-body.light .admin-nav-item.active { background: rgba(23,79,150,0.08); color: #174F96; border-left-color: #174F96; }
+body.light .admin-nav-item.active { background: rgba(23,79,150,0.08); color: #0129ac; border-left-color: #0129ac; }
 
 .admin-settings-content { flex: 1; padding: 32px 40px; overflow-y: auto; max-width: 900px; }
 .admin-section-header { margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
@@ -3552,8 +3552,8 @@ body.light .yw-card:hover { background:#f6f8ff; }
   pointer-events: none;
 }
 body.light .db-hero {
-  background: #174F96;
-  border-bottom-color: #133f7a;
+  background: #0129ac;
+  border-bottom-color: #011e87;
 }
 .db-greeting {
   font-size: 12px;
@@ -3596,12 +3596,12 @@ body.light .db-hero {
   top: 0; left: 0; right: 0;
   height: 3px;
   border-radius: 14px 14px 0 0;
-  background: var(--db-stat-color, #174F96);
+  background: var(--db-stat-color, #0129ac);
   opacity: 0.9;
 }
 .db-stat:hover {
   box-shadow: 0 4px 20px rgba(0,0,0,0.12);
-  border-color: var(--db-stat-color, #174F96);
+  border-color: var(--db-stat-color, #0129ac);
   transform: translateY(-1px);
 }
 .db-stat-icon {
@@ -3613,14 +3613,14 @@ body.light .db-hero {
   justify-content: center;
   background: rgba(var(--db-stat-rgb, 23,79,150), 0.12);
   flex-shrink: 0;
-  color: var(--db-stat-color, #174F96);
+  color: var(--db-stat-color, #0129ac);
 }
 .db-stat-body { flex: 1; min-width: 0; }
 .db-stat-value {
   font-size: 30px;
   font-weight: 800;
   line-height: 1;
-  color: var(--db-stat-color, #174F96);
+  color: var(--db-stat-color, #0129ac);
   letter-spacing: -1px;
 }
 .db-stat-label {
@@ -3790,12 +3790,12 @@ body.light .db-panel-header { background: #f6f8fa; }
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 3px;
-  background: var(--db-sc-color, #174F96);
+  background: var(--db-sc-color, #0129ac);
   border-radius: 14px 14px 0 0;
   opacity: 0;
   transition: opacity 0.18s;
 }
-.db-space-card:hover { border-color: var(--db-sc-color, #174F96); box-shadow: 0 4px 20px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.db-space-card:hover { border-color: var(--db-sc-color, #0129ac); box-shadow: 0 4px 20px rgba(0,0,0,0.1); transform: translateY(-2px); }
 .db-space-card:hover::before { opacity: 1; }
 body.light .db-space-card { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .db-sc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }

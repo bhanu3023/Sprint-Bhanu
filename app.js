@@ -344,7 +344,7 @@ function avatarHtml(user, size) {
   size = size || 32;
   var baseStyle = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.4) + 'px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:700;flex-shrink:0;vertical-align:middle;line-height:1;text-align:center;overflow:hidden;';
   if (!user) return '<span class="avatar" style="' + baseStyle + 'background:#ccc">?</span>';
-  var color = user.color || '#174F96';
+  var color = user.color || '#0129ac';
   return '<span class="avatar" style="' + baseStyle + 'background:' + color + '" title="' + esc(user.name) + '">' + initials(user.name) + '</span>';
 }
 
@@ -911,7 +911,7 @@ function spaceNavItem(sp) {
   var active = S.currentSpace == sp.id ? ' active' : '';
   var isOwner = canCreateSpace();
   var initLetter = sp.name ? sp.name.charAt(0).toUpperCase() : '?';
-  var bgColor = sp.color || '#174F96';
+  var bgColor = sp.color || '#0129ac';
   var isActive = S.currentSpace != null && String(S.currentSpace) === String(sp.id);
   var subnav = isActive ? (
     '<div class="space-subnav">' +
@@ -992,7 +992,7 @@ function renderHome() {
       '</div>';
   }
   $('homeStats').innerHTML =
-    dbStat('Spaces', spaces.length, '#174F96', '23,79,150',
+    dbStat('Spaces', spaces.length, '#0129ac', '23,79,150',
       '<path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3A1.5 1.5 0 0 1 15 10.5v3A1.5 1.5 0 0 1 13.5 15h-3A1.5 1.5 0 0 1 9 13.5v-3z"/>') +
     dbStat('Total Issues', allIssues.length, '#6366f1', '99,102,241',
       '<path d="M14.5 3a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h13zm-13-1A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13zM3 5.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5zM3 8a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9A.5.5 0 0 1 3 8zm0 2.5a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1h-6a.5.5 0 0 1-.5-.5z"/>') +
@@ -1089,7 +1089,7 @@ function _drawSpacesGrid(spaces) {
   }
   var html = '';
   filtered.forEach(function(sp) {
-    var color = sp.color || '#174F96';
+    var color = sp.color || '#0129ac';
     var mems = getSpaceMembers(sp.id);
     var issCount = getSpaceIssues(sp.id).length;
     html += '<div class="db-space-card" style="--db-sc-color:' + color + '" onclick="navigateToSpace(\'' + sp.id + '\')">' +
@@ -2955,7 +2955,7 @@ function renderSummary() {
   }
 
   $('summaryStats').innerHTML =
-    statCard('Total Issues', total, '#174F96', 'all') +
+    statCard('Total Issues', total, '#0129ac', 'all') +
     statCard('To Do', todo, STATUS_COLORS['To Do'], 'To Do') +
     statCard('In Progress', inProg, STATUS_COLORS['In Progress'], 'In Progress') +
     statCard('Done', done, STATUS_COLORS['Done'], 'Done') +
@@ -3638,7 +3638,7 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   var ptsRow = '<div class="rpt-pts-row">' +
     '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#10b981">' + ptsDone + '</div><div class="rpt-pts-label">Pts Done</div></div>' +
     '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#f59e0b">' + ptsLeft + '</div><div class="rpt-pts-label">Pts Left</div></div>' +
-    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#174F96">' + ptsTotalPts + '</div><div class="rpt-pts-label">Total Pts</div></div>' +
+    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#0129ac">' + ptsTotalPts + '</div><div class="rpt-pts-label">Total Pts</div></div>' +
     '</div>';
 
   c.innerHTML = '<div class="rpt-rich-wrap">' +
@@ -3687,7 +3687,7 @@ function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {
   var bars = sprints.map(function(sp) {
     var v = sp.velocity || 0;
     var pct = Math.round((v / max) * 100);
-    var color = v >= avg ? '#10b981' : '#174F96';
+    var color = v >= avg ? '#10b981' : '#0129ac';
     return '<div class="velocity-bar-group">' +
       '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + color + '" title="' + esc(sp.name) + ': ' + v + ' pts"></div>' +
       '<span class="velocity-label">' + esc(sp.name) + '</span>' +
@@ -3698,10 +3698,10 @@ function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {
   c.innerHTML = '<div class="report-chart">' +
     sprintSelectorHtml +
     '<h4>Velocity Chart</h4>' +
-    '<div class="report-stats-row">' + statCard('Avg Velocity', avg + ' pts', '#174F96') + '</div>' +
+    '<div class="report-stats-row">' + statCard('Avg Velocity', avg + ' pts', '#0129ac') + '</div>' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
     '<span style="display:inline-block;width:12px;height:12px;background:#10b981;border-radius:2px"></span> Above avg' +
-    '<span style="display:inline-block;width:12px;height:12px;background:#174F96;border-radius:2px;margin-left:8px"></span> Below avg' +
+    '<span style="display:inline-block;width:12px;height:12px;background:#0129ac;border-radius:2px;margin-left:8px"></span> Below avg' +
     '</div>' +
     '<div style="position:relative">' +
     '<div class="velocity-bars">' + bars + '</div>' +
@@ -3781,7 +3781,7 @@ function renderControlChart(c, data, allSprints, sprintSelectorHtml) {
   c.innerHTML = '<div class="report-chart">' +
     sprintSelectorHtml +
     '<h4>Control Chart — Cycle Time per Issue</h4>' +
-    '<div class="report-stats-row">' + statCard('Avg Cycle Time', avgDays + ' days', '#174F96') + '</div>' +
+    '<div class="report-stats-row">' + statCard('Avg Cycle Time', avgDays + ' days', '#0129ac') + '</div>' +
     '<div style="display:flex;gap:12px;font-size:11px;color:var(--text2);margin-bottom:12px">' +
     '<span style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:2px"></span> &lt;3d' +
     '<span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;margin-left:8px"></span> 3–7d' +
@@ -4570,7 +4570,7 @@ function renderSettingsGeneral(space) {
     '<p><strong>Key:</strong> ' + esc(space.key) + '</p>' +
     '<p><strong>Description:</strong> ' + esc(space.description || 'No description') + '</p>' +
     '<p><strong>Icon:</strong> ' + esc(space.icon || 'None') + '</p>' +
-    '<p><strong>Color:</strong> <span class="space-dot" style="background:' + (space.color || '#174F96') + ';display:inline-block;vertical-align:middle"></span> ' + esc(space.color || '#174F96') + '</p>' +
+    '<p><strong>Color:</strong> <span class="space-dot" style="background:' + (space.color || '#0129ac') + ';display:inline-block;vertical-align:middle"></span> ' + esc(space.color || '#0129ac') + '</p>' +
     '<p><strong>Type:</strong> ' + cap(space.space_type || 'scrum') + '</p>' +
     '<p><strong>Visibility:</strong> ' + visLabel(space.visibility) + '</p>' +
     '<div class="settings-actions">' +
