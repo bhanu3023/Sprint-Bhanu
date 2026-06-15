@@ -7252,10 +7252,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
   $('createIssueBtn').addEventListener('click', function () {
     resetIssueForm();
-    $('issueSpaceId').value = S.currentSpace || '';
     $('issueModalTitle').textContent = 'Create Issue';
-    window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(S.currentSpace);
-    window._onIssueSpaceChange(S.currentSpace || '');
+    // Use current space or fall back to first available space so custom fields always load
+    var spaceToUse = S.currentSpace || ((S.data && S.data.spaces && S.data.spaces[0]) ? S.data.spaces[0].id : '');
+    $('issueSpaceId').value = spaceToUse;
+    window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(spaceToUse);
+    window._onIssueSpaceChange && window._onIssueSpaceChange(spaceToUse);
     populateIssueFormSelects();
     openModal('modal-issue');
   });
