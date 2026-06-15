@@ -893,10 +893,19 @@ function renderSidebar() {
     el.addEventListener('click', function (e) {
       e.preventDefault();
       var spaceId = el.dataset.spaceId;
-      if (String(S.currentSpace) === String(spaceId)) {
-        // Already open — collapse by going back to home
+      if (String(S.currentSpace) === String(spaceId) && S.currentView === 'space') {
+        // Already open — collapse: remove subnav and deactivate
+        qsa('.space-subnav').forEach(function(s){ s.remove(); });
+        qsa('.space-item').forEach(function(s){ s.classList.remove('active'); });
         S.currentSpace = null;
-        navigateTo('home');
+        S.currentView = 'home';
+        qsa('.view').forEach(function(v){ v.setAttribute('hidden',''); });
+        var homeView = $('view-home');
+        if (homeView) homeView.removeAttribute('hidden');
+        $('spaceHeader').setAttribute('hidden','');
+        qsa('.nav-item[data-view]').forEach(function(n){ n.classList.toggle('active', n.dataset.view === 'home'); });
+        updateBreadcrumb([{ label: 'Home' }]);
+        renderHome();
       } else {
         navigateToSpace(spaceId);
       }
