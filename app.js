@@ -6440,8 +6440,11 @@ function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   bulkVals.forEach(function(v) { valueMap[v.field_id] = v.value; });
   (cfValues || []).forEach(function(v) { valueMap[v.field_id] = v.value; }); // live values override
 
+  // Fields that are already rendered as built-in drawer fields — skip to avoid duplicates
+  var _builtinFields = ['team', 'product type'];
   var html = '';
   spaceFields.forEach(function(field) {
+    if (_builtinFields.indexOf((field.name || '').toLowerCase().trim()) !== -1) return;
     var fid = field.id;
     var fname = esc(field.name);
     var ftype = field.field_type || 'text';
