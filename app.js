@@ -1163,52 +1163,23 @@ function renderYourWorkContent(data) {
     return;
   }
 
-  // Status summary pills
-  var statusCounts = {};
-  issues.forEach(function(iss) { statusCounts[iss.status] = (statusCounts[iss.status] || 0) + 1; });
-  var summaryHtml = '<div class="yw-summary">';
-  summaryHtml += '<span class="yw-summary-total">' + issues.length + ' issue' + (issues.length !== 1 ? 's' : '') + '</span>';
-  Object.keys(statusCounts).forEach(function(st) {
-    var col = STATUS_COLORS[st] || '#6b7280';
-    summaryHtml += '<span class="yw-summary-pill" style="background:' + col + '22;color:' + col + ';border:1px solid ' + col + '44">' +
-      '<span style="width:7px;height:7px;border-radius:50%;background:' + col + ';display:inline-block"></span>' +
-      esc(st) + ' · ' + statusCounts[st] + '</span>';
-  });
-  summaryHtml += '</div>';
-
-  // Issue card rows
-  var rows = issues.map(function(iss) {
+  var html = '<table class="yw-table"><thead><tr>' +
+    '<th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Space</th><th>Updated</th>' +
+    '</tr></thead><tbody>';
+  for (var i = 0; i < issues.length; i++) {
+    var iss = issues[i];
     var iid = iss.id;
-    var pColor = PRIORITY_COLORS[iss.priority] || PRIORITY_COLORS['medium'];
-    var spaceInitial = (iss.space_name || '?').charAt(0).toUpperCase();
-    var spaceColor = ['#174F96','#10b981','#8b5cf6','#f59e0b','#ef4444','#06b6d4'][
-      (iss.space_name || '').charCodeAt(0) % 6];
-    var statusClick = 'event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + esc(iss.status || '') + '\')';
-    var priorityClick = 'event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + esc(iss.priority || '') + '\')';
-    return '<div class="yw-card" onclick="openIssuePage(\'' + iid + '\')">' +
-      '<div class="yw-card-priority-strip" style="background:' + pColor + '"></div>' +
-      '<div class="yw-card-key">' + esc(issueKeyStr(iss)) + '</div>' +
-      '<div class="yw-card-main">' +
-        '<div class="yw-card-title">' + esc(iss.title) + '</div>' +
-        '<div class="yw-card-meta">' +
-          typeIcon(iss.type) +
-          '<span class="yw-card-type">' + cap(iss.type || 'Task') + '</span>' +
-          '<span class="yw-card-dot">·</span>' +
-          '<span class="yw-card-space" style="background:' + spaceColor + '22;color:' + spaceColor + '">' +
-            '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:' + spaceColor + ';color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px;flex-shrink:0">' + spaceInitial + '</span>' +
-            esc(iss.space_name || '') +
-          '</span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="yw-card-right">' +
-        '<span onclick="' + statusClick + '" style="cursor:pointer">' + statusBadge(iss.status) + '</span>' +
-        '<span onclick="' + priorityClick + '" style="cursor:pointer">' + priorityBadge(iss.priority) + '</span>' +
-        '<span class="yw-card-time">' + relativeTime(iss.updated_at) + '</span>' +
-      '</div>' +
-    '</div>';
-  }).join('');
-
-  $('yourWorkContent').innerHTML = summaryHtml + '<div class="yw-card-list">' + rows + '</div>';
+    html += '<tr onclick="openIssuePage(\'' + iid + '\')">' +
+      '<td class="yw-key">' + esc(issueKeyStr(iss)) + '</td>' +
+      '<td class="yw-title-cell">' + esc(iss.title) + '</td>' +
+      '<td>' + typeIcon(iss.type) + ' <span style="font-size:12px;color:var(--text2)">' + cap(iss.type || '') + '</span></td>' +
+      '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\')" style="cursor:pointer">' + statusBadge(iss.status) + '</td>' +
+      '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\')" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>' +
+      '<td class="yw-space-cell">' + esc(iss.space_name || '') + '</td>' +
+      '<td class="yw-time-cell">' + relativeTime(iss.updated_at) + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  $('yourWorkContent').innerHTML = html;
 }
 
 // ═══════════════════════════════════════════════════════════
