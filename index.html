@@ -258,67 +258,82 @@
 
         <!-- Work Log Report View -->
         <div class="view" id="view-worklog-report" hidden>
-          <div class="wlr-header">
-            <h1 class="view-title" style="margin:0">Work Log</h1>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-outline btn-sm" id="wlrFieldListBtn" onclick="window._wlrOpenPivotPanel()" hidden>⊞ Field List</button>
-              <button class="btn btn-primary btn-sm" onclick="window._wlrExportCSV()">⬇ Export CSV</button>
-            </div>
-          </div>
-
-          <!-- Filter bar -->
-          <div class="wlr-filters">
-            <!-- Space multi-select -->
-            <div class="wlr-filter-group">
-              <label class="wlr-filter-label">Space</label>
-              <div class="aw-ms-wrap">
-                <button class="aw-ms-btn" id="wlrSpaceBtn" onclick="window._wlrToggle('space')">All Spaces <span class="aw-ms-count" id="wlrSpaceCount" hidden></span><span class="aw-ms-arrow">▾</span></button>
-                <div class="aw-ms-panel" id="wlrSpacePanel" hidden></div>
+          <!-- Sticky top zone: title + filters + stats + group-by -->
+          <div class="wlr-sticky-top">
+            <div class="wlr-header">
+              <h1 class="view-title" style="margin:0">Work Log</h1>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn btn-outline btn-sm" id="wlrFieldListBtn" onclick="window._wlrOpenPivotPanel()" hidden>⊞ Field List</button>
+                <button class="btn btn-primary btn-sm" onclick="window._wlrExportCSV()">⬇ Export CSV</button>
               </div>
             </div>
-            <!-- Date range -->
-            <div class="wlr-filter-group">
-              <label class="wlr-filter-label">From</label>
-              <input type="date" class="input input-sm" id="wlrFrom">
-            </div>
-            <div class="wlr-filter-group">
-              <label class="wlr-filter-label">To</label>
-              <input type="date" class="input input-sm" id="wlrTo">
-            </div>
-            <!-- User multi-select -->
-            <div class="wlr-filter-group">
-              <label class="wlr-filter-label">User</label>
-              <div class="aw-ms-wrap">
-                <button class="aw-ms-btn" id="wlrUserBtn" onclick="window._wlrToggle('user')">Assignees <span class="aw-ms-count" id="wlrUserCount" hidden></span><span class="aw-ms-arrow">▾</span></button>
-                <div class="aw-ms-panel" id="wlrUserPanel" hidden></div>
+
+            <!-- Filter bar -->
+            <div class="wlr-filters">
+              <!-- Space multi-select -->
+              <div class="wlr-filter-group">
+                <label class="wlr-filter-label">Space</label>
+                <div class="aw-ms-wrap">
+                  <button class="aw-ms-btn" id="wlrSpaceBtn" onclick="window._wlrToggle('space')">
+                    <svg class="aw-ms-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                    <span class="aw-ms-label">All Spaces</span>
+                    <span class="aw-ms-count" id="wlrSpaceCount" hidden></span>
+                    <svg class="aw-ms-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                  <div class="aw-ms-panel" id="wlrSpacePanel" hidden></div>
+                </div>
+              </div>
+              <!-- Date range -->
+              <div class="wlr-filter-group">
+                <label class="wlr-filter-label">From</label>
+                <input type="date" class="input input-sm" id="wlrFrom">
+              </div>
+              <div class="wlr-filter-group">
+                <label class="wlr-filter-label">To</label>
+                <input type="date" class="input input-sm" id="wlrTo">
+              </div>
+              <!-- User multi-select -->
+              <div class="wlr-filter-group">
+                <label class="wlr-filter-label">User</label>
+                <div class="aw-ms-wrap">
+                  <button class="aw-ms-btn" id="wlrUserBtn" onclick="window._wlrToggle('user')">
+                    <svg class="aw-ms-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span class="aw-ms-label">Assignees</span>
+                    <span class="aw-ms-count" id="wlrUserCount" hidden></span>
+                    <svg class="aw-ms-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                  <div class="aw-ms-panel" id="wlrUserPanel" hidden></div>
+                </div>
+              </div>
+              <!-- Billable -->
+              <div class="wlr-filter-group">
+                <label class="wlr-filter-label">Billable</label>
+                <select class="input input-sm" id="wlrBillable">
+                  <option value="">All</option>
+                  <option value="1">Billable only</option>
+                  <option value="0">Non-billable only</option>
+                </select>
+              </div>
+              <div class="wlr-filter-actions">
+                <button class="btn btn-primary btn-sm" onclick="window._wlrApply()">Apply</button>
+                <button class="btn btn-outline btn-sm" onclick="window._wlrClear()">Clear</button>
               </div>
             </div>
-            <!-- Billable -->
-            <div class="wlr-filter-group">
-              <label class="wlr-filter-label">Billable</label>
-              <select class="input input-sm" id="wlrBillable">
-                <option value="">All</option>
-                <option value="1">Billable only</option>
-                <option value="0">Non-billable only</option>
-              </select>
+
+            <!-- Summary cards -->
+            <div class="wlr-summary" id="wlrSummary"></div>
+
+            <!-- Group by toggle -->
+            <div class="wlr-groupby-bar">
+              <span class="wlr-groupby-label">Group by:</span>
+              <button class="wlr-gb-btn active" data-wlr-group="user">Assignee</button>
+              <button class="wlr-gb-btn" data-wlr-group="space">Space</button>
+              <button class="wlr-gb-btn" data-wlr-group="date">Date</button>
+              <button class="wlr-gb-btn" data-wlr-group="none">All Entries</button>
+              <button class="wlr-gb-btn" data-wlr-group="timesheet">Timesheet</button>
+              <button class="wlr-gb-btn" data-wlr-group="pivot">Pivot</button>
             </div>
-            <button class="btn btn-outline btn-sm" onclick="window._wlrApply()">Apply</button>
-            <button class="btn btn-ghost btn-sm" onclick="window._wlrClear()">Clear</button>
-          </div>
-
-          <!-- Summary cards -->
-          <div class="wlr-summary" id="wlrSummary"></div>
-
-          <!-- Group by toggle -->
-          <div class="wlr-groupby-bar">
-            <span class="wlr-groupby-label">Group by:</span>
-            <button class="wlr-gb-btn active" data-wlr-group="user">Assignee</button>
-            <button class="wlr-gb-btn" data-wlr-group="space">Space</button>
-            <button class="wlr-gb-btn" data-wlr-group="date">Date</button>
-            <button class="wlr-gb-btn" data-wlr-group="none">All Entries</button>
-            <button class="wlr-gb-btn" data-wlr-group="timesheet">Timesheet</button>
-            <button class="wlr-gb-btn" data-wlr-group="pivot">Pivot</button>
-          </div>
+          </div><!-- /.wlr-sticky-top -->
 
           <!-- Results -->
           <div id="wlrContent" class="wlr-content"></div>
