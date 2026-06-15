@@ -6907,8 +6907,10 @@ function renderNotifPanel() {
   var unread = notifs.filter(function(n){ return !n.is_read; }).length;
   var badge = document.getElementById('notifCountBadge');
   if (badge) { if (unread > 0) { badge.textContent = unread; badge.removeAttribute('hidden'); } else { badge.setAttribute('hidden', ''); } }
+  var listEl = $('notifList');
+  if (!listEl) return;
   if (notifs.length === 0) {
-    $('notifList').innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;padding:40px 20px;color:var(--text3)"><div style="font-size:32px;margin-bottom:12px">&#128276;</div><div style="font-size:14px;font-weight:600;color:var(--text2)">All caught up!</div><div style="font-size:13px;margin-top:4px">No new notifications</div></div>';
+    listEl.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;padding:40px 20px;color:var(--text3)"><div style="font-size:32px;margin-bottom:12px">&#128276;</div><div style="font-size:14px;font-weight:600;color:var(--text2)">All caught up!</div><div style="font-size:13px;margin-top:4px">No new notifications</div></div>';
     return;
   }
   var sorted = notifs.slice().sort(function(a,b){ return new Date(b.created_at)-new Date(a.created_at); });
@@ -6921,21 +6923,42 @@ function renderNotifPanel() {
     var icon = tIcons[n.type] || '&#128276;';
     var color = tColors[n.type] || '#0129AC';
     var isU = !n.is_read;
-    var bg = isU ? 'var(--bg3)' : 'transparent';
-    html += '<div onclick="window._markNotifRead(\'' + n.id + '\',\'' + encodeURIComponent(n.link||'') + '\')" style="display:flex;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);background:' + bg + '">' +
-      '<div style="width:36px;height:36px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">' + icon + '</div>' +
-      '<div style="flex:1;min-width:0">' +
-      '<div style="font-size:13px;font-weight:' + (isU?'600':'400') + ';color:var(--text);line-height:1.4">' + esc(n.title||'Notification') + '</div>' +
-      (n.body ? '<div style="font-size:12px;color:var(--text2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(n.body) + '</div>' : '') +
-      '<div style="font-size:11px;color:var(--text3);margin-top:4px">' + relativeTime(n.created_at) + '</div>' +
-      '</div>' + (isU ? '<div style="width:8px;height:8px;border-radius:50%;background:#0129AC;flex-shrink:0;margin-top:8px"></div>' : '') +
+    var encodedLink = encodeURIComponent(n.link || '');
+    html += '<div class="notif-item' + (isU ? ' unread' : '') + '" onclick="window._markNotifRead(\'' + n.id + '\',\'' + encodedLink + '\')">' +
+      '<div class="notif-item-icon" style="background:' + color + '22">' + icon + '</div>' +
+      '<div class="notif-item-body">' +
+      '<div class="notif-item-title' + (isU ? ' bold' : '') + '">' + esc(n.title || 'Notification') + '</div>' +
+      (n.body ? '<div class="notif-item-preview">' + esc(n.body) + '</div>' : '') +
+      '<div class="notif-item-time">' + relativeTime(n.created_at) + '</div>' +
+      '</div>' +
+      (isU ? '<div class="notif-item-dot"></div>' : '') +
       '</div>';
   }
-  $('notifList').innerHTML = html;
+  listEl.innerHTML = html;
 }
 
-window._markNotifRead = async function (id) {
+window._markNotifRead = async function (id, encodedLink) {
   await api('/api/notifications/' + id + '/read', 'PUT');
+  // Close panel
+  var panel = $('notifPanel');
+  if (panel) panel.setAttribute('hidden', '');
+  // Navigate to the linked issue
+  if (encodedLink) {
+    var link = decodeURIComponent(encodedLink); // e.g. "/?ENG-41"
+    var issueKey = link.replace(/^\/?\??/, ''); // → "ENG-41"
+    if (issueKey) {
+      // Try to find the issue in local data first
+      var issue = (S.data && S.data.issues || []).find(function(i) { return i.key === issueKey; });
+      if (issue) {
+        openIssuePage(issue.id, issue.key);
+      } else {
+        // Fetch across spaces then open
+        api('/api/issues/' + encodeURIComponent(issueKey)).then(function(data) {
+          if (data && data.id) openIssuePage(data.id, data.key);
+        }).catch(function() {});
+      }
+    }
+  }
   await loadNotifications();
   renderNotifPanel();
 };
