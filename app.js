@@ -962,7 +962,7 @@ function renderSpaceHeader(space) {
   var shown = members.slice(0, 5);
   var overflow = members.length - 5;
   var membersHtml = shown.map(function (u) { return avatarHtml(u, 28); }).join('');
-  if (overflow > 0) membersHtml += '<span class="avatar-overflow">+' + overflow + '</span>';
+  if (overflow > 0) membersHtml += '<span class="avatar-overflow" style="cursor:pointer" title="View all members" onclick="_settingsActiveTab=\'people\';navigateToSpace(S.currentSpace,\'space-settings\')">+' + overflow + '</span>';
   $('spaceMembers').innerHTML = membersHtml;
 
   var starred = isFavorited(space.id);
@@ -7229,11 +7229,10 @@ document.addEventListener('DOMContentLoaded', function () {
   // Create sprint
   $('createSprintBtn').addEventListener('click', function () { window._openSprintModal(null); });
 
-  // Invite member (header button navigates to settings > people)
+  // Invite member (header button opens invite modal directly)
   $('inviteMemberBtn').addEventListener('click', function () {
     if (S.currentSpace) {
-      _settingsActiveTab = 'people';
-      navigateToSpace(S.currentSpace, 'space-settings');
+      openInviteMemberModal();
     } else {
       toast('Select a space first', 'error');
     }
