@@ -5381,6 +5381,12 @@ function bindDrawerEdits(issue) {
     _drawerDescOriginal = $('drawerDesc').innerHTML;
     var b = $('drawerDescBtns'); if(b) b.style.display='flex';
   };
+
+  // Open links inside contenteditable description on click
+  $('drawerDesc').addEventListener('click', function(e) {
+    var a = e.target.closest('a[href]');
+    if (a) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); }
+  });
   var drawerDescSaveBtn = $('drawerDescSave');
   var drawerDescCancelBtn = $('drawerDescCancel');
   if(drawerDescSaveBtn) drawerDescSaveBtn.onclick = async function(e) {
