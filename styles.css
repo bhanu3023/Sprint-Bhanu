@@ -3100,26 +3100,34 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 .prm-tl-today-label { position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--danger,#e74c3c);font-weight:700;white-space:nowrap; }
 
 /* ── Swim-lane Gantt (Roadmunk-style) ─────────────────────── */
-.prm-swimlane-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg2); }
-.prm-sl-scroll { min-width:700px; }
+.prm-swimlane-wrap { overflow:hidden; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg2); }
+/* Scrollable in both directions; header and left columns will be sticky */
+.prm-sl-scroll { min-width:700px; overflow:auto; max-height:calc(100vh - 256px); }
 .prm-sl-table { width:100%; border-collapse:collapse; table-layout:fixed; }
 .prm-sl-table th,.prm-sl-table td { border:1px solid var(--border); }
 
-/* Header rows */
-.prm-sl-yr-row th { background:var(--bg3); padding:5px 8px; font-size:12px; font-weight:800; color:var(--text); text-align:center; }
-.prm-sl-corner-top { width:192px; background:var(--bg3) !important; }
-.prm-sl-year-th { background:var(--accent) !important; color:#fff !important; letter-spacing:.04em; }
+/* Header rows — sticky top (stacked: yr=0, qtr=28px, mo=56px) */
+.prm-sl-yr-row th  { background:var(--bg3); padding:5px 8px; font-size:12px; font-weight:800; color:var(--text); text-align:center; position:sticky; top:0; z-index:12; }
+.prm-sl-qtr-row th { background:var(--bg3); padding:6px 8px; font-size:11px; font-weight:700; color:var(--text2); text-align:center; white-space:nowrap; position:sticky; top:28px; z-index:11; }
+.prm-sl-mo-row th  { background:var(--bg2); padding:4px 2px; font-size:10px; font-weight:600; color:var(--text2); text-align:center; border-bottom:2px solid var(--border); white-space:nowrap; position:sticky; top:56px; z-index:10; }
 
-.prm-sl-qtr-row th { background:var(--bg3); padding:6px 8px; font-size:11px; font-weight:700; color:var(--text2); text-align:center; white-space:nowrap; }
-.prm-sl-hdr-group { width:52px; min-width:52px; color:var(--text3) !important; font-size:10px !important; }
-.prm-sl-hdr-cat { width:140px; min-width:140px; text-align:left !important; padding-left:12px !important; color:var(--text3) !important; font-size:10px !important; }
-.prm-sl-hdr-q { min-width:210px; text-transform:uppercase; letter-spacing:.05em; }
+/* Corner cell: sticky both top AND left, highest z-index */
+.prm-sl-corner-top { width:192px; background:var(--bg3) !important; position:sticky; left:0; z-index:20 !important; }
+.prm-sl-year-th    { background:var(--accent) !important; color:#fff !important; letter-spacing:.04em; }
+
+/* Group / Category header cells — sticky left */
+.prm-sl-hdr-group { width:52px; min-width:52px; color:var(--text3) !important; font-size:10px !important; position:sticky; left:0; z-index:11; background:var(--bg2) !important; }
+.prm-sl-hdr-cat   { width:140px; min-width:140px; text-align:left !important; padding-left:12px !important; color:var(--text3) !important; font-size:10px !important; position:sticky; left:52px; z-index:11; background:var(--bg2) !important; }
+.prm-sl-hdr-q  { min-width:210px; text-transform:uppercase; letter-spacing:.05em; }
 .prm-sl-q-active { color:var(--accent) !important; background:rgba(77,144,224,.07) !important; }
 
-/* Month header row */
-.prm-sl-mo-row th { background:var(--bg2); padding:4px 2px; font-size:10px; font-weight:600; color:var(--text2); text-align:center; border-bottom:2px solid var(--border); white-space:nowrap; }
-.prm-sl-hdr-mo { min-width:70px; width:70px; }
-.prm-sl-mo-active { color:var(--accent,#4d90e0) !important; font-weight:800 !important; background:rgba(77,144,224,.06) !important; }
+/* Month header */
+.prm-sl-hdr-mo     { min-width:70px; width:70px; }
+.prm-sl-mo-active  { color:var(--accent,#4d90e0) !important; font-weight:800 !important; background:rgba(77,144,224,.06) !important; }
+
+/* Body: Group and Category cells — sticky left so they stay when scrolling right */
+.prm-sl-group-td { position:sticky; left:0; z-index:5; background:var(--bg2); }
+.prm-sl-cat-td   { position:sticky; left:52px; z-index:5; background:var(--bg2); }
 
 /* Body rows */
 .prm-sl-body-row { background:var(--bg2); }
