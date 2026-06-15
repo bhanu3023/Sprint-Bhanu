@@ -5093,15 +5093,26 @@ async function openDrawer(issueId) {
   // If content has no HTML tags, convert newlines to <br>
   function renderDesc(text) {
     if (!text) return '';
+    var linkStyle = 'color:#0129AC;text-decoration:underline;cursor:pointer';
     if (/<[a-z][\s\S]*>/i.test(text)) {
-      // Clean up excessive gaps from pasted HTML
-      return text
+      // Fix broken <a href=""> by using the link text as the href
+      var fixed = text.replace(/<a\s[^>]*href=["']["'][^>]*>(https?:\/\/[^<]+)<\/a>/gi, function(m, url) {
+        return '<a href="' + url.trim() + '" style="' + linkStyle + '" target="_blank">' + url.trim() + '</a>';
+      });
+      // Linkify bare URLs not already inside an <a> tag
+      fixed = fixed.replace(/(<a\s[^>]*>[\s\S]*?<\/a>)|(https?:\/\/[^\s<"]+)/g, function(m, anchor, url) {
+        if (anchor) return anchor;
+        return '<a href="' + url + '" style="' + linkStyle + '" target="_blank">' + url + '</a>';
+      });
+      return fixed
         .replace(/<p>\s*<\/p>/gi, '')
         .replace(/(<br\s*\/?>){3,}/gi, '<br>')
         .replace(/&nbsp;/gi, ' ')
         .trim();
     }
-    var p=text.replace(/\\n{3,}/g,'\\n\\n').replace(/\\n/g,'<br>'); var d=p.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>'); return d.replace(/(https?:\/\/\S+)/g,'<a href="$1" style="color:#0129AC;text-decoration:underline" target="_blank">$1</a>');
+    var p = text.replace(/\n{3,}/g,'\n\n').replace(/\n/g,'<br>');
+    var d = p.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+    return d.replace(/(https?:\/\/[^\s<"]+)/g,'<a href="$1" style="' + linkStyle + '" target="_blank">$1</a>');
   }
   $('drawerDesc').innerHTML = renderDesc(descText);
   $('drawerFixDesc').innerHTML = renderDesc(fixDescText);
