@@ -1565,6 +1565,7 @@ body.light .drawer-sidebar { background: #f7f8fa; }
 .drawer-desc:hover { background: var(--bg3); }
 .drawer-desc:focus { border-color: var(--accent); background: var(--bg3); min-height: 80px; max-height: 400px; }
 .drawer-desc:empty::before { content: attr(data-placeholder); color: var(--text3); font-style: italic; }
+.drawer-desc a[href] { color: var(--accent); text-decoration: underline; cursor: pointer; }
 
 /* Subtask rows */
 .subtask-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius); cursor: pointer; font-size: 13px; }

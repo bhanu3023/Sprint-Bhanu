@@ -5382,10 +5382,14 @@ function bindDrawerEdits(issue) {
     var b = $('drawerDescBtns'); if(b) b.style.display='flex';
   };
 
-  // Open links inside contenteditable description on click
+  // Open links inside contenteditable description
+  $('drawerDesc').addEventListener('mousedown', function(e) {
+    var a = e.target.closest('a[href]');
+    if (a) { e.preventDefault(); e.stopPropagation(); window.open(a.href, '_blank', 'noopener'); }
+  });
   $('drawerDesc').addEventListener('click', function(e) {
     var a = e.target.closest('a[href]');
-    if (a) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); }
+    if (a) { e.preventDefault(); e.stopPropagation(); window.open(a.href, '_blank', 'noopener'); }
   });
   var drawerDescSaveBtn = $('drawerDescSave');
   var drawerDescCancelBtn = $('drawerDescCancel');
