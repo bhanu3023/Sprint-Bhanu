@@ -8793,7 +8793,7 @@ window._copyIssueUrl = function() {
     el._lf=true;
     el.addEventListener("blur",function(){
       var h=el.innerHTML;
-      var h2=h.replace(/(?<!href=")(https?:\/\/[^\s<]+)/g,"<a href=\"\" style=\"color:#0129AC;text-decoration:underline\" target=\"_blank\">\<\/a>");
+      var h2=h.replace(/(?<!href=")(https?:\/\/[^\s<"]+)/g,'<a href="$1" style="color:#0129AC;text-decoration:underline;cursor:pointer" target="_blank">$1</a>');
       if(h2!==h){el.innerHTML=h2;autoSave(field,h2.trim());}
     });
   }
