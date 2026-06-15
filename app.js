@@ -1036,29 +1036,6 @@ function renderHome() {
   }
   $('recentActivity').innerHTML = actHtml || '<div class="db-issue-empty">No recent activity</div>';
 
-  // Spaces count badge
-  var scEl = $('dbSpacesCount'); if (scEl) scEl.textContent = spaces.length;
-
-  // Spaces Grid
-  var gridHtml = '';
-  for (var k = 0; k < spaces.length; k++) {
-    var sp = spaces[k];
-    var color = sp.color || '#174F96';
-    var mems = getSpaceMembers(sp.id);
-    var issCount = getSpaceIssues(sp.id).length;
-    gridHtml += '<div class="db-space-card" style="--db-sc-color:' + color + '" onclick="navigateToSpace(\'' + sp.id + '\')">' +
-      '<div class="db-sc-head">' +
-      '<div class="db-sc-avatar" style="background:' + color + '">' + (sp.name ? sp.name.charAt(0).toUpperCase() : '?') + '</div>' +
-      '<div class="db-sc-info"><div class="db-sc-name">' + esc(sp.name) + '</div><div class="db-sc-key">' + esc(sp.key) + '</div></div>' +
-      '</div>' +
-      '<div class="db-sc-desc">' + esc(sp.description || 'No description') + '</div>' +
-      '<div class="db-sc-footer"><div class="db-sc-meta">' +
-      '<span class="db-sc-stat"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm5 5a5 5 0 0 0-10 0h10z"/></svg>' + mems.length + ' member' + (mems.length !== 1 ? 's' : '') + '</span>' +
-      '<span class="db-sc-stat"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M14.5 3a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h13zm-13-1A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13z"/></svg>' + issCount + ' issue' + (issCount !== 1 ? 's' : '') + '</span>' +
-      '</div></div>' +
-      '</div>';
-  }
-  $('allSpacesGrid').innerHTML = gridHtml || '<p class="text-muted" style="font-size:13px">No spaces yet.</p>';
 }
 
 // ═══════════════════════════════════════════════════════════
