@@ -7194,55 +7194,65 @@ document.addEventListener('DOMContentLoaded', function () {
       sprintSel.innerHTML = '<option value="">None</option>' +
         sprints.map(function(sp){ return '<option value="' + sp.id + '">' + esc(sp.name) + '</option>'; }).join('');
     }
-    // Render custom fields
+    // Render custom fields — always show ALL unique custom fields across all spaces
     var cfContainer = $('issueCustomFieldsContainer');
     if (!cfContainer) return;
-    var cached = (S.data.custom_fields || []).filter(function(f){ return f.space_id == spaceId; });
+
     function renderCF(cfs) {
       var excluded = ['team', 'product type'];
-      cfs = cfs.filter(function(f){ return excluded.indexOf((f.name||'').toLowerCase()) < 0; });
-      cfContainer.innerHTML = cfs.map(function(f) {
+      // Deduplicate by lowercase name — keep first occurrence
+      var seen = {};
+      var unique = [];
+      cfs.forEach(function(f) {
+        var key = (f.name || '').toLowerCase().trim();
+        if (excluded.indexOf(key) !== -1) return;
+        if (seen[key]) return;
+        seen[key] = true;
+        unique.push(f);
+      });
+      cfContainer.innerHTML = unique.map(function(f) {
         var opts = Array.isArray(f.options) ? f.options :
           (typeof f.options === 'string' ? (function(){ try{ return JSON.parse(f.options); }catch(e){ return []; } })() : []);
         if (f.field_type === 'select') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
-            '<select class="input cf-field" data-cf-id="' + f.id + '">' +
+            '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '">' +
             '<option value="">— Select —</option>' +
+            opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
+            '</select></div>';
+        } else if (f.field_type === 'multiselect') {
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
+            '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" data-multi="1" multiple style="min-height:80px">' +
             opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
             '</select></div>';
         } else if (f.field_type === 'text') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
-            '<input type="text" class="input cf-field" data-cf-id="' + f.id + '"></div>';
+            '<input type="text" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
         } else if (f.field_type === 'number') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
-            '<input type="number" class="input cf-field" data-cf-id="' + f.id + '"></div>';
-        } else if (f.field_type === 'multiselect') {
-          return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
-            '<select class="input cf-field" data-cf-id="' + f.id + '" data-multi="1" multiple style="min-height:80px">' +
-            opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
-            '</select></div>';
+            '<input type="number" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
         } else if (f.field_type === 'textarea') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
-            '<textarea class="input cf-field" data-cf-id="' + f.id + '" rows="3"></textarea></div>';
+            '<textarea class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" rows="3"></textarea></div>';
         }
         return '';
       }).join('');
     }
-    if (cached.length) {
-      renderCF(cached);
+
+    // Always use ALL cached custom fields from all spaces (deduplicated)
+    var allCFs = S.data.custom_fields || [];
+    if (allCFs.length) {
+      renderCF(allCFs);
     } else if (spaceId) {
-      // Fetch from API if not in cache (e.g. coming from home/global view)
       cfContainer.innerHTML = '';
       api('/api/data?space_id=' + spaceId).then(function(data) {
         if (data && data.custom_fields) {
-          // Merge into cache
           S.data.custom_fields = (S.data.custom_fields || []).filter(function(f){ return f.space_id !== spaceId; }).concat(data.custom_fields);
-          renderCF(data.custom_fields);
+          renderCF(S.data.custom_fields);
         }
       }).catch(function(){});
     } else {
