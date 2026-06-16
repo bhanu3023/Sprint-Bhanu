@@ -1296,12 +1296,17 @@ app.delete('/api/users/:id', requireAuth, wrap(async (req, res) => {
     return res.status(400).json({ error: 'You cannot delete your own account' });
   const ex = await q('SELECT id FROM users WHERE id=$1', [id]);
   if (!ex.rows.length) return res.status(404).json({ error: 'User not found' });
-  // Nullify references before deleting
+  // Nullify / reassign all references before deleting
   await q('UPDATE issues SET assignee_id=NULL WHERE assignee_id=$1', [id]);
   await q('UPDATE issues SET reporter_id=NULL WHERE reporter_id=$1', [id]);
+  await q('UPDATE issues SET created_by=NULL WHERE created_by=$1', [id]);
+  // Reassign space ownership to the requesting admin
+  await q('UPDATE spaces SET owner_id=$1 WHERE owner_id=$2', [req.user.id, id]);
+  await q('UPDATE spaces SET created_by=$1 WHERE created_by=$2', [req.user.id, id]);
   await q('DELETE FROM space_members WHERE user_id=$1', [id]);
   await q('DELETE FROM comments WHERE user_id=$1', [id]);
   await q('DELETE FROM notifications WHERE user_id=$1', [id]);
+  await q('UPDATE worklogs SET user_id=NULL WHERE user_id=$1', [id]).catch(function(){});
   await q('DELETE FROM users WHERE id=$1', [id]);
   res.json({ success: true });
 }));
