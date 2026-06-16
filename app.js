@@ -7287,7 +7287,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // Sidebar toggle
   if ($('sidebarToggle')) $('sidebarToggle').addEventListener('click', function () {
-    $('sidebar').classList.toggle('sidebar-collapsed');
+    $('sidebar').classList.toggle('collapsed');
   });
 
   // Sidebar search
