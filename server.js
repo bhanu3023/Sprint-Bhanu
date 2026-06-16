@@ -1222,7 +1222,7 @@ app.put('/api/users/:id', requireAuth, wrap(async (req, res) => {
   const isAdmin = req.user.role === 'admin' || req.user.role === 'owner';
   if (!isSelf && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
 
-  const { name, role, is_active, theme, color, avatar_url } = req.body;
+  const { name, email, role, is_active, theme, color, avatar_url } = req.body;
   const before = (await q('SELECT name,email,role,is_active,theme FROM users WHERE id=$1', [req.params.id])).rows[0];
 
   // Build dynamic update — self can only update name/theme/color/avatar; admins can also update role/is_active
@@ -1230,6 +1230,7 @@ app.put('/api/users/:id', requireAuth, wrap(async (req, res) => {
   const push = (col, val) => { setClauses.push(`${col}=$${vals.length + 1}`); vals.push(val); };
 
   if (name     !== undefined) push('name', name);
+  if (email    !== undefined && isSelf) push('email', email);
   if (theme    !== undefined) push('theme', theme);
   if (color    !== undefined) push('color', color);
   if (avatar_url !== undefined) push('avatar_url', avatar_url);

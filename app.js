@@ -631,8 +631,96 @@ function renderTopbarProfile(user) {
     var menu = $('topbarProfileMenu');
     if (menu) menu.hidden = true;
     if (action === 'settings') navigateTo('settings');
-    else if (action === 'profile') navigateTo('settings'); // opens settings; can refine later
+    else if (action === 'profile') openProfileSettingsModal();
     else if (action === 'logout') doLogout();
+  };
+}
+
+function openProfileSettingsModal() {
+  var user = S.currentUserObj || {};
+  var nameParts = (user.name || '').split(' ');
+  var firstName = nameParts[0] || '';
+  var lastName = nameParts.slice(1).join(' ') || '';
+  var color = user.color || '#0129AC';
+  var av = user.avatar_url
+    ? '<img src="' + esc(user.avatar_url) + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover">'
+    : '<div style="width:64px;height:64px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">' + initials(user.name) + '</div>';
+
+  var overlay = document.createElement('div');
+  overlay.id = '_profileSettingsOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:16px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,0.2);overflow:hidden">' +
+      // Header
+      '<div style="padding:20px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">' +
+        '<div>' +
+          '<div style="font-size:17px;font-weight:700;color:#0f172a">Profile Settings</div>' +
+          '<div style="font-size:12px;color:#64748b;margin-top:2px">Update your personal information</div>' +
+        '</div>' +
+        '<button id="_profileModalClose" style="width:30px;height:30px;border:none;background:#f1f5f9;border-radius:8px;cursor:pointer;font-size:16px;color:#64748b;display:flex;align-items:center;justify-content:center">&times;</button>' +
+      '</div>' +
+      // Avatar
+      '<div style="padding:24px 24px 0;display:flex;align-items:center;gap:16px">' +
+        '<div>' + av + '</div>' +
+        '<div>' +
+          '<div style="font-size:14px;font-weight:600;color:#0f172a">' + esc(user.name || '') + '</div>' +
+          '<div style="font-size:12px;color:#64748b;margin-top:2px">' + esc(user.email || '') + '</div>' +
+          '<div style="margin-top:6px"><span style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:20px">' + cap(user.role || 'member') + '</span></div>' +
+        '</div>' +
+      '</div>' +
+      // Form
+      '<div style="padding:20px 24px">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
+          '<div>' +
+            '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">First Name</label>' +
+            '<input id="_profFirstName" value="' + esc(firstName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+          '</div>' +
+          '<div>' +
+            '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">Last Name</label>' +
+            '<input id="_profLastName" value="' + esc(lastName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:20px">' +
+          '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">Email Address</label>' +
+          '<input id="_profEmail" type="email" value="' + esc(user.email || '') + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+        '</div>' +
+        '<div style="display:flex;gap:10px;justify-content:flex-end">' +
+          '<button id="_profileCancelBtn" style="padding:9px 20px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;color:#64748b;font-size:13px;font-weight:600;cursor:pointer">Cancel</button>' +
+          '<button id="_profileSaveBtn" style="padding:9px 24px;border:none;border-radius:8px;background:#0129AC;color:#fff;font-size:13px;font-weight:700;cursor:pointer">Save Changes</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+
+  var close = function() { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
+  overlay.querySelector('#_profileModalClose').onclick = close;
+  overlay.querySelector('#_profileCancelBtn').onclick = close;
+  overlay.onclick = function(e) { if (e.target === overlay) close(); };
+
+  overlay.querySelector('#_profileSaveBtn').onclick = async function() {
+    var fn = overlay.querySelector('#_profFirstName').value.trim();
+    var ln = overlay.querySelector('#_profLastName').value.trim();
+    var em = overlay.querySelector('#_profEmail').value.trim();
+    var fullName = (fn + ' ' + ln).trim();
+    if (!fullName) { toast('Name is required', 'error'); return; }
+    var saveBtn = overlay.querySelector('#_profileSaveBtn');
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    try {
+      var updated = await api('/api/users/' + user.id, 'PUT', { name: fullName, email: em });
+      // Update local state
+      if (S.currentUserObj) { S.currentUserObj.name = updated.name; S.currentUserObj.email = updated.email; }
+      if (S.data && S.data.users) {
+        var idx = S.data.users.findIndex(function(u){ return u.id === user.id; });
+        if (idx !== -1) { S.data.users[idx].name = updated.name; S.data.users[idx].email = updated.email; }
+      }
+      renderTopbarProfile(S.currentUserObj);
+      close();
+      toast('Profile updated successfully', 'success');
+    } catch(e) {
+      toast('Failed to save: ' + (e.message || 'Unknown error'), 'error');
+      saveBtn.disabled = false; saveBtn.textContent = 'Save Changes';
+    }
   };
 }
 
