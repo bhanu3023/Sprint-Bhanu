@@ -8068,10 +8068,35 @@ async function renderAdminUsers(el) {
       if (!ok) return;
       try {
         await api('/api/users/' + uid, 'DELETE');
-        popupAlert('User Deleted', name + ' has been permanently removed.', 'warning');
-        renderAdminSettings('user-management');
+        // Rich success popup
+        var successOverlay = document.createElement('div');
+        successOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+        successOverlay.innerHTML =
+          '<div style="background:#fff;border-radius:16px;padding:36px 32px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.25);text-align:center">' +
+          '<div style="width:68px;height:68px;border-radius:50%;background:#fef3c7;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">✅</div>' +
+          '<h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111">User Deleted</h2>' +
+          '<p style="margin:0 0 8px;font-size:15px;font-weight:600;color:#1e293b">' + esc(name) + '</p>' +
+          '<p style="margin:0 0 24px;font-size:13px;color:#64748b">This user has been permanently removed from the system.</p>' +
+          '<button id="_delSuccessClose" style="padding:10px 32px;border:none;border-radius:8px;background:#0129AC;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Done</button>' +
+          '</div>';
+        document.body.appendChild(successOverlay);
+        var closeSuccess = function() { if (document.body.contains(successOverlay)) document.body.removeChild(successOverlay); renderAdminSettings('user-management'); };
+        successOverlay.querySelector('#_delSuccessClose').onclick = closeSuccess;
+        successOverlay.onclick = function(e) { if (e.target === successOverlay) closeSuccess(); };
+        setTimeout(closeSuccess, 3000);
       } catch(e) {
-        popupAlert('Error', 'Could not delete user: ' + (e.message || 'Unknown error'), 'error');
+        var errOverlay = document.createElement('div');
+        errOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+        errOverlay.innerHTML =
+          '<div style="background:#fff;border-radius:16px;padding:36px 32px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.25);text-align:center">' +
+          '<div style="width:68px;height:68px;border-radius:50%;background:#fee2e2;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">❌</div>' +
+          '<h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#dc2626">Delete Failed</h2>' +
+          '<p style="margin:0 0 24px;font-size:13px;color:#64748b">' + esc(e.message || 'Could not delete user. Please try again.') + '</p>' +
+          '<button id="_delErrClose" style="padding:10px 32px;border:none;border-radius:8px;background:#dc2626;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Close</button>' +
+          '</div>';
+        document.body.appendChild(errOverlay);
+        errOverlay.querySelector('#_delErrClose').onclick = function() { document.body.removeChild(errOverlay); };
+        errOverlay.onclick = function(e) { if (e.target === errOverlay) document.body.removeChild(errOverlay); };
       }
     });
   });
