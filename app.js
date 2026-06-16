@@ -1146,6 +1146,15 @@ function renderHome() {
   var greetEl = $('dbGreeting'); if (greetEl) greetEl.textContent = 'Hello,';
   var fullName = me && me.name ? me.name : 'there';
   var nameEl = $('dbUserName'); if (nameEl) nameEl.textContent = fullName;
+  var heroAv = $('dbHeroAvatar');
+  if (heroAv && me) {
+    if (me.avatar_url) {
+      heroAv.innerHTML = '<img src="' + esc(me.avatar_url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    } else {
+      heroAv.style.background = me.color || 'rgba(255,255,255,0.18)';
+      heroAv.textContent = initials(me.name);
+    }
+  }
 
   // Stat cards
   function dbStat(label, value, color, rgb, svgPath, onclick) {
