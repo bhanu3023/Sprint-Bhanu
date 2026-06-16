@@ -431,11 +431,7 @@ function populateSprintSelect(sel, sprints, selectedId) {
 // THEME
 // ═══════════════════════════════════════════════════════════
 function initTheme() {
-  // Use localStorage as fast initial load; DB preference applied after login in init()
-  var saved = localStorage.getItem('sb-theme') || 'light';
-  applyTheme(saved, false);
-
-
+  applyTheme('light', false);
 }
 
 function toggleTheme() {
