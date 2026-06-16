@@ -8084,6 +8084,9 @@ async function renderAdminUsers(el) {
       if (!ok) return;
       try {
         await api('/api/users/' + uid, 'DELETE');
+        // Remove row immediately from table
+        var delBtn2 = document.querySelector('.um-delete-user-btn[data-uid="' + uid + '"]');
+        if (delBtn2) { var delRow = delBtn2.closest('tr'); if (delRow) delRow.remove(); }
         // Rich success popup
         var successOverlay = document.createElement('div');
         successOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
