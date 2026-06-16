@@ -17,6 +17,7 @@ const S = {
   calendarDate: new Date(),
   calendarView: 'month',
   allWorkSort: { col: 'updated_at', dir: 'desc' },
+  allWorkPage: 1,
   allWorkSelected: new Set(),
   yourWorkTab: 'assigned',
   awFilters: {
@@ -4336,7 +4337,8 @@ window._awToggleColKey = function(key, on) {
 };
 
 S.allWorkSort = { col: 'key', dir: 'desc' };
-function renderAllWork() {
+function renderAllWork(opts) {
+  if (!opts || !opts.keepPage) S.allWorkPage = 1;
   var search = ($('allWorkSearch') ? $('allWorkSearch').value : '').toLowerCase().trim();
   var f = S.awFilters;
 
@@ -4480,6 +4482,10 @@ function renderAllWork() {
 
   var visCols = _awGetVisibleCols();
 
+  var PAGE_SIZE = 50;
+  var totalIssues = issues.length;
+  var pagedIssues = issues.slice(0, PAGE_SIZE * (S.allWorkPage || 1));
+
   html += '<table class="data-table" style="min-width:1200px;width:100%"><thead><tr>' +
     '<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>' +
     visCols.map(function(col) {
@@ -4489,8 +4495,8 @@ function renderAllWork() {
     }).join('') +
     '</tr></thead><tbody>';
 
-  for (var i = 0; i < issues.length; i++) {
-    var iss = issues[i];
+  for (var i = 0; i < pagedIssues.length; i++) {
+    var iss = pagedIssues[i];
     var assignee = findUser(iss.assignee_id);
     var sprint = (S.data.sprints || []).find(function (sp) { return sp.id == iss.sprint_id; });
     var reporter = findUser(iss.reporter_id);
@@ -4532,7 +4538,23 @@ function renderAllWork() {
       '</tr>';
   }
   html += '</tbody></table>';
+
+  var shown = pagedIssues.length;
+  if (shown < totalIssues) {
+    html += '<div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:18px 0;border-top:1px solid var(--border)">' +
+      '<span style="font-size:13px;color:var(--text3)">Showing <b>' + shown + '</b> of <b>' + totalIssues + '</b> issues</span>' +
+      '<button id="awLoadMoreBtn" style="padding:7px 20px;border:1.5px solid #0129AC;border-radius:8px;background:#fff;color:#0129AC;font-size:13px;font-weight:600;cursor:pointer" onmouseover="this.style.background=\'#f0f4ff\'" onmouseout="this.style.background=\'#fff\'">Load More</button>' +
+      '</div>';
+  } else if (totalIssues > PAGE_SIZE) {
+    html += '<div style="text-align:center;padding:14px 0;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">All ' + totalIssues + ' issues loaded</div>';
+  }
+
   $('allWorkTable').innerHTML = html;
+
+  var loadMoreBtn = $('awLoadMoreBtn');
+  if (loadMoreBtn) {
+    loadMoreBtn.onclick = function() { S.allWorkPage = (S.allWorkPage || 1) + 1; renderAllWork({keepPage:true}); };
+  }
 
   // Bind sorting
   qsa('.sortable-th').forEach(function (thEl) {
