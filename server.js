@@ -1708,6 +1708,46 @@ app.post('/api/admin/sync-db', async (req, res) => {
       )`);
     } catch(e) { console.error('Migration warning (notifications):', e.message); }
 
+    // Fix duplicate issue keys on startup
+    try {
+      const dupRows = await q(`
+        SELECT i.id, i.key, i.space_id, s.key AS space_key
+        FROM issues i
+        JOIN spaces s ON s.id = i.space_id
+        WHERE i.key IN (
+          SELECT key FROM issues WHERE deleted_at IS NULL GROUP BY key HAVING COUNT(*) > 1
+        ) AND i.deleted_at IS NULL
+        ORDER BY i.space_id, i.key, i.created_at ASC
+      `);
+      if (dupRows.rows.length > 0) {
+        console.log('[startup] Found ' + dupRows.rows.length + ' issues with duplicate keys — fixing...');
+        // Group by space
+        const bySpace = {};
+        dupRows.rows.forEach(function(r) {
+          if (!bySpace[r.space_id]) bySpace[r.space_id] = [];
+          bySpace[r.space_id].push(r);
+        });
+        for (const spaceId of Object.keys(bySpace)) {
+          const maxRow = (await q(
+            "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1",
+            [spaceId]
+          )).rows[0];
+          let counter = maxRow.mx;
+          const spaceKey = bySpace[spaceId][0].space_key;
+          // Skip the first occurrence of each duplicate key (keep it), renumber the rest
+          const seen = new Set();
+          for (const row of bySpace[spaceId]) {
+            if (!seen.has(row.key)) { seen.add(row.key); continue; }
+            counter++;
+            const newKey = spaceKey + '-' + counter;
+            await q('UPDATE issues SET key=$1 WHERE id=$2', [newKey, row.id]);
+            console.log('[startup] Renamed ' + row.key + ' → ' + newKey + ' (id=' + row.id + ')');
+          }
+        }
+        console.log('[startup] Duplicate key fix complete.');
+      }
+    } catch(e) { console.error('[startup] Duplicate key fix error:', e.message); }
+
     console.log('==================================================');
     console.log('  SprintBoard Server');
     console.log('  Database connected');
