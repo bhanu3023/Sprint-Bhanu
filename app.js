@@ -7938,6 +7938,20 @@ async function renderAdminUsers(el) {
 
   var totalActive = users.filter(function(u){ return u.is_active!==false; }).length;
 
+  // Define filter BEFORE setting innerHTML so onclick can find it immediately
+  window._umFilter = function(filter) {
+    document.querySelectorAll('.um-filter-chip').forEach(function(chip) {
+      chip.style.border = chip.getAttribute('data-filter') === filter ? '2px solid #0129AC' : '2px solid transparent';
+      chip.style.opacity = chip.getAttribute('data-filter') === filter ? '1' : '0.8';
+    });
+    document.querySelectorAll('tr[data-um-status]').forEach(function(row) {
+      row.style.display = (filter === 'all' || row.getAttribute('data-um-status') === filter) ? '' : 'none';
+    });
+    document.querySelectorAll('tr[data-um-invite]').forEach(function(row) {
+      row.style.display = (filter === 'all' || filter === 'pending') ? '' : 'none';
+    });
+  };
+
   el.innerHTML =
     '<div style="padding:24px 0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' +
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:12px">' +
