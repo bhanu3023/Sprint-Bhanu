@@ -7671,6 +7671,24 @@ window.renderAdminSettings = renderAdminSettings;
 
 // Wire up nav clicks after DOM ready
 document.addEventListener('click', function(e) {
+  // Filter chip click — handle first before nav check
+  var chip = e.target.closest('.um-filter-chip');
+  if (chip) {
+    e.stopPropagation();
+    var filter = chip.getAttribute('data-filter');
+    document.querySelectorAll('.um-filter-chip').forEach(function(c) {
+      c.style.border = c.getAttribute('data-filter') === filter ? '2px solid #0129AC' : '2px solid transparent';
+      c.style.opacity = c.getAttribute('data-filter') === filter ? '1' : '0.8';
+    });
+    document.querySelectorAll('tr[data-um-status]').forEach(function(row) {
+      row.style.display = (filter === 'all' || row.getAttribute('data-um-status') === filter) ? '' : 'none';
+    });
+    document.querySelectorAll('tr[data-um-invite]').forEach(function(row) {
+      row.style.display = (filter === 'all' || filter === 'pending') ? '' : 'none';
+    });
+    return;
+  }
+
   var item = e.target.closest('.admin-nav-item');
   if (!item || !item.dataset.section) return;
   renderAdminSettings(item.dataset.section);
