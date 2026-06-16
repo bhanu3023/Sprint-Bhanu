@@ -394,11 +394,14 @@ app.get('/api/issues/:id', wrap(async (req, res) => {
 app.post('/api/issues', wrap(async (req, res) => {
   const b = req.body;
   if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
-  const cnt = (await q("SELECT COUNT(*)::int AS c FROM issues WHERE space_id=$1", [b.space_id])).rows[0].c;
   const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [b.space_id])).rows[0];
   if (!spaceKeyRow) return res.status(400).json({ error: 'Invalid space_id' });
   const spaceKey = spaceKeyRow.key;
-  const key = `${spaceKey}-${cnt + 1}`;
+  const maxRow = (await q(
+    "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1 AND key LIKE $2",
+    [b.space_id, spaceKey + '-%']
+  )).rows[0];
+  const key = `${spaceKey}-${maxRow.mx + 1}`;
   const id = uid();
   const r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
       assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
