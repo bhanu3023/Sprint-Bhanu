@@ -1303,6 +1303,7 @@ app.delete('/api/users/:id', requireAuth, wrap(async (req, res) => {
   await q('UPDATE roadmap_items SET assigned_to=NULL WHERE assigned_to=$1', [id]).catch(()=>{});
   await q('UPDATE worklogs SET user_id=NULL WHERE user_id=$1', [id]).catch(()=>{});
   await q('UPDATE spaces SET owner_id=$1 WHERE owner_id=$2', [req.user.id, id]).catch(()=>{});
+  await q('DELETE FROM saved_filters WHERE user_id=$1', [id]).catch(()=>{});
   await q('DELETE FROM space_favorites WHERE user_id=$1', [id]).catch(()=>{});
   await q('DELETE FROM space_members WHERE user_id=$1', [id]).catch(()=>{});
   await q('DELETE FROM comments WHERE user_id=$1', [id]).catch(()=>{});
