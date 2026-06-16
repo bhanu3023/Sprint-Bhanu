@@ -1288,6 +1288,24 @@ app.post('/api/users', requireAuth, wrap(async (req, res) => {
   res.status(201).json(r.rows[0]);
 }));
 
+app.delete('/api/users/:id', requireAuth, wrap(async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'owner')
+    return res.status(403).json({ error: 'Only admins can delete users' });
+  const { id } = req.params;
+  if (id === req.user.id)
+    return res.status(400).json({ error: 'You cannot delete your own account' });
+  const ex = await q('SELECT id FROM users WHERE id=$1', [id]);
+  if (!ex.rows.length) return res.status(404).json({ error: 'User not found' });
+  // Nullify references before deleting
+  await q('UPDATE issues SET assignee_id=NULL WHERE assignee_id=$1', [id]);
+  await q('UPDATE issues SET reporter_id=NULL WHERE reporter_id=$1', [id]);
+  await q('DELETE FROM space_members WHERE user_id=$1', [id]);
+  await q('DELETE FROM comments WHERE user_id=$1', [id]);
+  await q('DELETE FROM notifications WHERE user_id=$1', [id]);
+  await q('DELETE FROM users WHERE id=$1', [id]);
+  res.json({ success: true });
+}));
+
 // ── Email Helpers ──────────────────────────────────────────
 async function getEmailSettings() {
   // DB settings take priority; fall back to .env SMTP_* variables
