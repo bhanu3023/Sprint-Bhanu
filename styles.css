@@ -318,48 +318,98 @@ body.light ::-webkit-scrollbar-thumb {
    SIDEBAR — Light Mode Overrides
    ------------------------------------------------------------ */
 body.light .sidebar {
-  background: #0129ac;
-  border-right-color: #011e87;
+  background: linear-gradient(180deg, #0f2fd4 0%, #0129ac 40%, #011e87 100%);
+  border-right: none;
+  box-shadow: 2px 0 16px rgba(1,41,172,0.18);
 }
 
 body.light .sidebar-header {
   background: #ffffff;
-  border-bottom-color: rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid #e8eeff;
+  box-shadow: 0 1px 0 rgba(1,41,172,0.06);
 }
 
-body.light .workspace-name {
+body.light .workspace-name,
+body.light .sidebar-workspace-name {
   color: #0129ac;
+  font-weight: 700;
 }
 
 body.light .sidebar-label {
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.08em;
+  font-size: 10px;
 }
 
 body.light .sidebar-label button {
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 body.light .nav-item {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  margin: 1px 10px;
 }
 
 body.light .nav-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
 }
 
 body.light .nav-item.active {
   background: rgba(255, 255, 255, 0.18);
   color: #ffffff;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 #fff, inset 0 0 0 1px rgba(255,255,255,0.1);
+}
+
+body.light .nav-item .nav-icon {
+  opacity: 0.85;
+}
+
+body.light .nav-item.active .nav-icon {
+  opacity: 1;
+}
+
+body.light .space-item {
+  color: rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  margin: 1px 10px;
+}
+
+body.light .space-item:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+body.light .space-item.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 #fff, inset 0 0 0 1px rgba(255,255,255,0.1);
+}
+
+body.light .nav-divider {
+  background: rgba(255,255,255,0.1);
+  margin: 6px 14px;
 }
 
 body.light .sidebar-create-btn {
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
 }
 
 body.light .sidebar-create-btn:hover {
   background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255,255,255,0.35);
+}
+
+body.light .sidebar-empty {
+  color: rgba(255,255,255,0.4);
+  font-size: 12px;
+  padding: 4px 16px;
 }
 
 body.light .sidebar-search input {
