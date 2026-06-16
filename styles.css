@@ -3673,6 +3673,28 @@ body.light .db-hero {
   letter-spacing: -0.3px;
 }
 
+.db-hero-brand {
+  text-align: right;
+  flex-shrink: 0;
+}
+.db-hero-brand-label {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 400;
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+.db-hero-brand-name {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0129AC;
+  letter-spacing: -0.4px;
+  background: linear-gradient(135deg, #0129AC 0%, #3b5bdb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
 /* Stat Cards */
 .db-stats {
   display: grid;
