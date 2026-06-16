@@ -7940,13 +7940,13 @@ async function renderAdminUsers(el) {
     (pendingInvites.length ? '<div style="display:flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + pendingInvites.length + ' Pending Invites</div>' : '') +
     '</div>' +
     '<div style="background:#fff;border:1px solid #dfe1e6;border-radius:8px;overflow-x:auto;box-shadow:0 1px 4px rgba(0,0,0,0.06);-webkit-overflow-scrolling:touch">' +
-    '<table style="width:100%;min-width:900px;border-collapse:collapse;table-layout:fixed">' +
+    '<table style="width:100%;border-collapse:collapse;table-layout:auto">' +
     '<thead><tr style="background:#f4f5f7;border-bottom:2px solid #dfe1e6">' +
-    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:28%">User</th>' +
-    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:15%">Role</th>' +
-    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:12%">Status</th>' +
-    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:15%">Last Login</th>' +
-    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;width:30%">Actions</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:220px">User</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:130px">Role</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:90px">Status</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:120px">Last Login</th>' +
+    '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:220px">Actions</th>' +
     '</tr></thead><tbody>' + userRows + inviteRows + '</tbody></table></div></div>';
 
   qsa('.um-role-sel').forEach(function(sel) {
