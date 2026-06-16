@@ -3637,114 +3637,61 @@ body.light .yw-card:hover { background:#f6f8ff; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 32px 36px;
+  padding: 28px 32px;
   margin: -24px -24px 28px;
-  background: linear-gradient(135deg, #0129AC 0%, #1a3ecf 50%, #0f2fd4 100%);
+  background: linear-gradient(135deg, #f0f4ff 0%, #e8eeff 60%, #f5f7ff 100%);
+  border-bottom: 1px solid #dde5ff;
   position: relative;
   overflow: hidden;
-  min-height: 130px;
 }
-/* Decorative blobs */
-.db-hero-blob {
+.db-hero::before {
+  content: '';
   position: absolute;
-  border-radius: 50%;
+  right: -40px;
+  top: -40px;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(1,41,172,0.07) 0%, transparent 70%);
   pointer-events: none;
 }
-.db-hero-blob1 {
-  width: 260px; height: 260px;
-  top: -80px; right: 260px;
-  background: radial-gradient(circle, rgba(255,255,255,0.07) 0%, transparent 70%);
-}
-.db-hero-blob2 {
-  width: 200px; height: 200px;
-  bottom: -80px; right: 80px;
-  background: radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%);
-}
-.db-hero-blob3 {
-  width: 120px; height: 120px;
-  top: 10px; right: 420px;
-  background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
-}
 body.light .db-hero {
-  background: linear-gradient(135deg, #0129AC 0%, #1a3ecf 50%, #0f2fd4 100%);
+  background: linear-gradient(135deg, #f0f4ff 0%, #e8eeff 60%, #f5f7ff 100%);
+  border-bottom: 1px solid #dde5ff;
 }
-/* Left side */
-.db-hero-left {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  z-index: 1;
-}
-.db-hero-avatar {
-  width: 54px; height: 54px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.18);
-  border: 2px solid rgba(255,255,255,0.35);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px; font-weight: 800; color: #fff;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-.db-hero-text { display: flex; flex-direction: column; }
 .db-greeting {
   font-size: 13px;
   font-weight: 400;
-  color: rgba(255,255,255,0.65);
-  margin-bottom: 1px;
   letter-spacing: 0;
   text-transform: none;
+  color: #64748b;
+  margin-bottom: 3px;
 }
 .db-username {
   font-size: 26px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: -0.4px;
-  line-height: 1.15;
+  font-weight: 700;
+  color: #0129AC;
+  letter-spacing: -0.3px;
 }
-.db-hero-sub {
-  font-size: 12px;
-  color: rgba(255,255,255,0.5);
-  margin-top: 5px;
-  font-weight: 400;
-}
-/* Right side */
 .db-hero-brand {
-  z-index: 1;
   text-align: right;
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-.db-hero-brand-icon {
-  width: 44px; height: 44px;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.2);
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 6px;
 }
 .db-hero-brand-label {
-  font-size: 11px;
-  color: rgba(255,255,255,0.55);
+  font-size: 12px;
+  color: #64748b;
   font-weight: 400;
-  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
 }
 .db-hero-brand-name {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 800;
-  color: #fff;
+  color: #0129AC;
   letter-spacing: -0.4px;
-  line-height: 1.15;
-}
-.db-hero-brand-tag {
-  font-size: 10px;
-  color: rgba(255,255,255,0.45);
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-top: 2px;
+  background: linear-gradient(135deg, #0129AC 0%, #3b5bdb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Stat Cards */
