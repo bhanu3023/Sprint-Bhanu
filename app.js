@@ -346,7 +346,7 @@ function avatarHtml(user, size) {
   var baseStyle = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.4) + 'px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:700;flex-shrink:0;vertical-align:middle;line-height:1;text-align:center;overflow:hidden;';
   if (!user) return '<span class="avatar" style="' + baseStyle + 'background:#ccc">?</span>';
   var color = user.color || '#0129ac';
-  return '<span class="avatar" style="' + baseStyle + 'background:' + color + '" title="' + esc(user.name) + '">' + initials(user.name) + '</span>';
+  return '<span class="avatar av-tip" style="' + baseStyle + 'background:' + color + ';position:relative;cursor:default" data-tip="' + esc(user.name) + '">' + initials(user.name) + '</span>';
 }
 
 function issueKeyStr(issue) {
