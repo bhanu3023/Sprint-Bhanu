@@ -7321,8 +7321,8 @@ document.addEventListener('DOMContentLoaded', function () {
     $('sidebar').classList.toggle('collapsed');
   });
 
-  // Sidebar search
-  $('sidebarSearch').addEventListener('input', function () {
+  // Sidebar search (element may not exist if removed from HTML)
+  if ($('sidebarSearch')) $('sidebarSearch').addEventListener('input', function () {
     var term = $('sidebarSearch').value.toLowerCase();
     qsa('.space-item').forEach(function (el) {
       el.style.display = el.textContent.toLowerCase().indexOf(term) >= 0 ? '' : 'none';
