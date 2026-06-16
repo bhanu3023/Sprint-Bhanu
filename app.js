@@ -7961,11 +7961,11 @@ async function renderAdminUsers(el) {
     '<button onclick="openInviteUserModal()" style="background:#0129AC;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">+ Invite User</button>' +
     '</div>' +
     '</div>' +
-    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 20px">' +
-    '<div class="um-filter-chip" data-filter="all" onclick="window._umFilter(\'all\')" style="display:flex;align-items:center;gap:6px;background:var(--bg3);color:var(--text);font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + users.length + ' Registered</div>' +
-    '<div class="um-filter-chip" data-filter="active" onclick="window._umFilter(\'active\')" style="display:flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + totalActive + ' Active</div>' +
-    '<div class="um-filter-chip" data-filter="inactive" onclick="window._umFilter(\'inactive\')" style="display:flex;align-items:center;gap:6px;background:#f1f5f9;color:#64748b;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + (users.length - totalActive) + ' Inactive</div>' +
-    (pendingInvites.length ? '<div class="um-filter-chip" data-filter="pending" onclick="window._umFilter(\'pending\')" style="display:flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + pendingInvites.length + ' Pending Invites</div>' : '') +
+    '<div id="umFilterBar" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 20px">' +
+    '<div class="um-filter-chip" data-filter="all" style="display:flex;align-items:center;gap:6px;background:var(--bg3);color:var(--text);font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid #0129AC">' + users.length + ' Registered</div>' +
+    '<div class="um-filter-chip" data-filter="active" style="display:flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + totalActive + ' Active</div>' +
+    '<div class="um-filter-chip" data-filter="inactive" style="display:flex;align-items:center;gap:6px;background:#f1f5f9;color:#64748b;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + (users.length - totalActive) + ' Inactive</div>' +
+    (pendingInvites.length ? '<div class="um-filter-chip" data-filter="pending" style="display:flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + pendingInvites.length + ' Pending Invites</div>' : '') +
     '</div>' +
     '<div style="background:#fff;border:1px solid #dfe1e6;border-radius:8px;overflow-x:auto;box-shadow:0 1px 4px rgba(0,0,0,0.06);-webkit-overflow-scrolling:touch">' +
     '<table style="width:100%;border-collapse:collapse;table-layout:auto">' +
@@ -7977,25 +7977,22 @@ async function renderAdminUsers(el) {
     '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:220px">Actions</th>' +
     '</tr></thead><tbody>' + userRows + inviteRows + '</tbody></table></div></div>';
 
-  // Filter function for stat chips
-  window._umFilter = function(filter) {
-    // Highlight active chip
-    qsa('.um-filter-chip').forEach(function(chip) {
-      var isActive = chip.dataset.filter === filter;
-      chip.style.border = isActive ? '2px solid #0129AC' : '2px solid transparent';
-      chip.style.opacity = isActive ? '1' : '0.7';
+  // Bind filter chips via addEventListener (avoids inline onclick quoting issues)
+  el.querySelectorAll('.um-filter-chip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      var filter = chip.getAttribute('data-filter');
+      el.querySelectorAll('.um-filter-chip').forEach(function(c) {
+        c.style.border = c.getAttribute('data-filter') === filter ? '2px solid #0129AC' : '2px solid transparent';
+        c.style.opacity = c.getAttribute('data-filter') === filter ? '1' : '0.8';
+      });
+      el.querySelectorAll('tr[data-um-status]').forEach(function(row) {
+        row.style.display = (filter === 'all' || row.getAttribute('data-um-status') === filter) ? '' : 'none';
+      });
+      el.querySelectorAll('tr[data-um-invite]').forEach(function(row) {
+        row.style.display = (filter === 'all' || filter === 'pending') ? '' : 'none';
+      });
     });
-    // Show/hide rows
-    qsa('tr[data-um-status]').forEach(function(row) {
-      var status = row.dataset.umStatus;
-      var show = filter === 'all' || status === filter;
-      row.style.display = show ? '' : 'none';
-    });
-    // Show/hide invite rows
-    qsa('tr[data-um-invite]').forEach(function(row) {
-      row.style.display = (filter === 'all' || filter === 'pending') ? '' : 'none';
-    });
-  };
+  });
 
   qsa('.um-role-sel').forEach(function(sel) {
     sel.addEventListener('change', async function() {
