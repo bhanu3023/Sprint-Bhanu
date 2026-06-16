@@ -1302,7 +1302,6 @@ app.delete('/api/users/:id', requireAuth, wrap(async (req, res) => {
   await q('UPDATE issues SET created_by=NULL WHERE created_by=$1', [id]);
   // Reassign space ownership to the requesting admin
   await q('UPDATE spaces SET owner_id=$1 WHERE owner_id=$2', [req.user.id, id]);
-  await q('UPDATE spaces SET created_by=$1 WHERE created_by=$2', [req.user.id, id]);
   await q('DELETE FROM space_members WHERE user_id=$1', [id]);
   await q('DELETE FROM comments WHERE user_id=$1', [id]);
   await q('DELETE FROM notifications WHERE user_id=$1', [id]);
