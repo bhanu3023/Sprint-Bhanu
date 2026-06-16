@@ -1296,17 +1296,22 @@ app.delete('/api/users/:id', requireAuth, wrap(async (req, res) => {
     return res.status(400).json({ error: 'You cannot delete your own account' });
   const ex = await q('SELECT id FROM users WHERE id=$1', [id]);
   if (!ex.rows.length) return res.status(404).json({ error: 'User not found' });
-  // Nullify / reassign all references before deleting (use .catch to skip if column doesn't exist)
+  // Clear all FK references before deleting user
   await q('UPDATE issues SET assignee_id=NULL WHERE assignee_id=$1', [id]).catch(()=>{});
   await q('UPDATE issues SET reporter_id=NULL WHERE reporter_id=$1', [id]).catch(()=>{});
   await q('UPDATE roadmap_items SET created_by=NULL WHERE created_by=$1', [id]).catch(()=>{});
   await q('UPDATE roadmap_items SET assigned_to=NULL WHERE assigned_to=$1', [id]).catch(()=>{});
-  // Reassign space ownership to the requesting admin
+  await q('UPDATE worklogs SET user_id=NULL WHERE user_id=$1', [id]).catch(()=>{});
   await q('UPDATE spaces SET owner_id=$1 WHERE owner_id=$2', [req.user.id, id]).catch(()=>{});
+  await q('DELETE FROM space_favorites WHERE user_id=$1', [id]).catch(()=>{});
   await q('DELETE FROM space_members WHERE user_id=$1', [id]).catch(()=>{});
   await q('DELETE FROM comments WHERE user_id=$1', [id]).catch(()=>{});
   await q('DELETE FROM notifications WHERE user_id=$1', [id]).catch(()=>{});
-  await q('UPDATE worklogs SET user_id=NULL WHERE user_id=$1', [id]).catch(()=>{});
+  await q('DELETE FROM issue_field_values WHERE issue_id IN (SELECT id FROM issues WHERE assignee_id=$1 OR reporter_id=$1)', [id]).catch(()=>{});
+  await q('DELETE FROM invitations WHERE invited_by=$1', [id]).catch(()=>{});
+  await q('DELETE FROM sessions WHERE user_id=$1', [id]).catch(()=>{});
+  await q('DELETE FROM audit_logs WHERE user_id=$1', [id]).catch(()=>{});
+  await q('DELETE FROM roadmap_colors WHERE created_by=$1', [id]).catch(()=>{});
   await q('DELETE FROM users WHERE id=$1', [id]);
   res.json({ success: true });
 }));
