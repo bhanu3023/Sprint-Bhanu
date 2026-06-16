@@ -7892,7 +7892,23 @@ function renderAdminNotifications(el) {
 
 // ── Users (Admin) ─────────────────────────────────────────
 async function renderAdminUsers(el) {
-  el.innerHTML = '<div style="padding:20px;color:var(--text3)">Loading users...</div>';
+  el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;gap:18px;">
+    <div style="position:relative;width:56px;height:56px;">
+      <svg viewBox="0 0 56 56" style="width:56px;height:56px;animation:um-spin 1s linear infinite;">
+        <circle cx="28" cy="28" r="22" fill="none" stroke="var(--border)" stroke-width="4"/>
+        <circle cx="28" cy="28" r="22" fill="none" stroke="#0129AC" stroke-width="4" stroke-dasharray="80 60" stroke-linecap="round"/>
+      </svg>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0129AC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
+    </div>
+    <div style="font-size:15px;font-weight:600;color:var(--text1)">Loading Users</div>
+    <div style="font-size:13px;color:var(--text3)">Fetching team members&hellip;</div>
+  </div>
+  <style>@keyframes um-spin{to{transform:rotate(360deg)}}</style>`;
   // Refresh with timeout guard — don't block forever
   try {
     await Promise.race([
