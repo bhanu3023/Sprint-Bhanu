@@ -8084,6 +8084,8 @@ async function renderAdminUsers(el) {
       if (!ok) return;
       try {
         await api('/api/users/' + uid, 'DELETE');
+        // Remove from local cache so stale data never re-appears on re-render
+        if (S.data && S.data.users) S.data.users = S.data.users.filter(function(u){ return u.id !== uid; });
         // Remove row immediately from table
         var delBtn2 = document.querySelector('.um-delete-user-btn[data-uid="' + uid + '"]');
         if (delBtn2) { var delRow = delBtn2.closest('tr'); if (delRow) delRow.remove(); }
