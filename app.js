@@ -610,9 +610,9 @@ function renderTopbarProfile(user) {
   if (nameEl) nameEl.textContent = user.name;
   if (emailEl) emailEl.textContent = user.email || '';
 
-  // Hide Admin Settings if not admin
-  var adminBtn = $('topbarProfileMenu') && $('topbarProfileMenu').querySelectorAll('button')[1];
-  if (adminBtn && !isAdmin) adminBtn.style.display = 'none';
+  // Hide Admin Settings if not admin/owner
+  var adminBtn = $('topbarAdminSettingsBtn');
+  if (adminBtn) adminBtn.style.display = isAdmin ? '' : 'none';
 
   // Toggle dropdown
   btn.onclick = function(e) {
