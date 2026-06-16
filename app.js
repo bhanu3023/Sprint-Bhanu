@@ -587,17 +587,26 @@ function renderUserFooter(user) {
   var footer = $('sidebarUserFooter');
   if (!footer || !user) return;
   var isAdmin = user.role === 'admin' || user.role === 'owner';
+  var color = user.color || '#6366f1';
+  var av = user.avatar_url
+    ? '<img src="' + esc(user.avatar_url) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.2)" />'
+    : '<div style="width:36px;height:36px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;border:2px solid rgba(255,255,255,0.2);flex-shrink:0">' + initials(user.name) + '</div>';
+  var roleBadge = '<span style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);padding:1px 6px;border-radius:10px">' + cap(user.role || 'member') + '</span>';
   footer.innerHTML =
-    '<div class="user-footer-info">' +
-    '<div class="user-avatar-sm" style="background:' + (user.color || '#6366f1') + '">' + initials(user.name) + '</div>' +
-    '<div class="user-footer-text">' +
-    '<div class="user-footer-name">' + esc(user.name) + '</div>' +
-    '<div class="user-footer-role">' + cap(user.role || 'member') + '</div>' +
-    '</div>' +
-    '</div>' +
-    '<div class="user-footer-actions">' +
-    (isAdmin ? '<button class="btn-icon footer-icon-btn" title="Admin Settings" onclick="navigateTo(\'settings\')" style="font-size:15px">⚙️</button>' : '') +
-    '<button class="btn-icon footer-icon-btn" title="Logout" onclick="doLogout()" style="font-size:15px;background:none;border:none;cursor:pointer;color:#c0c8d4" title="Logout"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>' +
+    '<div style="border-top:1px solid rgba(255,255,255,0.08);padding:10px 12px 8px;display:flex;align-items:center;gap:10px;min-width:0">' +
+      av +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:13px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3">' + esc(user.name) + '</div>' +
+        '<div style="margin-top:3px">' + roleBadge + '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:2px;flex-shrink:0">' +
+        (isAdmin ? '<button onclick="navigateTo(\'settings\')" title="Admin Settings" style="width:30px;height:30px;border:none;background:rgba(255,255,255,0.08);border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);transition:background .15s" onmouseover="this.style.background=\'rgba(255,255,255,0.18)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.08)\'">' +
+          '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' +
+        '</button>' : '') +
+        '<button onclick="doLogout()" title="Logout" style="width:30px;height:30px;border:none;background:rgba(255,255,255,0.08);border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);transition:background .15s" onmouseover="this.style.background=\'rgba(220,38,38,0.35)\';this.style.color=\'#fff\'" onmouseout="this.style.background=\'rgba(255,255,255,0.08)\';this.style.color=\'rgba(255,255,255,0.7)\'">' +
+          '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
+        '</button>' +
+      '</div>' +
     '</div>';
 }
 
