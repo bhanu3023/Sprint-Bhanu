@@ -7483,7 +7483,7 @@ async function renderUserManagement() {
   var rows = users.map(function (u) {
     var statusBadge = u.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-muted">Inactive</span>';
     var lastLogin = u.last_login ? relativeTime(u.last_login) : 'Never';
-    return '<tr style="border-bottom:1px solid #f4f5f7" onmouseover="this.style.background=\'#f8f9fa\'" onmouseout="this.style.background=\'\'">' +
+    return '<tr data-um-status="' + (u.is_active !== false ? 'active' : 'inactive') + '" style="border-bottom:1px solid #f4f5f7" onmouseover="this.style.background=\'#f8f9fa\'" onmouseout="this.style.background=\'\'">' +
       '<td style="padding:12px 20px;min-width:250px;max-width:300px"><div style="display:flex;align-items:center;gap:12px">' +
       '<div class="user-avatar-sm" style="background:' + (u.color || '#6366f1') + ';flex-shrink:0">' + initials(u.name) + '</div>' +
       '<div style="overflow:hidden"><div style="font-weight:600;color:#172b4d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.name) + '</div><div style="font-size:12px;color:#6b778c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.email) + '</div></div>' +
@@ -7506,10 +7506,11 @@ async function renderUserManagement() {
     '<div>' +
     '<h2 style="margin:0 0 6px;font-size:22px;font-weight:700;color:var(--text)">User Management</h2>' +
     '<p style="margin:0 0 10px;color:var(--text2);font-size:14px">Manage all users, roles and access in your organization.</p>' +
-    '<div style="display:flex;gap:16px;flex-wrap:wrap">' +
-    '<div style="display:flex;align-items:center;gap:6px;background:var(--bg3);padding:6px 14px;border-radius:20px;font-size:13px"><span style="font-weight:700;color:var(--text)">' + users.length + '</span><span style="color:var(--text3)">Registered</span></div>' +
-    '<div style="display:flex;align-items:center;gap:6px;background:#dcfce7;padding:6px 14px;border-radius:20px;font-size:13px"><span style="font-weight:700;color:#166534">' + totalActive + '</span><span style="color:#166534">Active</span></div>' +
-    (pendingInvites.length ? '<div style="display:flex;align-items:center;gap:6px;background:#fef3c7;padding:6px 14px;border-radius:20px;font-size:13px"><span style="font-weight:700;color:#92400e">' + pendingInvites.length + '</span><span style="color:#92400e">Pending</span></div>' : '') +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+    '<div class="um-filter-chip" data-filter="all" onclick="window._umFilter(\'all\')" style="display:flex;align-items:center;gap:6px;background:var(--bg3);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid #0129AC"><span style="font-weight:700;color:var(--text)">' + users.length + '</span><span style="color:var(--text3)">Registered</span></div>' +
+    '<div class="um-filter-chip" data-filter="active" onclick="window._umFilter(\'active\')" style="display:flex;align-items:center;gap:6px;background:#dcfce7;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid transparent"><span style="font-weight:700;color:#166534">' + totalActive + '</span><span style="color:#166534">Active</span></div>' +
+    '<div class="um-filter-chip" data-filter="inactive" onclick="window._umFilter(\'inactive\')" style="display:flex;align-items:center;gap:6px;background:#f1f5f9;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid transparent"><span style="font-weight:700;color:#64748b">' + (users.length - totalActive) + '</span><span style="color:#64748b">Inactive</span></div>' +
+    (pendingInvites.length ? '<div class="um-filter-chip" data-filter="pending" onclick="window._umFilter(\'pending\')" style="display:flex;align-items:center;gap:6px;background:#fef3c7;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid transparent"><span style="font-weight:700;color:#92400e">' + pendingInvites.length + '</span><span style="color:#92400e">Pending Invites</span></div>' : '') +
     '</div>' +
     '</div>' +
     '<button onclick="openInviteUserModal()" style="background:#0129AC;color:#fff;border:none;padding:9px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">+ Invite User</button>' +
@@ -7524,6 +7525,19 @@ async function renderUserManagement() {
     '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:28%">Actions</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '</div>';
+
+  // Filter chips
+  window._umFilter = function(filter) {
+    qsa('.um-filter-chip').forEach(function(chip) {
+      chip.style.border = chip.dataset.filter === filter ? '2px solid #0129AC' : '2px solid transparent';
+    });
+    qsa('tr[data-um-status]').forEach(function(row) {
+      row.style.display = (filter === 'all' || row.dataset.umStatus === filter) ? '' : 'none';
+    });
+    qsa('tr[data-um-invite]').forEach(function(row) {
+      row.style.display = (filter === 'all' || filter === 'pending') ? '' : 'none';
+    });
+  };
 
   // Role change handlers
   qsa('.um-role-sel').forEach(function (sel) {
