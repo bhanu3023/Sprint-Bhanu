@@ -7895,7 +7895,7 @@ async function renderAdminUsers(el) {
     var toggleBtn = u.id!==me.id ? '<button class="btn btn-sm um-toggle-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-active="'+u.is_active+'" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:#fff;border:none;background:'+(isActive?'#ef4444':'#22c55e')+'">'+(isActive?'Deactivate':'Activate')+'</button>' : '';
     var pwdBtn = '<button class="btn btn-sm um-pwd-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#0129AC;cursor:pointer;color:#fff">Reset PW</button>';
     var delBtn = u.id!==me.id ? '<button class="btn btn-sm um-delete-user-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-email="'+esc(u.email)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#dc2626;cursor:pointer;color:#fff">Delete</button>' : '';
-    return '<tr style="border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">' +
+    return '<tr data-um-status="' + (isActive ? 'active' : 'inactive') + '" style="border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">' +
       '<td style="padding:14px 16px"><div style="display:flex;align-items:center;gap:12px">' + av + info + '</div></td>' +
       '<td style="padding:14px 16px">' + rolesel + '</td>' +
       '<td style="padding:14px 16px">' + sb + '</td>' +
@@ -7907,7 +7907,7 @@ async function renderAdminUsers(el) {
     var expiresStr = new Date(inv.expires_at) < new Date()
       ? '<span style="color:#ef4444;font-size:11px">Expired</span>'
       : '<span style="font-size:11px;color:var(--text3)">Expires ' + relativeTime(inv.expires_at) + '</span>';
-    return '<tr style="opacity:0.85">' +
+    return '<tr data-um-invite="1" style="opacity:0.85">' +
       '<td><div style="display:flex;align-items:center;gap:10px">' +
       '<div class="user-avatar-sm" style="background:#64748b;font-size:10px">?</div>' +
       '<div><div style="font-weight:600;font-size:13px;color:var(--text2)">(Pending)</div>' +
@@ -7934,10 +7934,10 @@ async function renderAdminUsers(el) {
     '</div>' +
     '</div>' +
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 20px">' +
-    '<div style="display:flex;align-items:center;gap:6px;background:var(--bg3);color:var(--text);font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + users.length + ' Registered</div>' +
-    '<div style="display:flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + totalActive + ' Active</div>' +
-    '<div style="display:flex;align-items:center;gap:6px;background:#f1f5f9;color:#64748b;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + (users.length - totalActive) + ' Inactive</div>' +
-    (pendingInvites.length ? '<div style="display:flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px">' + pendingInvites.length + ' Pending Invites</div>' : '') +
+    '<div class="um-filter-chip" data-filter="all" onclick="window._umFilter(\'all\')" style="display:flex;align-items:center;gap:6px;background:var(--bg3);color:var(--text);font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + users.length + ' Registered</div>' +
+    '<div class="um-filter-chip" data-filter="active" onclick="window._umFilter(\'active\')" style="display:flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + totalActive + ' Active</div>' +
+    '<div class="um-filter-chip" data-filter="inactive" onclick="window._umFilter(\'inactive\')" style="display:flex;align-items:center;gap:6px;background:#f1f5f9;color:#64748b;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + (users.length - totalActive) + ' Inactive</div>' +
+    (pendingInvites.length ? '<div class="um-filter-chip" data-filter="pending" onclick="window._umFilter(\'pending\')" style="display:flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;font-size:13px;font-weight:600;padding:6px 14px;border-radius:20px;cursor:pointer;border:2px solid transparent">' + pendingInvites.length + ' Pending Invites</div>' : '') +
     '</div>' +
     '<div style="background:#fff;border:1px solid #dfe1e6;border-radius:8px;overflow-x:auto;box-shadow:0 1px 4px rgba(0,0,0,0.06);-webkit-overflow-scrolling:touch">' +
     '<table style="width:100%;border-collapse:collapse;table-layout:auto">' +
@@ -7948,6 +7948,26 @@ async function renderAdminUsers(el) {
     '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:120px">Last Login</th>' +
     '<th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b778c;text-transform:uppercase;min-width:220px">Actions</th>' +
     '</tr></thead><tbody>' + userRows + inviteRows + '</tbody></table></div></div>';
+
+  // Filter function for stat chips
+  window._umFilter = function(filter) {
+    // Highlight active chip
+    qsa('.um-filter-chip').forEach(function(chip) {
+      var isActive = chip.dataset.filter === filter;
+      chip.style.border = isActive ? '2px solid #0129AC' : '2px solid transparent';
+      chip.style.opacity = isActive ? '1' : '0.7';
+    });
+    // Show/hide rows
+    qsa('tr[data-um-status]').forEach(function(row) {
+      var status = row.dataset.umStatus;
+      var show = filter === 'all' || status === filter;
+      row.style.display = show ? '' : 'none';
+    });
+    // Show/hide invite rows
+    qsa('tr[data-um-invite]').forEach(function(row) {
+      row.style.display = (filter === 'all' || filter === 'pending') ? '' : 'none';
+    });
+  };
 
   qsa('.um-role-sel').forEach(function(sel) {
     sel.addEventListener('change', async function() {
