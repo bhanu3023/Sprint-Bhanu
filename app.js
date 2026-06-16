@@ -498,6 +498,7 @@ async function init() {
 
     // Update sidebar user footer
     renderUserFooter(me);
+    renderTopbarProfile(me);
 
     renderSidebar();
     // navigateTo home handled below after issue param check
@@ -581,6 +582,58 @@ async function init() {
     $('errorMsg').textContent = e.message || 'Failed to load data';
     $('errorOverlay').removeAttribute('hidden');
   }
+}
+
+function renderTopbarProfile(user) {
+  if (!user) return;
+  var color = user.color || '#0129AC';
+  var isAdmin = user.role === 'admin' || user.role === 'owner';
+
+  // Avatar button
+  var btn = $('topbarProfileBtn');
+  var av1 = $('topbarProfileAvatar');
+  var av2 = $('topbarProfileAv2');
+  var nameEl = $('topbarProfileName');
+  var emailEl = $('topbarProfileEmail');
+  if (!btn) return;
+
+  if (user.avatar_url) {
+    btn.innerHTML = '<img src="' + esc(user.avatar_url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    if (av2) av2.innerHTML = '<img src="' + esc(user.avatar_url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+  } else {
+    var ini = initials(user.name);
+    btn.style.background = color;
+    btn.style.color = '#fff';
+    btn.innerHTML = '<span style="font-size:13px;font-weight:700">' + ini + '</span>';
+    if (av2) { av2.textContent = ini; av2.style.background = color; }
+  }
+  if (nameEl) nameEl.textContent = user.name;
+  if (emailEl) emailEl.textContent = user.email || '';
+
+  // Hide Admin Settings if not admin
+  var adminBtn = $('topbarProfileMenu') && $('topbarProfileMenu').querySelectorAll('button')[1];
+  if (adminBtn && !isAdmin) adminBtn.style.display = 'none';
+
+  // Toggle dropdown
+  btn.onclick = function(e) {
+    e.stopPropagation();
+    var menu = $('topbarProfileMenu');
+    if (menu) menu.hidden = !menu.hidden;
+  };
+
+  // Close on outside click
+  document.addEventListener('click', function(e) {
+    var menu = $('topbarProfileMenu');
+    if (menu && !menu.hidden && !$('topbarProfileWrap').contains(e.target)) menu.hidden = true;
+  });
+
+  window._topbarProfileAction = function(action) {
+    var menu = $('topbarProfileMenu');
+    if (menu) menu.hidden = true;
+    if (action === 'settings') navigateTo('settings');
+    else if (action === 'profile') navigateTo('settings'); // opens settings; can refine later
+    else if (action === 'logout') doLogout();
+  };
 }
 
 function renderUserFooter(user) {

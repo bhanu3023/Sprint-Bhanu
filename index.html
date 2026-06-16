@@ -138,6 +138,36 @@
             <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="stroke:#42526e"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           </button>
+          <!-- Profile avatar + dropdown -->
+          <div style="position:relative" id="topbarProfileWrap">
+            <button id="topbarProfileBtn" aria-label="Profile" style="width:34px;height:34px;border-radius:50%;border:2px solid transparent;background:#e8eaf0;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:border-color .15s;font-size:13px;font-weight:700;color:#0129AC;overflow:hidden" onmouseover="this.style.borderColor='#0129AC'" onmouseout="this.style.borderColor='transparent'">
+              <span id="topbarProfileAvatar">BS</span>
+            </button>
+            <div id="topbarProfileMenu" hidden style="position:absolute;right:0;top:42px;width:220px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.13);z-index:9999;overflow:hidden">
+              <div id="topbarProfileHeader" style="padding:14px 16px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px">
+                <div id="topbarProfileAv2" style="width:38px;height:38px;border-radius:50%;background:#0129AC;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">BS</div>
+                <div style="min-width:0">
+                  <div id="topbarProfileName" style="font-size:13px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Bhanu srikakulam</div>
+                  <div id="topbarProfileEmail" style="font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+                </div>
+              </div>
+              <div style="padding:6px">
+                <button onclick="window._topbarProfileAction('profile')" style="width:100%;display:flex;align-items:center;gap:10px;padding:9px 12px;border:none;background:none;border-radius:8px;cursor:pointer;font-size:13px;color:#1e293b;text-align:left" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  Profile Settings
+                </button>
+                <button onclick="window._topbarProfileAction('settings')" style="width:100%;display:flex;align-items:center;gap:10px;padding:9px 12px;border:none;background:none;border-radius:8px;cursor:pointer;font-size:13px;color:#1e293b;text-align:left" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                  Admin Settings
+                </button>
+                <div style="height:1px;background:#f1f5f9;margin:4px 0"></div>
+                <button onclick="window._topbarProfileAction('logout')" style="width:100%;display:flex;align-items:center;gap:10px;padding:9px 12px;border:none;background:none;border-radius:8px;cursor:pointer;font-size:13px;color:#dc2626;text-align:left" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='none'">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
           <button class="btn btn-primary btn-sm" id="createIssueBtn">+ Create Issue</button>
         </div>
       </header>
