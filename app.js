@@ -5243,8 +5243,8 @@ async function openDrawer(issueId) {
     issue = await api('/api/issues/' + issueId);
   } catch (e) { return; }
 
-  if (issue && issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); window._currentIssueKey = issue.key; }
-  if (issue && issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); }
+  if (!issue) { toast('Could not load issue', 'error'); return; }
+  if (issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); window._currentIssueKey = issue.key; }
   document.body.classList.add('issue-page'); void document.body.offsetHeight; var dp = document.querySelector('.drawer-panel'); if(dp){ dp.style.position='fixed'; dp.style.inset='0'; dp.style.width='100vw'; dp.style.maxWidth='100vw'; dp.style.height='100vh'; dp.style.zIndex='99999'; dp.style.display='flex'; dp.style.flexDirection='column'; } $('issueDrawer').removeAttribute('hidden');
 
   // Parent breadcrumb for subtasks
