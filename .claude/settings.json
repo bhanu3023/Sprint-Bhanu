@@ -1,0 +1,63 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "Bash(npm run build)",
+      "Bash(npm run lint)",
+      "Bash(npm run lint:fix)",
+      "Bash(npm run db:generate)",
+      "Bash(npm run db:push)",
+      "Bash(npm run db:migrate)",
+      "Bash(npm run db:studio)",
+      "Bash(npm run db:seed)",
+      "Bash(npx prisma *)",
+      "Bash(npx tsc *)",
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push)"
+    ],
+    "deny": [
+      "Bash(npm run db:reset)",
+      "Bash(prisma migrate reset *)",
+      "Bash(rm -rf *)",
+      "Bash(drop *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-sensitive-writes.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-edit-format.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/validate-code.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

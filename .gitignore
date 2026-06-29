@@ -39,3 +39,7 @@ prisma/migrations
 # uploads
 public/uploads/*
 !public/uploads/.gitkeep
+
+# Claude Code local overrides (machine-specific, never committed)
+CLAUDE.local.md
+.claude/settings.local.json
