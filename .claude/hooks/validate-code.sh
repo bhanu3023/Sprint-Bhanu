@@ -1,25 +1,28 @@
 #!/bin/bash
-# Runs after Claude stops — validates TypeScript and lint.
-# Exit 0 = allow, Exit 2 = block (will notify user)
+# Runs after Claude stops — validates server.js and app.js for syntax errors.
+# Exit 0 = allow (warn only)
 
-echo "Running post-session validation..."
+echo "Running syntax check on server.js and app.js..."
 
-# Only validate if TypeScript files were modified
-if git diff --name-only HEAD 2>/dev/null | grep -qE '\.(ts|tsx)$'; then
-  echo "TypeScript files changed. Running type check..."
-  if ! npx tsc --noEmit --skipLibCheck 2>&1; then
-    echo "⚠️  TypeScript errors found. Run 'npx tsc --noEmit' to see details."
-    # Exit 0 (warn, don't block) — user can still review
-    exit 0
+if [ -f "server.js" ]; then
+  if ! node --check server.js 2>&1; then
+    echo "SYNTAX ERROR in server.js — fix before committing."
+  else
+    echo "server.js OK"
   fi
-  echo "✓ TypeScript OK"
 fi
 
-echo "Running lint check..."
-if ! npm run lint --silent 2>&1; then
-  echo "⚠️  Lint errors found. Run 'npm run lint' to see details."
-  exit 0
+if [ -f "app.js" ]; then
+  if ! node --check app.js 2>&1; then
+    echo "SYNTAX ERROR in app.js — fix before committing."
+  else
+    echo "app.js OK"
+  fi
 fi
 
-echo "✓ Lint OK"
+# Warn on possible unparameterized SQL
+if grep -n '\${' server.js 2>/dev/null | grep -i 'pool\.query\|SELECT\|INSERT\|UPDATE\|DELETE' | grep -v '^[[:space:]]*//' | head -5; then
+  echo "WARNING: Possible SQL string interpolation detected above — verify all are parameterized."
+fi
+
 exit 0

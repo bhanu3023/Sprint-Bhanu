@@ -1,26 +1,26 @@
 # Skill: PR Description
 
 ## Description
-Generate a complete, well-structured PR description from the current git diff. Auto-triggered when the user asks to "write a PR", "describe my changes", or "create PR description".
+Generate a PR title and description from the current git diff, specific to this Express.js + PostgreSQL project.
 
 ## Trigger Patterns
 - "write a PR description"
 - "describe my changes"
-- "generate PR title and body"
+- "generate PR title"
 - "help me write the PR"
-- "create PR description"
 
 ## Behavior
-1. Run `git diff main...HEAD` (or `git diff HEAD~1`) to get changed files.
-2. Read key changed files to understand intent.
-3. Generate:
-   - **Title** following `<type>(<scope>): <description>` from `.claude/rules/pr.md`
-   - **Summary** bullets — what changed and why
-   - **Changes** — list of affected files with a one-line description each
-   - **Test Plan** — manual steps to verify the feature works
-   - **Notes** — callouts for reviewers (breaking changes, follow-up tickets)
-4. If UI files changed, remind the user to add screenshots.
-5. Output the full description in a code block ready to paste into GitHub.
+1. Run `git diff main...HEAD` to see changed files
+2. Read `server.js` diffs to identify which routes changed
+3. Read `app.js` / `index.html` diffs for frontend impact
+4. Check for DB schema changes (new tables, columns, indexes)
+5. Generate:
+   - **Title:** `<type>(<scope>): <description>` — e.g. `fix(sprints): prevent multiple active sprints per space`
+   - **Summary:** bullet points of what changed and why
+   - **Changes:** routes affected and what they now do differently
+   - **Side Effects to Verify:** if issues/sprints changed, call out `issue_history`, `createNotif`, `audit_logs`
+   - **Test Plan:** manual curl/Postman steps to verify
+6. If worklog or auth routes changed, flag them for extra security review attention
 
-## Output Format
-Follows the template in `.claude/rules/pr.md` exactly.
+## Output
+Full PR description in a markdown code block, following `.claude/rules/pr.md` template exactly.

@@ -1,36 +1,47 @@
-# Workflow: Code Review
+# Workflow: Code Review — Sprint Board
 
-A repeatable blueprint for reviewing a PR or set of changed files.
+Blueprint for reviewing a PR or set of changes.
 
 ## Steps
 
 ### 1. Understand the Change
-- Read the PR description (or ask the user what the change does)
-- Run `git diff main...HEAD` to see all changed files
-- Group files by layer: schema / API / lib / components / pages
+- Read the PR description or ask what changed
+- `git diff main...HEAD` — identify changed files
+- Group: DB schema / server.js routes / app.js / index.html
 
-### 2. Data Layer Review
-- Schema changes: are new fields nullable? are indexes added for queried fields?
-- Migration files: are they additive (safe) or destructive (requires data migration plan)?
-- Zod schemas: do they match the Prisma model?
+### 2. DB Layer Review
+- New columns: nullable? (safe for zero-downtime deploy)
+- New indexes: added for WHERE/ORDER BY columns?
+- Any DROP or destructive change? Needs explicit sign-off.
 
-### 3. API Layer Review
-- Every mutating route: auth check present? permission check present?
-- Input validation: Zod schema applied?
-- Error handling: Prisma errors caught and mapped to HTTP status codes?
-- Response shape: follows conventions in `.claude/rules/api-conventions.md`?
+### 3. API Layer Review (server.js)
+- Every new POST/PUT/DELETE: `authenticate` middleware present?
+- Space-scoped routes: space-member lookup before returning data?
+- All `pool.query` calls: `$1,$2` parameterized, no string interpolation?
+- Issue update: `issue_history` INSERT for each tracked field?
+- `createNotif()` called without `await` where needed?
+- `audit_logs` INSERT present for create/update/delete?
+- Every handler: `try/catch` returning `{ error: 'Internal server error' }`?
+- No `password_hash` or `token` in SELECT columns returned to client?
+- Worklog create/update: uses `req.user.id`, not `req.body.user_id`?
+- Issue deletes: soft (`deleted_at=NOW()`), not hard DELETE?
 
-### 4. UI Layer Review
-- Server vs client boundary: is `"use client"` used only when necessary?
-- Props typed correctly? No `any`?
-- Loading, error, and empty states handled?
-- Accessibility: interactive elements have labels, keyboard navigable?
+### 4. Frontend Review (app.js)
+- All API calls through `api()` helper?
+- No inline `onclick=` on dynamic HTML?
+- DOM elements null-checked before mutation?
+- Status/priority colors use defined constants?
 
 ### 5. Security Pass
 - Delegate to `@security-reviewer` with the diff
-- Integrate findings into the review report
+- Integrate findings before final verdict
 
 ### 6. Output
-- Structured findings table (Critical / High / Medium / Low / Style)
-- Overall verdict: `✅ Ready to merge` | `🔄 Needs changes` | `❌ Do not merge`
-- Offer to apply fixes for Low/Medium findings automatically
+```md
+## Review Results
+
+| Severity | Route/Function | Line | Issue | Fix |
+|----------|----------------|------|-------|-----|
+
+Verdict: Ready to merge / Needs changes / Do not merge
+```

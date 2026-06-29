@@ -1,44 +1,37 @@
-# /project:review — Code Review Command
+# /project:review — Code Review
 
-Review the current git diff or a specific file/PR for correctness, security, and style.
+Review changed routes or files in server.js / app.js for correctness, security, and conventions.
 
 ## Usage
 ```
 /project:review
-/project:review src/app/api/issues/route.ts
+/project:review server.js
 /project:review $ARGUMENTS
 ```
 
-## What This Command Does
-1. Reads the target file(s) or runs `git diff` if no argument given.
-2. Checks against `.claude/rules/code-style.md` and `.claude/rules/api-conventions.md`.
-3. Delegates security checks to the `security-reviewer` agent.
-4. Reports findings grouped by: **Critical** → **High** → **Medium** → **Low / Style**.
-5. For each finding: file path + line number, description, suggested fix.
-
 ## Steps
-```
-1. Read target files or `git diff HEAD`
-2. Check: TypeScript types, missing auth checks, raw Prisma queries, unvalidated input
-3. Check: React hooks rules, missing keys, incorrect "use client" usage
-4. @security-reviewer: run security pass on the diff
-5. Output structured findings table
-6. Ask: "Apply fixes automatically?" — if yes, edit files, then re-run lint
-```
+1. Read the target file or run `git diff HEAD` if no argument
+2. For each changed route in `server.js`, check:
+   - Is `authenticate` middleware present?
+   - Is there a permission check (org role or space-member lookup)?
+   - Is SQL parameterized (`$1, $2`)? Flag any string interpolation as **Critical**
+   - Is `password_hash` or `token` excluded from the response SELECT?
+   - Does issue update write to `issue_history` for tracked fields?
+   - Is `createNotif()` fire-and-forget (not awaited in response path)?
+   - Does route have `try/catch` returning `{ error: 'Internal server error' }` on 500?
+3. For worklog routes: verify `user_id` is NOT accepted from `req.body`
+4. For sprint complete route: verify velocity calc and backlog move
+5. Delegate full security pass to `@security-reviewer`
+6. Output findings table by severity
 
 ## Output Format
 ```md
-## Review Results — <filename or "current diff">
+## Review: <file or "current diff">
 
-### Critical
-| Line | Issue | Fix |
-|------|-------|-----|
+| Severity | Route | Line | Issue | Fix |
+|----------|-------|------|-------|-----|
+| Critical | PUT /api/issues/:id | 416 | SQL string interpolation | Use $1 param |
+| High | POST /api/worklogs | 537 | Accepts user_id from body | Use req.user.id |
 
-### High
-...
-
-### Style
-...
-
-**Verdict:** Ready to merge / Needs changes
+**Verdict:** Ready / Needs changes
 ```

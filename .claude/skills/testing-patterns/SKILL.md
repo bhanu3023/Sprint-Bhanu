@@ -1,43 +1,46 @@
 # Skill: Testing Patterns
 
 ## Description
-Generate tests that match the project's testing conventions. Auto-triggered when the user asks to "write tests", "add tests", or "test this".
+Write Jest tests for Express.js routes in server.js using Supertest and mocked pg pool. Triggered when the user asks to write or add tests.
 
 ## Trigger Patterns
-- "write tests for this"
-- "add unit tests"
-- "test this component"
-- "test this API route"
+- "write tests for this route"
+- "add tests for POST /api/issues"
+- "test the sprint complete endpoint"
 - "improve test coverage"
 
-## Behavior
+## For any Express route, generate tests covering:
+1. Happy path — valid token, correct body, expected response shape
+2. No auth token → 401 `{ error: 'Unauthorized' }`
+3. Wrong org role (member doing admin-only) → 403
+4. Not a space member → 403
+5. Missing required field → 400 with field name in error message
+6. Resource not found → 404
 
-### For API Routes
-1. Read the route file.
-2. Identify: HTTP methods, auth requirements, Zod schema used, Prisma calls.
-3. Generate tests covering:
-   - Happy path (mocked Prisma returns valid data)
-   - Missing session → 401
-   - Insufficient permissions → 403
-   - Invalid body → 400 with Zod errors
-   - Resource not found → 404
-   - Prisma P2002 (unique) → 409
+## Issue update route — also test:
+- `issue_history` INSERT called for each tracked field (status, assignee_id, priority, sprint_id, due_date, story_points)
+- `createNotif` called when `assignee_id` changes
+- `createNotif` called when `status` changes
 
-### For Components
-1. Read the component file.
-2. Identify: props, state, user interactions, conditional rendering.
-3. Generate tests covering:
-   - Renders without crashing
-   - Key props affect output
-   - User interactions trigger expected callbacks
-   - Loading and error states render correctly
+## Sprint complete — also test:
+- Velocity = SUM story_points WHERE status='Done'
+- Incomplete issues get `sprint_id=NULL`
+- All space members receive `sprint_completed` notification
 
-### Mock Setup
-Always mock at module level:
-```ts
-jest.mock("@/lib/prisma")
-jest.mock("next-auth/next", () => ({ getServerSession: jest.fn() }))
+## Worklog create — also test:
+- `user_id` in request body is ignored; `req.user.id` is used instead
+
+## Mock Setup Template
+```js
+const request = require('supertest')
+const app = require('../../server')
+jest.mock('../../db/pool', () => ({ pool: { query: jest.fn() } }))
+const { pool } = require('../../db/pool')
+jest.mock('../../middleware/authenticate', () => (req, res, next) => {
+  req.user = { id: 'usr-test', role: 'member', org_id: 'org-1' }
+  next()
+})
 ```
 
 ## Output
-Test file ready to save. Path follows the convention in `.claude/rules/testing-standard.md`.
+Complete test file at `tests/routes/<resource>.test.js`. Reports path and test count.

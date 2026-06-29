@@ -1,29 +1,29 @@
 # Agent Roster — Sprint Board
 
 ## security-reviewer
-**Role:** Reviews code changes for security vulnerabilities.
-**Capabilities:** OWASP Top 10 analysis, SQL injection checks, auth bypass detection, sensitive data exposure.
-**When to delegate:** Before any PR that touches API routes, auth logic, or data mutations.
-**Handoff:** Returns a structured report of findings with severity levels (Critical / High / Medium / Low).
+**Role:** Security audit on server.js API routes and SQL queries.
+**Capabilities:** SQL injection (raw string interpolation), broken auth (missing `authenticate` middleware), IDOR (missing space-member check before accessing issues), exposed secrets in responses (password_hash, token), worklog impersonation (accepting user_id from body), CSRF in OAuth callback.
+**When to delegate:** Any PR that adds or modifies routes in `server.js`, especially auth, issues, worklogs, or attachments.
+**Handoff:** Returns findings JSON with severity, route, line number, and fix.
 **File:** `.claude/agents/security-reviewer.md`
 
 ## test-writer
-**Role:** Writes unit and integration tests for components and API routes.
-**Capabilities:** React Testing Library, Jest, API route testing with mocked Prisma, Zod schema tests.
-**When to delegate:** After implementing a new feature or fixing a bug — pass the file paths that changed.
-**Handoff:** Returns test files ready to drop into `__tests__/` or alongside the source file.
+**Role:** Writes Jest integration tests for Express routes using a real test DB or mocked `pg` pool.
+**Capabilities:** Supertest for HTTP layer, mocked `pool.query` for unit tests, session token fixture, role-based scenario coverage.
+**When to delegate:** After implementing a new Express route or fixing a bug in `server.js`. Pass the route path and HTTP method.
+**Handoff:** Returns test file path and test case count.
 **File:** `.claude/agents/test-writer.md`
 
 ## research
-**Role:** Investigates libraries, patterns, or external APIs without polluting the main session.
-**Capabilities:** Web search, documentation reading, comparison tables, recommendations.
-**When to delegate:** When evaluating a new library, debugging a third-party integration, or exploring architectural options.
-**Handoff:** Returns a concise recommendation with pros/cons and a suggested integration path.
+**Role:** Investigates libraries, PostgreSQL query patterns, OAuth flows, or third-party integrations without polluting the main session.
+**Capabilities:** Web search, npm/GitHub doc reading, comparison tables, integration path recommendations.
+**When to delegate:** Evaluating a new npm package, debugging Nodemailer TLS issues, researching PostgreSQL JSONB indexing, or exploring WebSocket vs SSE for real-time notifications.
+**Handoff:** Returns recommendation with pros/cons and step-by-step integration path into `server.js`.
 **File:** `.claude/agents/research.md`
 
 ## Coordination Protocol
-1. The main session identifies work that fits a subagent's role.
-2. The main session delegates with a clear, self-contained prompt including file paths and context.
-3. The subagent completes its task and returns results.
-4. The main session integrates results — it does not re-do the subagent's work.
-5. Subagents do NOT call each other directly.
+1. Main session identifies work fitting a subagent's role.
+2. Main session provides a self-contained prompt: route path, file lines, or specific question.
+3. Subagent completes its task and returns results.
+4. Main session integrates — does not redo the subagent's work.
+5. Subagents do NOT call each other.

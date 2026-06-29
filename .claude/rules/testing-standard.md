@@ -1,33 +1,73 @@
-# Testing Standards
+# Testing Standards — Sprint Board
 
 ## Test Tooling
-- **Unit / Component:** Jest + React Testing Library
-- **API Routes:** Jest with mocked Prisma client (`jest.mock("@/lib/prisma")`)
-- **E2E:** (not yet configured — Playwright is the planned tool)
+- **HTTP layer:** Supertest (`npm i -D supertest`) against the Express app
+- **Unit tests:** Jest with mocked `pg` pool
+- **DB integration:** Jest with a real test PostgreSQL database (separate from dev DB)
+- **E2E:** Not yet configured — Playwright is planned
 
 ## File Placement
-- Component tests: `src/components/<domain>/__tests__/<ComponentName>.test.tsx`
-- API route tests: `src/app/api/<resource>/__tests__/route.test.ts`
-- Utility tests: next to the source file, e.g., `src/lib/sla.test.ts`
+```
+tests/
+  routes/
+    issues.test.js      ← PUT/POST/DELETE /api/issues
+    sprints.test.js     ← sprint lifecycle tests
+    auth.test.js        ← login, token expiry, OAuth
+    worklogs.test.js    ← time logging rules
+  helpers/
+    fixtures.js         ← create test user, space, issue helpers
+    pool-mock.js        ← jest mock for pg pool
+```
 
-## What to Test
-- Every Zod schema: valid input passes, invalid input fails with correct error paths.
-- Every API route: happy path + auth missing (401) + permission denied (403) + not found (404).
-- Pure utility functions: all branches (e.g., `src/lib/sla.ts`, `src/lib/permissions.ts`).
-- Components: render without crashing, key interactions (click, submit), conditional rendering.
+## What to Test Per Route
+Every Express route needs:
+- **Happy path** — valid token, valid body, correct DB response
+- **No token** → 401
+- **Expired token** → 401
+- **Wrong org role** (member doing admin action) → 403
+- **Not a space member** → 403
+- **Missing required field** → 400 with clear error message
+- **Resource not found** → 404
 
-## Mocking Rules
-- Mock Prisma at the module level — never let tests hit a real DB.
-- Mock `getServerSession` to return a test session or `null` for auth tests.
-- Use `msw` for mocking fetch in client component tests (preferred over `jest.fn()` on `fetch`).
+## Issue-Specific Test Scenarios
+- `PUT /api/issues/:id` changing `status` → verify `issue_history` INSERT and `createNotif` called
+- `PUT /api/issues/:id` changing `assignee_id` → verify notification to new assignee
+- `POST /api/issues` → verify `issue_counter` incremented and key formatted as `{KEY}-{n}`
+- Soft delete: `deleted_at` set, issue excluded from list queries
 
-## Test Quality
-- Tests must read like documentation — describe blocks use feature names, `it` blocks use plain English.
-- No `toBeTruthy` / `toBeFalsy` — use specific matchers (`toEqual`, `toHaveBeenCalledWith`, etc.).
-- Each test is independent — no shared mutable state between tests.
-- Aim for one assertion per test; group related assertions only when they describe a single behaviour.
+## Sprint-Specific Test Scenarios
+- `POST /api/sprints/:id/start` when another sprint is already active → 400
+- `POST /api/sprints/:id/complete` → verify velocity calculation, incomplete issues moved to backlog, space members notified
 
-## Coverage Targets
-- Utilities and lib: ≥ 90% line coverage.
-- API routes: ≥ 80% line coverage.
-- Components: render + key interaction paths covered; snapshot tests are discouraged.
+## Worklog Test Scenarios
+- `POST /api/worklogs` with `user_id` in body → verify server uses `req.user.id` instead
+- `DELETE /api/worklogs/:id` by non-owner non-admin → 403
+
+## Mocking Pattern (pg pool mock)
+```js
+// tests/helpers/pool-mock.js
+const query = jest.fn()
+module.exports = { pool: { query } }
+
+// In test:
+const { pool } = require('../helpers/pool-mock')
+jest.mock('../../db', () => require('../helpers/pool-mock'))
+
+pool.query.mockResolvedValueOnce({ rows: [{ id: 'test-id', ... }] })
+```
+
+## Auth Fixture Pattern
+```js
+// Create a valid session in the test DB or mock the authenticate middleware:
+jest.mock('../../middleware/authenticate', () => (req, res, next) => {
+  req.user = { id: 'usr-test', role: 'member', org_id: 'org-1' }
+  next()
+})
+```
+
+## Test Quality Rules
+- `describe` block = resource name (e.g. `'PUT /api/issues/:id'`)
+- `it` block = plain English scenario (e.g. `'returns 403 when user is not a space member'`)
+- No shared mutable state between tests — use `beforeEach` to reset mocks
+- Never assert `toBeTruthy` — use specific matchers: `toEqual`, `toHaveBeenCalledWith`, `toMatchObject`
+- One assertion per `it` unless they describe the same single behavior

@@ -1,6 +1,6 @@
-# /project:deploy — Deploy Command
+# /project:deploy — Deploy Checklist
 
-Run the full pre-deploy checklist and build the production bundle.
+Run pre-deploy validation and confirm the server is ready.
 
 ## Usage
 ```
@@ -9,28 +9,25 @@ Run the full pre-deploy checklist and build the production bundle.
 ```
 
 ## Steps
-```
-1. git status — confirm no uncommitted changes
-2. npm run lint — must pass with 0 errors
-3. npx tsc --noEmit — must pass with 0 type errors
-4. npm run build — must succeed
-5. Report: bundle size, any warnings
-6. If $ARGUMENTS contains "--check-only": stop here and report results
-7. Otherwise: prompt user to confirm before pushing
-8. git push origin main (only after explicit confirmation)
-```
+1. `node --check server.js` — must pass with zero errors
+2. `node --check app.js` — must pass with zero errors
+3. Check `.env.example` is up to date with all required vars:
+   - `DATABASE_URL`, `SESSION_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_REDIRECT_URI`
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (fallback if DB email_settings not set)
+4. Verify `uploads/` directory exists and is writable
+5. Verify DB connection: `SELECT 1` via pool
+6. Check all required tables exist: `users`, `spaces`, `issues`, `sprints`, `sessions`, `notifications`, `audit_logs`
+7. If `--check-only`: stop and report results
+8. Otherwise: prompt for confirmation before proceeding
 
-## Pre-Deploy Checklist
-- [ ] All tests pass
-- [ ] `DATABASE_URL` points to production DB
-- [ ] `NEXTAUTH_SECRET` is set in production env
-- [ ] `NEXTAUTH_URL` is set to the production URL
-- [ ] No `.env.local` secrets committed
-- [ ] Prisma migrations are applied: `npx prisma migrate deploy`
-
-## Rollback
-If deploy fails after push:
-```
+## Rollback Plan
+```bash
 git revert HEAD
-git push origin main
+pm2 restart sprint-board   # or however the process is managed
 ```
+
+## Post-Deploy Verify
+- `GET /api/auth/me` with a valid token returns user data
+- `GET /api/data` returns spaces and issues
+- File upload to `POST /api/issues/:id/attachments` succeeds
+- `GET /api/notifications` returns correct unread-first list

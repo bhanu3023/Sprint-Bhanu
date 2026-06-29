@@ -1,33 +1,57 @@
-# Code Style Rules
+# Code Style — Sprint Board
 
-## TypeScript
-- Strict mode is on — never use `any`; use `unknown` and narrow types instead.
-- Prefer `interface` for object shapes, `type` for unions and aliases.
-- Exported types/interfaces go in `src/types/index.ts` unless tightly scoped to one file.
-- Use optional chaining (`?.`) and nullish coalescing (`??`) rather than `&&` guards.
+## JavaScript (server.js)
+- Use `async/await` — never `.then()` chains inside route handlers
+- Use `const` for everything except loop counters; no `var`
+- Always destructure from `req.body`, `req.params`, `req.query` at the top of the handler:
+  ```js
+  const { title, description, type, status, priority, assignee_id } = req.body
+  const { id } = req.params
+  ```
+- Required field validation before any DB call:
+  ```js
+  if (!title || !space_id) return res.status(400).json({ error: 'title and space_id are required' })
+  ```
+- Never use `==` — always `===`
+- Use template literals for SQL strings (multi-line), never string concatenation
 
-## React / Next.js
-- Default to Server Components. Add `"use client"` only when browser APIs, hooks, or event handlers are required.
-- Keep components small and single-purpose — extract when a component exceeds ~150 lines.
-- Props interfaces are named `<ComponentName>Props` and defined in the same file as the component.
-- Always pass `key` when rendering lists — never use array index as key if items can reorder.
-- Use `cn()` from `src/lib/utils.ts` for all conditional className merging.
+## SQL Queries
+- Always parameterized — `$1, $2, ...` with values array:
+  ```js
+  const result = await pool.query(
+    'UPDATE issues SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+    [status, id]
+  )
+  ```
+- Column aliases in SELECT use snake_case matching the JS field names
+- For conditional WHERE clauses build arrays:
+  ```js
+  const conditions = ['space_id=$1']
+  const params = [spaceId]
+  if (status) { conditions.push(`status=$${params.length+1}`); params.push(status) }
+  const sql = `SELECT * FROM issues WHERE ${conditions.join(' AND ')}`
+  ```
+- Never SELECT * in production queries — list columns explicitly to avoid returning sensitive fields
 
-## Imports
-- Use `@/` absolute imports (configured in `tsconfig.json`).
-- Order: React → Next.js → third-party → internal (`@/lib`, `@/components`, `@/types`) → relative.
-- No unused imports — ESLint will catch them but remove proactively.
+## Naming Conventions
+- Route handlers: descriptive inline `async (req, res) =>` — no named function expressions
+- Variables: `camelCase` (JS), `snake_case` matches DB column names when destructuring results
+- Constants: `SCREAMING_SNAKE_CASE` at module top (e.g. `STATUS_COLORS`, `PRIORITY_COLORS`)
+- Helper functions: `camelCase` verb + noun (e.g. `createNotif`, `sendEmail`, `authenticate`)
 
-## Naming
-- Files/folders: `kebab-case` for pages and utilities; `PascalCase` for component files.
-- Components: `PascalCase`.
-- Hooks: `useCamelCase`.
-- Constants: `SCREAMING_SNAKE_CASE` at module scope, `camelCase` inside functions.
+## Error Handling
+- Every async route must have `try/catch`
+- `catch (err)`: `console.error(err)` then `res.status(500).json({ error: 'Internal server error' })`
+- Never expose `err.message` or stack trace in the response
+- Specific errors before the catch: 400 (bad input), 401 (no/expired session), 403 (permission), 404 (not found), 409 (conflict — e.g. duplicate email)
 
-## Formatting
-- Prettier is the source of truth — 2-space indent, single quotes, no semicolons in TSX, trailing commas.
-- Never manually reformat; let the post-edit hook handle it.
+## Frontend (app.js)
+- All API calls go through the `api()` helper — never use raw `fetch` directly
+- DOM updates: query the element, check it exists, then set `.innerHTML` or `.textContent`
+- Event listeners added via `addEventListener` — never inline `onclick=` in dynamically generated HTML (XSS risk)
+- State changes: update global `S` object then call the relevant render function
 
 ## Comments
-- No inline comments that explain WHAT the code does — the code should be self-explanatory.
-- Only comment WHY: hidden constraints, non-obvious invariants, workarounds for specific bugs.
+- Only add a comment for non-obvious WHY: a workaround, a constraint, an invariant
+- Never comment what the code does — the code shows that
+- Microsoft OAuth2 CSRF workaround and email TLS workaround are already documented; don't re-explain them

@@ -1,44 +1,48 @@
-# Workflow: Feature Build
+# Workflow: Feature Build — Sprint Board
 
-A repeatable blueprint for building a new feature end-to-end.
+Blueprint for adding a new feature to this Express.js + PostgreSQL + Vanilla JS project.
 
 ## Steps
 
-### 1. Research & Design
-- Clarify requirements with the user (what does the feature do? what are the edge cases?)
-- If a new library is needed → delegate to `@research` agent
-- Define the data model changes (new Prisma models or fields)
-- Define the API contract (endpoints, request/response shapes)
-- Define the UI components needed
+### 1. Design
+- Which entities does this touch? (issues, sprints, spaces, users, custom_fields?)
+- DB changes needed: new table, column, or index?
+- API contract: endpoint path, method, request body, response shape
+- Where does it appear in the SPA? (which view function in app.js?)
 
-### 2. Data Layer
-- Update `prisma/schema.prisma` with new models/fields
-- Run `npm run db:migrate -- --name <feature-name>` to create migration
-- Run `npm run db:generate` to regenerate the Prisma client
-- Add Zod schema to `src/lib/validations/<feature>.schema.ts`
-- Add types to `src/types/index.ts`
+### 2. Database
+- Write `ALTER TABLE` or `CREATE TABLE` SQL manually (no migration tool exists)
+- Add index if the column appears in WHERE or ORDER BY
+- Test the SQL directly in psql first
+- Document the change in `CLAUDE.md` under "Database Tables & Key Fields"
 
-### 3. API Layer
-- Create API route handlers following `.claude/rules/api-conventions.md`
-- Include: auth check → permission check → Zod validation → DB operation → audit log
-- Test routes with curl or Thunder Client before building UI
+### 3. API Route (server.js)
+Follow the pattern in `.claude/rules/api-conventions.md`:
+1. `authenticate` middleware
+2. Permission check (org role or space-member lookup)
+3. Input validation → 400
+4. `pool.query(parameterized SQL)`
+5. `createNotif()` fire-and-forget if user-facing event
+6. `audit_logs` INSERT
+7. `res.json(result)`
+- If the SPA needs this on startup, add to `GET /api/data`
+- Test with curl before touching frontend
 
-### 4. UI Layer
-- Build Server Component page (`src/app/(app)/<feature>/page.tsx`)
-- Build Client Component view (`src/components/<feature>/<Feature>View.tsx`)
-- Use Radix UI primitives and Tailwind — match existing component patterns
-- Add navigation entry to `Sidebar.tsx` if needed
+### 4. Frontend (app.js / index.html)
+- All API calls through `api()` helper
+- Update global `S` state on success, re-render the affected view
+- Use `STATUS_COLORS` / `PRIORITY_COLORS` constants for colored elements
+- No inline `onclick=` on dynamically built HTML — use `addEventListener`
 
-### 5. Testing
-- Delegate to `@test-writer` agent with the new file paths
-- Review generated tests and ensure they pass
+### 5. Test
+- Delegate to `@test-writer` with the new route path and method
+- Manually verify with Postman: happy path + 401 + 403 + 400
 
 ### 6. Review
-- Run `/project:review` on all changed files
-- Delegate security review to `@security-reviewer` if API routes were added
-- Run `npm run lint && npm run build`
+- `/project:review` on changed server.js sections
+- `@security-reviewer` if new routes added
+- `node --check server.js && node --check app.js`
 
 ### 7. PR
-- Run `/project:review` → fix any issues
-- Run `/project:pr-description` to generate PR description
+- `/project:pr-description` to generate description
 - Push and open PR following `.claude/rules/pr.md`

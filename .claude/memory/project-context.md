@@ -1,27 +1,47 @@
-# Project Context
+# Project Context — Sprint Board
 
-## What This Project Is
-Sprint Board — a Jira-like sprint management tool. Users can create projects, manage issues across sprints, view kanban boards, configure SLAs, and receive notifications when assigned or mentioned.
+## What This Is
+A Jira-like sprint management tool: Express.js + PostgreSQL + Vanilla JS SPA.
+Single server file (`server.js`), single frontend (`app.js`), served from `index.html`.
 
-## Current State
-- Core features implemented: auth, projects, issues, board, backlog, sprints, reports, SLA, notifications, admin.
-- GitHub: https://github.com/bhanu3023/Sprint-Bhanu.git
-- Running on Next.js 14 App Router + Prisma + PostgreSQL.
+GitHub: https://github.com/bhanu3023/Sprint-Bhanu.git
 
-## Key Design Decisions
-- **App Router** selected over Pages Router for server components and improved data fetching.
-- **NextAuth v4** used because `@auth/prisma-adapter` was stable at project start.
-- **Zustand** for global client state (e.g., notification count, active project).
-- **Zod** schemas live in `src/lib/validations/` and are shared between API and form validation.
-- **SLA logic** kept pure in `src/lib/sla.ts` — no DB calls — to allow easy unit testing.
+## Core Entity Relationships
+```
+organizations → users → spaces (projects)
+spaces → space_members (access control + roles)
+spaces → sprints → issues
+issues → comments, worklogs, issue_history, issue_links, issue_attachments
+issues → issue_field_values (for custom_fields)
+spaces → custom_fields, saved_filters, roadmap_items
+users → notifications, sessions, invitations
+```
 
-## Active Work Areas
-(Update this as work progresses)
-- [ ] E2E test setup with Playwright
-- [ ] Real-time notifications via WebSocket or Server-Sent Events
-- [ ] Sprint velocity chart improvements
+## Issue Lifecycle
+- Created with auto-generated key (`{SPACE_KEY}-{issue_counter}`), default status `To Do`
+- Assigned to sprint or stays in backlog (`sprint_id=NULL`)
+- Field changes tracked in `issue_history` (status, assignee, priority, sprint, due_date, story_points)
+- Soft-deleted via `deleted_at` — never hard-deleted
+- Notifications: `issue_assigned`, `status_changed`, `comment_added`
+
+## Sprint Lifecycle
+- Created: `status='planning'`
+- Started: `POST /api/sprints/:id/start` → `status='active'` (only one per space at a time)
+- Completed: `POST /api/sprints/:id/complete` → velocity=SUM(story_points WHERE Done), incomplete issues→backlog, all space members notified
+
+## Auth System
+- Email+password: scrypt hash, 32-byte hex token, 7-day session in `sessions` table
+- Microsoft OAuth2: state CSRF validated at callback
+- Invitations: token-based, one-time use, marked `accepted` on use
+
+## Notification System
+- `createNotif()` helper — fire-and-forget, never throws, never awaited in request path
+- Fetched via `GET /api/notifications` (limit 100, unread first)
+- Types: `sprint_started`, `sprint_completed`, `issue_assigned`, `status_changed`, `comment_added`
 
 ## Known Constraints
-- Prisma does not support array fields in SQLite — production must use PostgreSQL.
-- NextAuth session is stored in the DB via Prisma adapter — session table must exist.
-- `@hello-pangea/dnd` requires `"use client"` on the Board component tree.
+- All business logic in `server.js` — no controller/service split
+- Frontend: Vanilla JS SPA, all state in global `S` object, no framework/bundler
+- File uploads: local `uploads/` directory via Multer — not cloud storage
+- No real-time: SPA polls for notifications
+- PostgreSQL only — uses `text[]` arrays and `jsonb`
