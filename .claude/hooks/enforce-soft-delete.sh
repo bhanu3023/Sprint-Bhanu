@@ -1,19 +1,26 @@
 #!/bin/bash
-# PreToolUse hook — warns if code being written contains a hard DELETE on the issues table.
-# Issues must always be soft-deleted via deleted_at=NOW(), never hard-deleted.
-# Exit 0 = allow (warn only), Exit 2 = block
+# PreToolUse hook — blocks hard DELETE on the issues table.
+# Claude Code passes tool input as JSON via stdin.
+# Exit 0 = allow, Exit 2 = block
 
-CONTENT="$CLAUDE_TOOL_INPUT_CONTENT"
+INPUT=$(cat)
+
+# Extract the content being written (new_string for Edit, content for Write)
+CONTENT=$(echo "$INPUT" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+tool_input = data.get('tool_input', {})
+print(tool_input.get('new_string', '') + tool_input.get('content', ''))
+" 2>/dev/null)
 
 if [ -z "$CONTENT" ]; then
   exit 0
 fi
 
-# Detect hard DELETE targeting the issues table
-if echo "$CONTENT" | grep -qiE "DELETE\s+FROM\s+issues|pool\.query\s*\(\s*['\"]DELETE\s+FROM\s+issues"; then
-  echo "BLOCKED: Hard DELETE on the 'issues' table is not allowed."
-  echo "Use soft-delete instead: UPDATE issues SET deleted_at=NOW(), deleted_by=req.user.id WHERE id=\$1"
-  echo "Hard DELETE is only permitted in maintenance scripts, not in API route handlers."
+# Block hard DELETE on the issues table
+if echo "$CONTENT" | grep -qiE "DELETE FROM issues|pool\.query.*DELETE FROM issues"; then
+  echo "BLOCKED: Hard DELETE on 'issues' table is not allowed."
+  echo "Use soft-delete: UPDATE issues SET deleted_at=NOW(), deleted_by=req.user.id WHERE id=\$1"
   exit 2
 fi
 
