@@ -1,17 +1,10 @@
 {
   "permissions": {
     "allow": [
+      "Bash(node *)",
+      "Bash(npm start)",
       "Bash(npm run dev)",
-      "Bash(npm run build)",
-      "Bash(npm run lint)",
-      "Bash(npm run lint:fix)",
-      "Bash(npm run db:generate)",
-      "Bash(npm run db:push)",
-      "Bash(npm run db:migrate)",
-      "Bash(npm run db:studio)",
-      "Bash(npm run db:seed)",
-      "Bash(npx prisma *)",
-      "Bash(npx tsc *)",
+      "Bash(npm install *)",
       "Bash(git status)",
       "Bash(git log *)",
       "Bash(git diff *)",
@@ -20,10 +13,9 @@
       "Bash(git push)"
     ],
     "deny": [
-      "Bash(npm run db:reset)",
-      "Bash(prisma migrate reset *)",
       "Bash(rm -rf *)",
-      "Bash(drop *)"
+      "Bash(DROP TABLE *)",
+      "Bash(DROP DATABASE *)"
     ]
   },
   "hooks": {
@@ -33,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/block-sensitive-writes.sh"
+            "command": "bash .claude/hooks/enforce-soft-delete.sh"
           }
         ]
       }
@@ -44,7 +36,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/post-edit-format.sh"
+            "command": "bash .claude/hooks/check-issue-history-side-effects.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/flag-unparameterized-sql.sh"
           }
         ]
       }
@@ -54,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/validate-code.sh"
+            "command": "node --check server.js 2>&1 && echo 'server.js OK' || echo 'SYNTAX ERROR in server.js'"
           }
         ]
       }

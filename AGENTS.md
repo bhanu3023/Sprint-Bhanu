@@ -1,29 +1,26 @@
 # Agent Roster — Sprint Board
 
-## security-reviewer
-**Role:** Security audit on server.js API routes and SQL queries.
-**Capabilities:** SQL injection (raw string interpolation), broken auth (missing `authenticate` middleware), IDOR (missing space-member check before accessing issues), exposed secrets in responses (password_hash, token), worklog impersonation (accepting user_id from body), CSRF in OAuth callback.
-**When to delegate:** Any PR that adds or modifies routes in `server.js`, especially auth, issues, worklogs, or attachments.
-**Handoff:** Returns findings JSON with severity, route, line number, and fix.
-**File:** `.claude/agents/security-reviewer.md`
+## db-query-optimizer
+**Role:** Analyzes `pool.query()` calls in server.js for missing indexes, slow patterns, and N+1 queries.
+**When to delegate:** When a route feels slow, when adding a new table/column, or before a production release.
+**Returns:** Table of missing indexes with ready-to-run `CREATE INDEX` SQL + slow query pattern list with rewrites.
+**File:** `.claude/agents/db-query-optimizer.md`
 
-## test-writer
-**Role:** Writes Jest integration tests for Express routes using a real test DB or mocked `pg` pool.
-**Capabilities:** Supertest for HTTP layer, mocked `pool.query` for unit tests, session token fixture, role-based scenario coverage.
-**When to delegate:** After implementing a new Express route or fixing a bug in `server.js`. Pass the route path and HTTP method.
-**Handoff:** Returns test file path and test case count.
-**File:** `.claude/agents/test-writer.md`
+## api-documenter
+**Role:** Reads all `app.METHOD()` routes in server.js and generates a complete REST API reference.
+**When to delegate:** After adding/changing routes, when onboarding a new team member, or when frontend needs API specs.
+**Returns:** Full markdown API reference grouped by resource (Auth, Issues, Sprints, Worklogs, etc.) with request/response shapes and side effects documented.
+**File:** `.claude/agents/api-documenter.md`
 
-## research
-**Role:** Investigates libraries, PostgreSQL query patterns, OAuth flows, or third-party integrations without polluting the main session.
-**Capabilities:** Web search, npm/GitHub doc reading, comparison tables, integration path recommendations.
-**When to delegate:** Evaluating a new npm package, debugging Nodemailer TLS issues, researching PostgreSQL JSONB indexing, or exploring WebSocket vs SSE for real-time notifications.
-**Handoff:** Returns recommendation with pros/cons and step-by-step integration path into `server.js`.
-**File:** `.claude/agents/research.md`
+## board-state-debugger
+**Role:** Diagnoses kanban board ordering issues, empty columns, sprint assignment bugs, and drag-drop persistence failures.
+**When to delegate:** When the board shows wrong order, columns are empty despite data existing, or drag-drop changes don't save.
+**Returns:** Root cause diagnosis with the exact server.js or app.js line + specific fix + how to verify.
+**File:** `.claude/agents/board-state-debugger.md`
 
 ## Coordination Protocol
-1. Main session identifies work fitting a subagent's role.
-2. Main session provides a self-contained prompt: route path, file lines, or specific question.
-3. Subagent completes its task and returns results.
-4. Main session integrates — does not redo the subagent's work.
-5. Subagents do NOT call each other.
+1. Main session identifies which agent fits the problem.
+2. Main session provides a self-contained prompt with symptom, file, and context.
+3. Agent returns its structured output.
+4. Main session applies the fix — agents do not write code directly unless they have the Write tool.
+5. Agents do NOT call each other.
