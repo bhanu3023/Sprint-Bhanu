@@ -1626,7 +1626,7 @@ app.post('/api/admin/sync-db', async (req, res) => {
     try {
       await pool.query(`ALTER TABLE space_members DROP CONSTRAINT IF EXISTS space_members_role_check`);
       await pool.query(`UPDATE space_members SET role='site_admin' WHERE role='admin'`);
-      await pool.query(`ALTER TABLE space_members ADD CONSTRAINT space_members_role_check CHECK (role IN ('site_admin','manager','member','viewer'))`);
+      await pool.query(`ALTER TABLE space_members ADD CONSTRAINT space_members_role_check CHECK (role IN ('owner','site_admin','manager','member','viewer'))`);
     } catch(e) { console.error('Migration warning (space_members role):', e.message); }
 
     // Migration: create roadmap_items table

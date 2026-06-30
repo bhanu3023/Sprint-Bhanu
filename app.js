@@ -774,7 +774,7 @@ function _exitIssuePage() {
 function navigateTo(view) {
   document.body.classList.remove('settings-active');
   // Guard: global Reports is owner-only
-  if (view === 'global-reports' && (S.currentUserObj || {}).role !== 'owner') {
+  if (view === 'global-reports' && !isSpaceOwner(S.currentSpace)) {
     toast('Only owners can access Reports', 'error');
     return;
   }
@@ -914,9 +914,8 @@ function navigateToSpace(spaceId, tab) {
 window.navigateToSpace = navigateToSpace;
 
 function renderTab(tab) {
-  // Guard: Reports and Settings are owner-only
-  var isOwner = (S.currentUserObj || {}).role === 'owner';
-  if (!isOwner && (tab === 'reports' || tab === 'space-settings')) {
+  // Guard: Reports and Settings are owner-only (global owner OR space owner)
+  if (!isSpaceOwner(S.currentSpace) && (tab === 'reports' || tab === 'space-settings')) {
     toast('Only owners can access this section', 'error');
     return;
   }
@@ -1009,9 +1008,10 @@ function renderSidebar() {
   var newSpaceBtn = $('newSpaceBtn');
   if (newSpaceBtn) newSpaceBtn.style.display = isOwner ? '' : 'none';
 
-  // Reports and Settings are owner-only
+  // Reports and Settings: visible to global owner OR space owner
+  var effectiveOwner = isOwner || isSpaceOwner(S.currentSpace);
   var ownerOnlyItems = document.querySelectorAll('[data-tab="reports"], [data-tab="space-settings"], [data-view="global-reports"]');
-  ownerOnlyItems.forEach(function(el) { el.style.display = isOwner ? '' : 'none'; });
+  ownerOnlyItems.forEach(function(el) { el.style.display = effectiveOwner ? '' : 'none'; });
 
   // Work Log and Product Roadmap visible to owner and admin only (hidden for members)
   var memberHiddenItems = document.querySelectorAll('[data-view="worklog-report"], [data-view="product-roadmap"]');
@@ -4780,6 +4780,7 @@ function renderSettingsGeneral(space) {
 function renderSettingsPeople(space) {
   var memberRecs = (S.data.space_members || []).filter(function (m) { return m.space_id == space.id; });
   var roles = [
+    { value: 'owner',      label: 'Owner'      },
     { value: 'site_admin', label: 'Site Admin' },
     { value: 'manager',    label: 'Manager'    },
     { value: 'member',     label: 'Member'     },
@@ -6774,6 +6775,23 @@ function renderDrawerCustomFields(cfValues, issueId, spaceId) {
 function canCreateSpace() {
   var role = (S.currentUserObj || {}).role;
   return role === 'owner';
+}
+
+// Returns current user's role in a given space (from space_members)
+function getMySpaceRole(spaceId) {
+  if (!spaceId) return null;
+  var sm = (S.data.space_members || []).find(function(m) {
+    return m.space_id === spaceId && m.user_id === S.currentUser;
+  });
+  return sm ? (sm.role || 'member') : null;
+}
+
+// Returns true if the current user can access owner-level features for the given space
+function isSpaceOwner(spaceId) {
+  var globalRole = (S.currentUserObj || {}).role;
+  if (globalRole === 'owner') return true;
+  var spaceRole = getMySpaceRole(spaceId);
+  return spaceRole === 'owner';
 }
 
 function openSpaceModal(space) {
