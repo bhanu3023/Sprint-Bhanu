@@ -1119,11 +1119,26 @@ app.get('/api/auth/callback/microsoft', wrap(async (req, res) => {
     return res.redirect('/login.html?error=no_email');
   }
 
-  // Look up user in database
-  const userRows = await q('SELECT * FROM users WHERE LOWER(email)=$1', [email]);
+  // Look up user in database — auto-create on first Microsoft login
+  let userRows = await q('SELECT * FROM users WHERE LOWER(email)=$1', [email]);
   if (!userRows.rows.length) {
-    console.error('[MS OAuth] User not found for email:', email);
-    return res.redirect('/login.html?error=user_not_found');
+    const displayName = profile.displayName || profile.givenName || email.split('@')[0];
+    const orgRow = await q('SELECT id FROM organizations LIMIT 1');
+    if (!orgRow.rows.length) {
+      console.error('[MS OAuth] No organization found in DB');
+      return res.redirect('/login.html?error=no_org');
+    }
+    const orgId = orgRow.rows[0].id;
+    const newUserId = `usr-${uid()}`;
+    const colors = ['#0052cc','#00875a','#ff5630','#ff991f','#6554c0','#00b8d9'];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    await q(
+      `INSERT INTO users (id, org_id, name, email, avatar_url, color, role, password_hash, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6,'member',NULL,true)`,
+      [newUserId, orgId, displayName, email, null, color]
+    );
+    console.log('[MS OAuth] Auto-created user:', email, newUserId);
+    userRows = await q('SELECT * FROM users WHERE id=$1', [newUserId]);
   }
   const user = userRows.rows[0];
 
