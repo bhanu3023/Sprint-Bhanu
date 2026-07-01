@@ -8,10 +8,11 @@ function hashPasswordSync(password) {
   return salt + ':' + hash;
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5433/sprintboard',
-  ssl: false,
-});
+const pool = new Pool(
+  process.env.DATABASE_URL
+    ? { connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false } }
+    : { host: 'sprint-postgres', port: 5432, database: 'sprintboard', user: 'postgres', password: 'postgres' }
+);
 
 const uid = () => crypto.randomUUID();
 
