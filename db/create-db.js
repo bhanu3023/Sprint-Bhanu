@@ -502,7 +502,7 @@ async function main() {
 
     for (const i of allIssues) {
       await client.query(
-        `INSERT INTO issues (id, space_id, sprint_id, parent_id, key, title, description, type, status, priority, assignee_id, reporter_id, points, labels, position)
+        `INSERT INTO issues (id, space_id, sprint_id, parent_id, key, title, description, type, status, priority, assignee_id, reporter_id, story_points, labels, position)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [i.id, i.space, i.sprintId, i.parentId, i.key, i.title, i.desc, i.type, i.status, i.priority, i.assignee, i.reporter, i.points, i.labels, i.pos]
       );
