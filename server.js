@@ -90,14 +90,17 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
 
   const sf1 = sid ? ' WHERE space_id=$1' : '';
   const p = sid ? [sid] : [];
-  const [sprints, issues, cf, filters, notifs, ifv] = await Promise.all([
+  const queries = [
     q('SELECT * FROM sprints' + sf1, p),
-    q('SELECT id,space_id,sprint_id,parent_id,key,title,type,status,priority,assignee_id,reporter_id,story_points,labels,position,start_date,due_date,original_estimate,time_spent,team,product_type,deleted_at,created_at,updated_at FROM issues' + (sf1 ? sf1 + ' AND deleted_at IS NULL' : ' WHERE deleted_at IS NULL'), p),
+    q('SELECT id,space_id,sprint_id,parent_id,key,title,type,status,priority,assignee_id,reporter_id,story_points,labels,position,start_date,due_date,original_estimate,time_spent,team,product_type,created_at,updated_at FROM issues' + (sf1 ? sf1 + ' AND deleted_at IS NULL' : ' WHERE deleted_at IS NULL'), p),
     q('SELECT * FROM custom_fields' + sf1, p),
     q('SELECT * FROM saved_filters' + sf1, p),
     q('SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50', [userId]),
-    q(`SELECT ifv.* FROM issue_field_values ifv JOIN issues i ON ifv.issue_id=i.id${sid ? ' WHERE i.space_id=$1' : ''}`, p)
-  ]);
+  ];
+  // Only load issue_field_values when scoped to a space (avoids full-table scan on initial load)
+  if (sid) queries.push(q('SELECT * FROM issue_field_values WHERE issue_id IN (SELECT id FROM issues WHERE space_id=$1 AND deleted_at IS NULL)', p));
+
+  const [sprints, issues, cf, filters, notifs, ifv] = await Promise.all(queries);
 
   // Filter issues/sprints to only non-archived visible spaces (everyone, including admins)
   const filteredIssues = issues.rows.filter(function(i) { return visibleSpaceIds.includes(i.space_id); });
@@ -108,7 +111,7 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
     space_members: space_members, space_favorites: sf.rows, sprints: filteredSprints,
     issues: filteredIssues, worklogs: [], comments: [],
     custom_fields: cf.rows, saved_filters: filters.rows, notifications: notifs.rows,
-    issue_field_values: ifv.rows
+    issue_field_values: ifv ? ifv.rows : []
   });
 }));
 
