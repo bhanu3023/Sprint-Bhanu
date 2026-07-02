@@ -464,11 +464,19 @@ function applyTheme(theme, saveToDb) {
 // INITIALIZATION
 // ═══════════════════════════════════════════════════════════
 async function init() {
+  // Capture token from Microsoft OAuth redirect (?token=...)
+  var _urlToken = new URLSearchParams(window.location.search).get('token');
+  if (_urlToken) {
+    localStorage.setItem('sb-token', _urlToken);
+    localStorage.removeItem('sb-user');
+    history.replaceState({}, '', window.location.pathname);
+  }
+
   // Check auth
   var token = localStorage.getItem('sb-token');
   var storedUser = null;
   try { storedUser = JSON.parse(localStorage.getItem('sb-user') || 'null'); } catch (_) {}
-  if (!token || !storedUser) {
+  if (!token) {
     window.location.href = '/login.html';
     return;
   }
