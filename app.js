@@ -4375,9 +4375,8 @@ function renderAllWork(opts) {
     f.dueDateFrom || f.dueDateTo || f.startDateFrom || f.startDateTo;
   var clearBtn = $('awClearFilters');
   if (clearBtn) clearBtn.style.display = anyFilter ? '' : 'none';
-  // Columns button visible to owner only
   var colBtn = $('awColBtn');
-  if (colBtn) colBtn.parentElement.style.display = canCreateSpace() ? '' : 'none';
+  if (colBtn) colBtn.parentElement.style.display = '';
 
   var issues = getSpaceIssues(S.currentSpace);
 
