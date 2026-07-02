@@ -521,16 +521,37 @@ app.delete('/api/comments/:id', wrap(async (req, res) => {
 
 app.post('/api/comments/upload', authenticate, (req, res) => {
   if (!upload) return res.status(503).json({ error: 'File upload not available' });
-  upload.array('files', 20)(req, res, async (err) => {
+  const memStorage = multer.memoryStorage();
+  const memUpload = multer({ storage: memStorage, limits: { fileSize: Infinity, files: 20 } });
+  memUpload.array('files', 20)(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files' });
-    const files = req.files.map(f => ({
-      name: f.originalname,
-      url: '/uploads/' + f.filename,
-      type: f.mimetype
-    }));
+    const files = [];
+    for (const f of req.files) {
+      const fileId = uid();
+      await pool.query(
+        `INSERT INTO file_storage (id, original_name, mime_type, size, data, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [fileId, f.originalname, f.mimetype, f.size, f.buffer, req.user.id]
+      );
+      files.push({ name: f.originalname, url: '/api/files/' + fileId, type: f.mimetype });
+    }
     res.json({ files });
   });
+});
+
+app.get('/api/files/:id', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT original_name, mime_type, data FROM file_storage WHERE id=$1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'File not found' });
+    const { original_name, mime_type, data } = r.rows[0];
+    res.setHeader('Content-Type', mime_type);
+    res.setHeader('Content-Disposition', 'inline; filename="' + original_name.replace(/"/g, '') + '"');
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+    res.send(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ── Worklogs ──────────────────────────────────────────────
@@ -1736,6 +1757,19 @@ app.post('/api/admin/sync-db', async (req, res) => {
         created_at TIMESTAMP DEFAULT NOW()
       )`);
     } catch(e) { console.error('Migration warning (notifications):', e.message); }
+
+    // Migration: create file_storage table for DB-backed image uploads
+    try {
+      await pool.query(`CREATE TABLE IF NOT EXISTS file_storage (
+        id VARCHAR PRIMARY KEY,
+        original_name VARCHAR NOT NULL,
+        mime_type VARCHAR NOT NULL,
+        size INTEGER,
+        data BYTEA NOT NULL,
+        uploaded_by VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )`);
+    } catch(e) { console.error('Migration warning (file_storage):', e.message); }
 
     // Fix duplicate issue keys on startup
     try {

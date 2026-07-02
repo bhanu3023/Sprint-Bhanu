@@ -333,7 +333,19 @@ async function main() {
       )
     `);
 
-    console.log('✅ All 18 tables created');
+    await client.query(`
+      CREATE TABLE file_storage (
+        id VARCHAR PRIMARY KEY,
+        original_name VARCHAR NOT NULL,
+        mime_type VARCHAR NOT NULL,
+        size INTEGER,
+        data BYTEA NOT NULL,
+        uploaded_by VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    console.log('✅ All 19 tables created');
 
     // ──────────────────────────────────────────────
     // 3. SEED DATA
