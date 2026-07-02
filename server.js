@@ -519,7 +519,7 @@ app.delete('/api/comments/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post('/api/comments/upload', authenticate, (req, res) => {
+app.post('/api/comments/upload', requireAuth, (req, res) => {
   if (!upload) return res.status(503).json({ error: 'File upload not available' });
   const memStorage = multer.memoryStorage();
   const memUpload = multer({ storage: memStorage, limits: { fileSize: Infinity, files: 20 } });
