@@ -519,6 +519,20 @@ app.delete('/api/comments/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+app.post('/api/comments/upload', authenticate, (req, res) => {
+  if (!upload) return res.status(503).json({ error: 'File upload not available' });
+  upload.array('files', 20)(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files' });
+    const files = req.files.map(f => ({
+      name: f.originalname,
+      url: '/uploads/' + f.filename,
+      type: f.mimetype
+    }));
+    res.json({ files });
+  });
+});
+
 // ── Worklogs ──────────────────────────────────────────────
 app.get('/api/worklogs', wrap(async (req, res) => {
   const { space_id, user_id, from, to } = req.query;
