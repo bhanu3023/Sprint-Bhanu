@@ -33,7 +33,8 @@ try {
 }
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(__dirname));
 
 // Serve uploaded files
@@ -532,7 +533,7 @@ app.post('/api/comments/upload', requireAuth, (req, res) => {
       const fileId = uid();
       await pool.query(
         `INSERT INTO file_storage (id, original_name, mime_type, size, data, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [fileId, f.originalname, f.mimetype, f.size, f.buffer, req.user.id]
+        [fileId, f.originalname, f.mimetype, f.size, f.buffer, req.user.user_id]
       );
       files.push({ name: f.originalname, url: '/api/files/' + fileId, type: f.mimetype });
     }
@@ -730,15 +731,19 @@ app.get('/api/issues/:id/attachments', wrap(async (req, res) => {
 }));
 
 app.post('/api/issues/:id/attachments', requireAuth, (req, res, next) => {
-  if (!upload) return res.status(503).json({ error: 'File upload not available' });
-  upload.array('files', 20)(req, res, async (err) => {
+  if (!multer) return res.status(503).json({ error: 'File upload not available' });
+  const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Infinity, files: 20 } });
+  memUpload.array('files', 20)(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
       const saved = [];
       for (const f of req.files) {
+        const fileId = uid();
+        await q(`INSERT INTO file_storage(id,original_name,mime_type,size,data,uploaded_by) VALUES($1,$2,$3,$4,$5,$6)`,
+          [fileId, f.originalname, f.mimetype, f.size, f.buffer, req.user.user_id]);
         const r = await q(`INSERT INTO issue_attachments(id,issue_id,filename,original_name,size,mime_type,uploaded_by)
           VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-          [uid(), req.params.id, f.filename, f.originalname, f.size, f.mimetype, req.user.user_id]);
+          [uid(), req.params.id, fileId, f.originalname, f.size, f.mimetype, req.user.user_id]);
         saved.push(r.rows[0]);
         await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
           VALUES($1,$2,$3,'attachment',NULL,$4)`,
@@ -755,6 +760,7 @@ app.delete('/api/attachments/:id', requireAuth, wrap(async (req, res) => {
   if (a.uploaded_by !== req.user.user_id && req.user.role !== 'admin' && req.user.role !== 'owner')
     return res.status(403).json({ error: 'Cannot delete another user\'s attachment' });
   try { fs.unlinkSync(path.join(uploadsDir, a.filename)); } catch(_) {}
+  try { await q('DELETE FROM file_storage WHERE id=$1', [a.filename]); } catch(_) {}
   await q('DELETE FROM issue_attachments WHERE id=$1', [req.params.id]);
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
     VALUES($1,$2,$3,'attachment',$4,NULL)`,
