@@ -528,9 +528,48 @@
         <!-- Space: Backlog -->
         <div class="view" id="view-backlog" hidden>
           <div class="view-toolbar">
-            <div class="toolbar-group">
+            <div class="toolbar-group" style="position:relative">
               <input type="text" class="input input-sm" id="backlogSearch" placeholder="Search backlog...">
-              <button class="btn btn-outline btn-sm" id="backlogFilterBtn">Filters</button>
+              <button class="btn btn-outline btn-sm" id="backlogFilterBtn">Filters <span id="backlogFilterCount" style="display:none;background:var(--accent);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px">0</span></button>
+              <div id="backlogFilterPanel" style="display:none;position:absolute;top:36px;left:0;z-index:200;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;min-width:300px;box-shadow:0 4px 16px rgba(0,0,0,0.15)">
+                <div style="margin-bottom:10px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Status</label>
+                  <div id="bfStatus" style="display:flex;flex-wrap:wrap;gap:6px">
+                    <label style="font-size:12px"><input type="checkbox" value="To Do"> To Do</label>
+                    <label style="font-size:12px"><input type="checkbox" value="In Progress"> In Progress</label>
+                    <label style="font-size:12px"><input type="checkbox" value="In Review"> In Review</label>
+                    <label style="font-size:12px"><input type="checkbox" value="Done"> Done</label>
+                  </div>
+                </div>
+                <div style="margin-bottom:10px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Priority</label>
+                  <div id="bfPriority" style="display:flex;flex-wrap:wrap;gap:6px">
+                    <label style="font-size:12px"><input type="checkbox" value="highest"> Highest</label>
+                    <label style="font-size:12px"><input type="checkbox" value="high"> High</label>
+                    <label style="font-size:12px"><input type="checkbox" value="medium"> Medium</label>
+                    <label style="font-size:12px"><input type="checkbox" value="low"> Low</label>
+                    <label style="font-size:12px"><input type="checkbox" value="lowest"> Lowest</label>
+                  </div>
+                </div>
+                <div style="margin-bottom:10px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Type</label>
+                  <div id="bfType" style="display:flex;flex-wrap:wrap;gap:6px">
+                    <label style="font-size:12px"><input type="checkbox" value="epic"> Epic</label>
+                    <label style="font-size:12px"><input type="checkbox" value="story"> Story</label>
+                    <label style="font-size:12px"><input type="checkbox" value="task"> Task</label>
+                    <label style="font-size:12px"><input type="checkbox" value="bug"> Bug</label>
+                    <label style="font-size:12px"><input type="checkbox" value="subtask"> Subtask</label>
+                  </div>
+                </div>
+                <div style="margin-bottom:12px">
+                  <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Assignee</label>
+                  <select id="bfAssignee" class="input input-sm" style="width:100%"><option value="">All</option></select>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button class="btn btn-primary btn-sm" id="bfApplyBtn" style="flex:1">Apply</button>
+                  <button class="btn btn-outline btn-sm" id="bfClearBtn">Clear</button>
+                </div>
+              </div>
             </div>
             <div class="toolbar-group">
               <button class="btn btn-primary btn-sm" id="createSprintBtn">+ Create Sprint</button>

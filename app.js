@@ -3325,6 +3325,17 @@ function renderBacklog() {
     window._activeStatFilter = null;
   }
   var searchTerm = ($('backlogSearch').value || '').toLowerCase();
+  var _bf = window._getBacklogFilters ? window._getBacklogFilters() : { status:[], priority:[], type:[], assignee:'' };
+  function applyBacklogFilters(list) {
+    return list.filter(function(iss) {
+      if (_bf.status.length   && _bf.status.indexOf(iss.status)     < 0) return false;
+      if (_bf.priority.length && _bf.priority.indexOf(iss.priority) < 0) return false;
+      if (_bf.type.length     && _bf.type.indexOf(iss.type)         < 0) return false;
+      if (_bf.assignee        && iss.assignee_id !== _bf.assignee)       return false;
+      return true;
+    });
+  }
+  issues = applyBacklogFilters(issues);
 
   // Sort sprints: active first, planning, completed
   var order = { active: 0, planning: 1, completed: 2 };
@@ -7559,6 +7570,65 @@ document.addEventListener('DOMContentLoaded', function () {
   $('backlogSearch').addEventListener('input', function () {
     if (S.currentTab === 'backlog') renderBacklog();
   });
+
+  // Backlog filter panel
+  var _bfFilters = { status: [], priority: [], type: [], assignee: '' };
+  var _bfOpen = false;
+
+  $('backlogFilterBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    _bfOpen = !_bfOpen;
+    $('backlogFilterPanel').style.display = _bfOpen ? 'block' : 'none';
+    if (_bfOpen) {
+      // Populate assignee dropdown with space members
+      var sel = $('bfAssignee');
+      var spaceMembers = (S.data.space_members || []).filter(function(m) { return m.space_id === S.currentSpace; });
+      var users = spaceMembers.map(function(m) { return findUser(m.user_id); }).filter(Boolean);
+      sel.innerHTML = '<option value="">All</option>' + users.map(function(u) {
+        return '<option value="' + u.id + '"' + (u.id === _bfFilters.assignee ? ' selected' : '') + '>' + esc(u.name) + '</option>';
+      }).join('');
+      sel.value = _bfFilters.assignee;
+      // Restore checkbox states
+      ['bfStatus', 'bfPriority', 'bfType'].forEach(function(panelId) {
+        var key = panelId === 'bfStatus' ? 'status' : panelId === 'bfPriority' ? 'priority' : 'type';
+        document.querySelectorAll('#' + panelId + ' input[type=checkbox]').forEach(function(cb) {
+          cb.checked = _bfFilters[key].indexOf(cb.value) >= 0;
+        });
+      });
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    if (_bfOpen && !$('backlogFilterPanel').contains(e.target) && e.target !== $('backlogFilterBtn')) {
+      _bfOpen = false;
+      $('backlogFilterPanel').style.display = 'none';
+    }
+  });
+
+  $('bfApplyBtn').addEventListener('click', function() {
+    _bfFilters.status   = Array.from(document.querySelectorAll('#bfStatus input:checked')).map(function(c){ return c.value; });
+    _bfFilters.priority = Array.from(document.querySelectorAll('#bfPriority input:checked')).map(function(c){ return c.value; });
+    _bfFilters.type     = Array.from(document.querySelectorAll('#bfType input:checked')).map(function(c){ return c.value; });
+    _bfFilters.assignee = $('bfAssignee').value;
+    var count = _bfFilters.status.length + _bfFilters.priority.length + _bfFilters.type.length + (_bfFilters.assignee ? 1 : 0);
+    var badge = $('backlogFilterCount');
+    if (count > 0) { badge.textContent = count; badge.style.display = 'inline'; } else { badge.style.display = 'none'; }
+    _bfOpen = false;
+    $('backlogFilterPanel').style.display = 'none';
+    if (S.currentTab === 'backlog') renderBacklog();
+  });
+
+  $('bfClearBtn').addEventListener('click', function() {
+    _bfFilters = { status: [], priority: [], type: [], assignee: '' };
+    document.querySelectorAll('#backlogFilterPanel input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
+    $('bfAssignee').value = '';
+    $('backlogFilterCount').style.display = 'none';
+    _bfOpen = false;
+    $('backlogFilterPanel').style.display = 'none';
+    if (S.currentTab === 'backlog') renderBacklog();
+  });
+
+  window._getBacklogFilters = function() { return _bfFilters; };
 
   // All work search
   $('allWorkSearch').addEventListener('input', function () {
