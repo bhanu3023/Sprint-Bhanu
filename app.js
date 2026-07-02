@@ -4082,7 +4082,15 @@ window._awToggleFilterPanel = function() {
   var open = panel.style.display === 'none' || panel.style.display === '';
   panel.style.display = open ? 'block' : 'none';
   if (btn) btn.classList.toggle('active', open);
-  if (open) _awRenderPanel();
+  if (open) {
+    // Pre-populate default filter fields if none added yet
+    if (_awActiveFields.length === 0) {
+      ['status', 'type', 'priority', 'assignee'].forEach(function(k) {
+        if (_awActiveFields.indexOf(k) < 0) _awActiveFields.push(k);
+      });
+    }
+    _awLoadDynamicOpts().then(function() { _awRenderPanel(); });
+  }
 };
 
 // Render all active filter rows
