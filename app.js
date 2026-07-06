@@ -6939,7 +6939,7 @@ function resetIssueForm() {
   $('issueType').value = 'task';
   $('issuePriority').value = 'medium';
   $('issuePoints').value = '';
-  $('issueLabels').value = '';
+  if ($('issueLabels')) $('issueLabels').value = '';
   if ($('issueTeam')) $('issueTeam').value = '';
   if ($('issueProductType')) $('issueProductType').value = '';
   $('issueStartDate').value = fmtDateISO(new Date()); // default to today
@@ -7014,7 +7014,7 @@ async function handleIssueSubmit(e) {
     story_points: $('issuePoints').value ? parseInt($('issuePoints').value, 10) : null,
     team: $('issueTeam') ? ($('issueTeam').value || null) : null,
     product_type: $('issueProductType') ? ($('issueProductType').value || null) : null,
-    labels: $('issueLabels').value,
+    labels: $('issueLabels') ? $('issueLabels').value : '',
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
     description: await (async function(){
