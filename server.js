@@ -35,7 +35,13 @@ try {
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use(express.static(__dirname));
+app.use(express.static(__dirname, {
+  setHeaders: function(res, filePath) {
+    if (filePath.endsWith('.js') || filePath.endsWith('.html') || filePath.endsWith('.css')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 
 // Serve uploaded files
 const fs = require('fs');
@@ -1821,8 +1827,9 @@ app.post('/api/admin/sync-db', async (req, res) => {
     console.log('==================================================');
     console.log('  SprintBoard Server');
     console.log('  Database connected');
-    app.listen(3000, () => {
-      console.log('  Listening on http://localhost:3000');
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+      console.log('  Listening on http://localhost:' + PORT);
       console.log('==================================================');
     });
   } catch (e) {
