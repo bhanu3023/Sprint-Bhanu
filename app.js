@@ -7421,7 +7421,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!cfContainer) return;
 
     function renderCF(cfs) {
-      var excluded = ['team', 'product type'];
+      var excluded = ['team', 'product type', 'environment', 'story category'];
       // Deduplicate by lowercase name — keep first occurrence
       var seen = {};
       var unique = [];
