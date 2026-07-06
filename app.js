@@ -4529,7 +4529,7 @@ function renderAllWork(opts) {
     var checked = S.allWorkSelected.has(iss.id) ? ' checked' : '';
     var iid = iss.id;
     var nav = 'openIssuePage(\'' + iid + '\')';
-    html += '<tr class="clickable-row">' +
+    html += '<tr class="clickable-row" onclick="' + nav + '">' +
       '<td onclick="event.stopPropagation()"><input type="checkbox" data-issue-check="' + iid + '"' + checked + '></td>' +
       visCols.map(function(col) {
         var cell = '';

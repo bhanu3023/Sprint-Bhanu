@@ -1527,7 +1527,7 @@ body.light .report-card {
    ISSUE DRAWER (Jira-style)
    ------------------------------------------------------------ */
 .issue-drawer { position: fixed; inset: 0; z-index: 200; }
-.drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200; }
+.drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200; display: none; }
 .drawer-panel { position: fixed; inset: 0; width: 100vw; max-width: 100vw; background: var(--bg2); z-index: 99999; display: flex; flex-direction: column; box-shadow: -6px 0 30px rgba(0,0,0,.25); animation: slideIn .2s ease-out; }
 body.light .drawer-panel { background: #ffffff; }
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
@@ -3985,3 +3985,6 @@ body.light .db-space-card { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0
   .db-hero { padding: 20px 16px; }
   .db-username { font-size: 18px; }
 }
+
+/* Show overlay only when drawer is open */
+#issueDrawer:not([hidden]) .drawer-overlay { display: block; }
