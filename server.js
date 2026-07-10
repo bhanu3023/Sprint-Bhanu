@@ -295,9 +295,7 @@ app.delete('/api/sprints/:id', wrap(async (req, res) => {
 app.post('/api/sprints/:id/start', wrap(async (req, res) => {
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [req.params.id])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
-  const active = await q("SELECT id FROM sprints WHERE space_id=$1 AND status='active' AND id!=$2",
-    [sprint.space_id, sprint.id]);
-  if (active.rows.length) return res.status(400).json({ error: 'Another sprint is already active in this space' });
+  // Multiple active sprints are allowed
   const r = await q("UPDATE sprints SET status='active' WHERE id=$1 RETURNING *", [req.params.id]);
   // Notify all space members
   const members = await q('SELECT user_id FROM space_members WHERE space_id=$1', [sprint.space_id]);

@@ -3544,50 +3544,58 @@ window._openSprintModal = function (id) {
 // ═══════════════════════════════════════════════════════════
 function renderSprintBoard() {
   var sprints = getSpaceSprints(S.currentSpace);
-  var activeSprint = null;
-  for (var s = 0; s < sprints.length; s++) {
-    if (sprints[s].status === 'active') { activeSprint = sprints[s]; break; }
-  }
+  var activeSprints = sprints.filter(function(sp) { return sp.status === 'active'; });
 
-  if (!activeSprint) {
+  if (!activeSprints.length) {
     $('sprintHeader').innerHTML = '';
     $('sprintBoard').innerHTML = '<p class="placeholder-text">No active sprint. Go to Backlog to start a sprint.</p>';
     return;
   }
 
-  var issues = getSpaceIssues(S.currentSpace).filter(function (i) { return i.sprint_id == activeSprint.id; });
-  var doneCount = issues.filter(function (i) { return i.status === 'Done'; }).length;
-  var pct = issues.length ? Math.round((doneCount / issues.length) * 100) : 0;
-  var totalPoints = issues.reduce(function (sum, i) { return sum + (i.story_points || 0); }, 0);
-  var donePoints = issues.filter(function (i) { return i.status === 'Done'; }).reduce(function (sum, i) { return sum + (i.story_points || 0); }, 0);
-
-  $('sprintHeader').innerHTML = '<div class="sprint-info">' +
-    '<h3>' + esc(activeSprint.name) + '</h3>' +
-    (activeSprint.goal ? '<p class="text-muted">' + esc(activeSprint.goal) + '</p>' : '') +
-    '<div class="sprint-meta">' +
-    '<span>' + fmtDateShort(activeSprint.start_date) + ' \u2014 ' + fmtDateShort(activeSprint.end_date) + '</span>' +
-    '<span>' + doneCount + '/' + issues.length + ' issues</span>' +
-    '<span>' + donePoints + '/' + totalPoints + ' pts</span></div>' +
-    '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div></div>';
-
+  $('sprintHeader').innerHTML = '';
+  var allBoardHtml = '';
   var statuses = ['To Do', 'In Progress', 'In Review', 'Done'];
-  var boardHtml = '';
-  for (var c = 0; c < statuses.length; c++) {
-    var status = statuses[c];
-    var colIssues = issues.filter(function (i) { return i.status === status; });
-    boardHtml += '<div class="board-col" data-status="' + status + '" ' +
-      'ondragover="event.preventDefault();this.classList.add(\'drag-over\')" ' +
-      'ondragleave="this.classList.remove(\'drag-over\')" ' +
-      'ondrop="window._dropToStatus(event,\'' + status + '\')">' +
-      '<div class="board-col-header"><span>' + status + '</span>' +
-      '<span class="col-count">' + colIssues.length + '</span></div>' +
-      '<div class="board-col-body">';
-    for (var ci = 0; ci < colIssues.length; ci++) {
-      boardHtml += boardCard(colIssues[ci]);
+
+  for (var si = 0; si < activeSprints.length; si++) {
+    var activeSprint = activeSprints[si];
+    var issues = getSpaceIssues(S.currentSpace).filter(function (i) { return i.sprint_id == activeSprint.id; });
+    var doneCount = issues.filter(function (i) { return i.status === 'Done'; }).length;
+    var pct = issues.length ? Math.round((doneCount / issues.length) * 100) : 0;
+    var totalPoints = issues.reduce(function (sum, i) { return sum + (i.story_points || 0); }, 0);
+    var donePoints = issues.filter(function (i) { return i.status === 'Done'; }).reduce(function (sum, i) { return sum + (i.story_points || 0); }, 0);
+
+    allBoardHtml += '<div class="multi-sprint-section">' +
+      '<div class="sprint-info">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
+      '<h3 style="margin:0">' + esc(activeSprint.name) + '</h3>' +
+      '<button class="btn btn-sm btn-secondary" onclick="window._completeSprint(\'' + activeSprint.id + '\')">Complete Sprint</button>' +
+      '</div>' +
+      (activeSprint.goal ? '<p class="text-muted" style="margin:4px 0 0">' + esc(activeSprint.goal) + '</p>' : '') +
+      '<div class="sprint-meta">' +
+      '<span>' + fmtDateShort(activeSprint.start_date) + ' \u2014 ' + fmtDateShort(activeSprint.end_date) + '</span>' +
+      '<span>' + doneCount + '/' + issues.length + ' issues</span>' +
+      '<span>' + donePoints + '/' + totalPoints + ' pts</span></div>' +
+      '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div></div>' +
+      '<div class="board-cols">';
+
+    for (var c = 0; c < statuses.length; c++) {
+      var status = statuses[c];
+      var colIssues = issues.filter(function (i) { return i.status === status; });
+      allBoardHtml += '<div class="board-col" data-status="' + status + '" data-sprint-id="' + activeSprint.id + '" ' +
+        'ondragover="event.preventDefault();this.classList.add(\'drag-over\')" ' +
+        'ondragleave="this.classList.remove(\'drag-over\')" ' +
+        'ondrop="window._dropToStatus(event,\'' + status + '\')">' +
+        '<div class="board-col-header"><span>' + status + '</span>' +
+        '<span class="col-count">' + colIssues.length + '</span></div>' +
+        '<div class="board-col-body">';
+      for (var ci = 0; ci < colIssues.length; ci++) {
+        allBoardHtml += boardCard(colIssues[ci]);
+      }
+      allBoardHtml += '</div></div>';
     }
-    boardHtml += '</div></div>';
+    allBoardHtml += '</div></div>';
   }
-  $('sprintBoard').innerHTML = boardHtml;
+  $('sprintBoard').innerHTML = allBoardHtml;
 }
 
 function boardCard(iss) {

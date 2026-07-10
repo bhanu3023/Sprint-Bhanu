@@ -1130,8 +1130,14 @@ body.light .backlog-lane-header { background: #f7f8fa; }
    ------------------------------------------------------------ */
 .board-columns {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 24px;
   min-height: 400px;
+}
+.board-columns .board-cols {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
 }
 
 .board-col {
@@ -3988,3 +3994,8 @@ body.light .db-space-card { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0
 
 /* Show overlay only when drawer is open */
 #issueDrawer:not([hidden]) .drawer-overlay { display: block; }
+
+/* Multiple active sprints on board */
+.multi-sprint-section { margin-bottom: 32px; }
+.multi-sprint-section .board-cols { display: flex; gap: 12px; margin-top: 12px; overflow-x: auto; }
+.multi-sprint-section .board-col { flex: 1; min-width: 200px; }
