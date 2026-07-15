@@ -1552,7 +1552,7 @@ app.post('/api/auth/invite', requireAuth, wrap(async (req, res) => {
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await q(`INSERT INTO invitations(id,email,org_id,invited_by,role,token,status,expires_at) VALUES($1,$2,$3,$4,$5,$6,'pending',$7)`,
     [`inv-${uid()}`, email.toLowerCase().trim(), org?.id, req.user.user_id, role || 'member', token, expires]);
-  const inviteUrl = `http://localhost:3000/login.html?invite=${token}`;
+  const inviteUrl = `${process.env.APP_URL || 'http://localhost:3000'}/login.html?invite=${token}`;
   const emailResult = await sendInviteEmail(email, inviteUrl, req.user.name, org?.name || 'Neutara Technologies');
   res.status(201).json({ ok: true, invite_url: inviteUrl, token, email_sent: emailResult.sent, email_reason: emailResult.reason });
 }));
@@ -1569,7 +1569,7 @@ app.post('/api/auth/invitations/:id/resend', requireAuth, wrap(async (req, res) 
   await q(`UPDATE invitations SET token=$1, expires_at=$2, status='pending' WHERE id=$3`, [newToken, newExpiry, inv.id]);
   const orgR = await q('SELECT * FROM organizations LIMIT 1');
   const org = orgR.rows[0];
-  const inviteUrl = `http://localhost:3000/login.html?invite=${newToken}`;
+  const inviteUrl = `${process.env.APP_URL || 'http://localhost:3000'}/login.html?invite=${newToken}`;
   const emailResult = await sendInviteEmail(inv.email, inviteUrl, req.user.name, org?.name || 'Neutara Technologies');
   res.json({ ok: true, invite_url: inviteUrl, email_sent: emailResult.sent, email_reason: emailResult.reason });
 }));
