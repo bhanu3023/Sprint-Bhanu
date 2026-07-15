@@ -5291,9 +5291,11 @@ async function openDrawer(issueId) {
       '<span class="drawer-crumb-icon">' + typeIcon(issue.type) + '</span>' +
       '<span>' + esc(issue.key) + '</span>';
     parentCrumb.style.display = '';
+    if ($('drawerKey')) $('drawerKey').style.display = 'none';
   } else {
     parentCrumb.style.display = 'none';
     parentCrumb.innerHTML = '';
+    if ($('drawerKey')) $('drawerKey').style.display = '';
   }
 
   $('drawerKey').textContent = issue.key || (issue.project_key ? issue.project_key + '-?' : '#' + issue.id);
