@@ -4115,9 +4115,9 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div style="font-size:11px;color:#93c5fd">Overview of current sprint progress and health</div></div></div></div>' +
     '<div style="font-size:11px;color:#93c5fd;display:flex;align-items:center;gap:5px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Last Updated: ' + nowStr + '</div>' +
     (allSprints && allSprints.length > 0
-      ? '<div style="display:flex;align-items:center;gap:8px"><label style="font-size:11px;color:#93c5fd;white-space:nowrap">Sprint:</label>' +
-        '<select class="input input-sm" style="background:#1e3a6e;color:#e2e8f0;border:1px solid #3b5998;border-radius:6px;padding:4px 24px 4px 8px;font-size:12px;max-width:220px" onchange="window._globalRptSprintChange(this.value,\'sprint-summary\')">' +
-        allSprints.map(function(sp){ return '<option value="' + sp.id + '"' + (sprint.id === sp.id ? ' selected' : '') + ' style="background:#1e3a6e;color:#e2e8f0">' + esc(sp.name) + '</option>'; }).join('') +
+      ? '<div style="display:flex;align-items:center;gap:8px"><label style="font-size:11px;color:#93c5fd;white-space:nowrap;font-weight:600">Sprint:</label>' +
+        '<select style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:5px 10px;font-size:12px;font-weight:500;max-width:200px;outline:none;cursor:pointer;backdrop-filter:blur(4px)" onchange="window._globalRptSprintChange(this.value,\'sprint-summary\')">' +
+        allSprints.map(function(sp){ return '<option value="' + sp.id + '"' + (sprint.id === sp.id ? ' selected' : '') + ' style="background:#0f2d5e;color:#e2e8f0">' + esc(sp.name) + '</option>'; }).join('') +
         '</select></div>'
       : '') +
     '</div>' +
