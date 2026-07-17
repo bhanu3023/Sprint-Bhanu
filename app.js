@@ -4355,7 +4355,17 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
   var count = Number(data.count) || 0;
   var totalPts = Number(data.totalPts) || 0;
   var isCompleted = sprint.status === 'completed';
-  var isProjected = !isCompleted;
+
+  if (!isCompleted) {
+    c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+      '<h4 style="margin:0 0 16px">Spillover</h4>' +
+      '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:40px;text-align:center;color:var(--text3)">' +
+      '<div style="font-size:40px;margin-bottom:12px">🏁</div>' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text2);margin-bottom:6px">No completed sprint selected</div>' +
+      '<div style="font-size:13px">Spillover is only available for completed sprints.<br>Please select a completed sprint from the dropdown above.</div>' +
+      '</div></div>';
+    return;
+  }
 
   // Count by type
   var stories = issues.filter(function(i){ return i.type === 'story'; }).length;
@@ -4388,15 +4398,13 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
       '</tr>';
   }).join('');
 
-  var banner = isProjected
-    ? '<div style="background:#f59e0b22;border:1px solid #f59e0b55;border-radius:8px;padding:12px 16px;font-size:13px;color:#92400e;margin-bottom:16px">⚠️ This sprint is still <strong>' + esc(sprint.status) + '</strong>. These are <strong>projected spillovers</strong> — issues currently not Done that may spill if the sprint were completed now.</div>'
-    : (count === 0
-        ? '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:12px 16px;font-size:13px;color:#065f46;margin-bottom:16px">🎉 No spillover — all issues were completed before the sprint ended!</div>'
-        : '<div style="background:#dc262622;border:1px solid #dc262644;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b;margin-bottom:16px">📋 <strong>' + count + ' issue' + (count !== 1 ? 's' : '') + '</strong> spilled over when this sprint was completed and moved back to the backlog.</div>');
+  var banner = count === 0
+    ? '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:12px 16px;font-size:13px;color:#065f46;margin-bottom:16px">🎉 No spillover — all issues were completed before the sprint ended!</div>'
+    : '<div style="background:#dc262622;border:1px solid #dc262644;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b;margin-bottom:16px">📋 <strong>' + count + ' issue' + (count !== 1 ? 's' : '') + '</strong> spilled over when this sprint was completed and moved back to the backlog.</div>';
 
   c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
     '<h4 style="margin:0 0 4px">Spillover — ' + esc(sprint.name || 'Sprint') + '</h4>' +
-    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">' + (isProjected ? 'Projected incomplete issues' : 'Issues not completed at sprint end') + '</p>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Issues not completed at sprint end</p>' +
     banner +
     '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
     kpi('Spilled Issues', count, count > 0 ? '#dc2626' : '#10b981', 'Total not completed') +
