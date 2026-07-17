@@ -2848,7 +2848,8 @@ body.light .chart-card { background: #ffffff; border-color: #d0d7de; }
 .calendar-nav-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text); cursor: pointer; padding: 4px 10px; border-radius: var(--radius); }
 .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); cursor: pointer; padding: 6px 14px; border-radius: var(--radius); font-size: 12px; font-weight: 600; }
 .btn-outline:hover { background: var(--bg3); }
-.input-sm { padding: 5px 8px; font-size: 12px; max-width: 200px; }
+.input-sm { padding: 5px 28px 5px 8px; font-size: 12px; max-width: 260px; }
+select.input-sm { appearance: auto; -webkit-appearance: auto; }
 .input-color { width: 60px; padding: 2px; height: 34px; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; }
 .badge-muted { background: var(--bg4); color: var(--text2); }
