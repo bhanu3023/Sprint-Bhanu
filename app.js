@@ -1332,9 +1332,10 @@ function renderYourWorkContent(data) {
     return;
   }
   var issues;
-  if (S.yourWorkTab === 'assigned') issues = data.assigned || [];
-  else if (S.yourWorkTab === 'reported') issues = data.reported || [];
-  else issues = data.recent || [];
+  if (S.yourWorkTab === 'assigned') issues = (data.assigned || []).slice();
+  else if (S.yourWorkTab === 'reported') issues = (data.reported || []).slice();
+  else issues = (data.recent || []).slice();
+  issues.sort(function(a, b) { return new Date(b.updated_at) - new Date(a.updated_at); });
 
   if (!issues.length) {
     var emptyMsg = S.yourWorkTab === 'assigned'
