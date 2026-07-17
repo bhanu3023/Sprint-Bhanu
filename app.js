@@ -3737,7 +3737,7 @@ async function renderReportContent(type, selectedSprintId) {
       var dSS = await api('/api/reports/sprint/' + activeSprint.id);
       renderSprintSummaryReport(c, dSS, allSprints, sprintSelectorHtml);
     } else if (type === 'burndown') {
-      var data = await api('/api/reports/sprint/' + activeSprint.id);
+      var data = await api('/api/reports/burndown/' + activeSprint.id);
       renderBurndownReport(c, data, allSprints, sprintSelectorHtml);
     } else if (type === 'velocity') {
       var data2 = await api('/api/reports/velocity?space_id=' + S.currentSpace);
@@ -3777,7 +3777,7 @@ async function renderReportContent(type, selectedSprintId) {
           var d = await api('/api/reports/sprint/' + sprintId);
           renderSprintSummaryReport(cont, d, allSprints, newSel);
         } else if (rtype === 'burndown') {
-          var d = await api('/api/reports/sprint/' + sprintId);
+          var d = await api('/api/reports/burndown/' + sprintId);
           renderBurndownReport(cont, d, allSprints, newSel);
         } else if (rtype === 'velocity') {
           var d2 = await api('/api/reports/velocity?space_id=' + S.currentSpace);
@@ -3813,115 +3813,158 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
   var sprint = data.sprint || {};
   var total = Number(data.total) || 0;
-  var done = Number(data.done) || 0;
-  var inProgress = Number(data.in_progress) || 0;
-  var toDo = Math.max(0, total - done - inProgress);
-  var remaining = total - done;
-  var ptsDone = Number(data.points_completed) || 0;
-  var ptsLeft = Number(data.points_remaining) || 0;
-  var completionPct = total ? Math.round((done / total) * 100) : 0;
+  var totalPts = Number(data.totalPts) || 0;
+  var series = Array.isArray(data.series) ? data.series : [];
 
-  var selectorHtml = sprintSelectorHtml || (allSprints && allSprints.length > 1
-    ? '<div class="rpt-sprint-selector"><label>Sprint</label>' +
-      '<select class="input input-sm" onchange="window._rptChangeSprint(this.value)">' +
-      (allSprints || []).map(function(sp) {
-        return '<option value="' + sp.id + '"' + (sp.id === sprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
-      }).join('') + '</select></div>'
-    : '');
+  // ── SVG line chart helper ────────────────────────────────────
+  function lineChart(lines, maxY, title, yLabel) {
+    var W = 560, H = 220, pL = 48, pR = 20, pT = 24, pB = 44;
+    var plotW = W - pL - pR, plotH = H - pT - pB;
+    var n = series.length;
+    if (!n) return '<p style="padding:20px;color:var(--text3)">No daily data yet — data appears once the sprint progresses.</p>';
+    maxY = maxY || 1;
 
-  // Donut SVG
-  var r = 54, cx = 70, cy = 70, circ = 2 * Math.PI * r;
-  var donePct = total ? done / total : 0;
-  var ipPct = total ? inProgress / total : 0;
-  var todoPct = total ? toDo / total : 0;
-  var doneLen = donePct * circ, ipLen = ipPct * circ, todoLen = todoPct * circ;
-  var doneOff = 0, ipOff = -doneLen, todoOff = -(doneLen + ipLen);
-  var donutSvg = '<svg width="140" height="140" viewBox="0 0 140 140">' +
-    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--bg2)" stroke-width="16"/>' +
-    (total ? (
-      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#10b981" stroke-width="16" stroke-dasharray="' + doneLen + ' ' + (circ - doneLen) + '" stroke-dashoffset="' + (circ * 0.25) + '" stroke-linecap="round"/>' +
-      (ipLen > 0 ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#0052cc" stroke-width="16" stroke-dasharray="' + ipLen + ' ' + (circ - ipLen) + '" stroke-dashoffset="' + (circ * 0.25 - doneLen) + '" stroke-linecap="round"/>' : '') +
-      (todoLen > 0 ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#42526e" stroke-width="16" stroke-dasharray="' + todoLen + ' ' + (circ - todoLen) + '" stroke-dashoffset="' + (circ * 0.25 - doneLen - ipLen) + '" stroke-linecap="round"/>' : '')
-    ) : '') +
-    '<text x="' + cx + '" y="' + (cy - 6) + '" text-anchor="middle" font-size="22" font-weight="700" fill="var(--text)">' + completionPct + '%</text>' +
-    '<text x="' + cx + '" y="' + (cy + 14) + '" text-anchor="middle" font-size="11" fill="var(--text2)">Complete</text>' +
-    '</svg>';
+    function xp(i) { return pL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2); }
+    function yp(v) { return pT + plotH - Math.min(1, v / maxY) * plotH; }
 
-  // Vertical bar chart
-  var chartH = 120;
-  var segments = [
-    { label: 'Done', count: done, color: '#10b981' },
-    { label: 'In Progress', count: inProgress, color: '#0052cc' },
-    { label: 'To Do', count: toDo, color: '#42526e' }
-  ];
-  var maxSeg = Math.max.apply(null, segments.map(function(s){ return s.count; })) || 1;
-  var barCols = segments.map(function(seg) {
-    var h = Math.max(total ? Math.round((seg.count / maxSeg) * chartH) : 0, seg.count > 0 ? 4 : 0);
-    return '<div class="rpt-bd-col">' +
-      '<div class="rpt-bd-count">' + seg.count + '</div>' +
-      '<div class="rpt-bd-barwrap" style="height:' + chartH + 'px">' +
-      '<div class="rpt-bd-bar2" style="height:' + h + 'px;background:' + seg.color + '"></div>' +
-      '</div>' +
-      '<div class="rpt-bd-chip" style="background:' + seg.color + '20;color:' + seg.color + '">' + esc(seg.label) + '</div>' +
+    // Grid + Y labels
+    var grid = '';
+    var gridSteps = 5;
+    for (var g = 0; g <= gridSteps; g++) {
+      var gv = Math.round((g / gridSteps) * maxY);
+      var gy = yp(gv);
+      grid += '<line x1="' + pL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pR) + '" y2="' + gy.toFixed(1) + '" stroke="var(--border)" stroke-dasharray="3,3" stroke-width="1"/>';
+      grid += '<text x="' + (pL - 5) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--text3)">' + gv + '</text>';
+    }
+
+    // X labels (dates)
+    var xLabels = '';
+    var step = Math.max(1, Math.floor(n / 8));
+    for (var i2 = 0; i2 < n; i2 += step) {
+      var x2 = xp(i2);
+      var dlbl = series[i2].date ? series[i2].date.slice(5).replace('-', '/') : '';
+      xLabels += '<text x="' + x2.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="var(--text3)">' + dlbl + '</text>';
+    }
+
+    // Polylines
+    var polylines = lines.map(function(line) {
+      var pts = series.map(function(s, i3) {
+        return xp(i3).toFixed(1) + ',' + yp(line.fn(s, i3)).toFixed(1);
+      }).join(' ');
+      var dashAttr = line.dash ? ' stroke-dasharray="' + line.dash + '"' : '';
+      return '<polyline points="' + pts + '" fill="none" stroke="' + line.color + '" stroke-width="' + (line.width || 2.5) + '"' + dashAttr + ' stroke-linejoin="round" stroke-linecap="round"/>';
+    }).join('');
+
+    // Dots on actual lines
+    var dots = lines.filter(function(l) { return !l.dash; }).map(function(line) {
+      return series.map(function(s, i4) {
+        return '<circle cx="' + xp(i4).toFixed(1) + '" cy="' + yp(line.fn(s, i4)).toFixed(1) + '" r="3" fill="' + line.color + '" stroke="var(--bg2)" stroke-width="1.5"/>';
+      }).join('');
+    }).join('');
+
+    return '<div style="overflow-x:auto"><svg width="100%" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:320px">' +
+      grid + xLabels +
+      '<line x1="' + pL + '" y1="' + pT + '" x2="' + pL + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      '<line x1="' + pL + '" y1="' + (pT + plotH) + '" x2="' + (W - pR) + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      polylines + dots +
+      '<text x="' + (pL - 30) + '" y="' + (pT + plotH / 2) + '" text-anchor="middle" font-size="10" fill="var(--text3)" transform="rotate(-90,' + (pL - 30) + ',' + (pT + plotH / 2) + ')">' + yLabel + '</text>' +
+      '</svg></div>';
+  }
+
+  // ── Legend helper ────────────────────────────────────────────
+  function legend(items) {
+    return '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--text2)">' +
+      items.map(function(it) {
+        var dash = it.dash ? 'border-top:2px dashed ' + it.color + ';border-bottom:none' : 'background:' + it.color;
+        return '<span style="display:flex;align-items:center;gap:5px">' +
+          '<span style="display:inline-block;width:20px;height:3px;' + dash + ';border-radius:2px"></span>' + it.label + '</span>';
+      }).join('') + '</div>';
+  }
+
+  // ── KPI tiles ────────────────────────────────────────────────
+  var ptsDone = series.length ? totalPts - (series[series.length - 1].remainingPts || 0) : 0;
+  var ptsLeft = series.length ? (series[series.length - 1].remainingPts || 0) : totalPts;
+  var issuesDone = series.length ? total - (series[series.length - 1].remaining || 0) : 0;
+  var pct = total ? Math.round((issuesDone / total) * 100) : 0;
+  var startStr = sprint.start_date ? fmtDateShort(sprint.start_date) : '—';
+  var endStr = sprint.end_date ? fmtDateShort(sprint.end_date) : '—';
+
+  function kpi(label, val, color, sub) {
+    return '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 18px;flex:1;min-width:110px;text-align:center">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">' + label + '</div>' +
+      '<div style="font-size:24px;font-weight:800;color:' + color + '">' + val + '</div>' +
+      (sub ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + sub + '</div>' : '') +
       '</div>';
-  }).join('');
+  }
 
-  // Stacked progress bar
-  var donePctW = total ? (done / total * 100).toFixed(1) : 0;
-  var ipPctW = total ? (inProgress / total * 100).toFixed(1) : 0;
-  var todoPctW = total ? (toDo / total * 100).toFixed(1) : 0;
-  var stackedBar = '<div class="rpt-stacked-wrap">' +
-    '<div class="rpt-stacked-bar">' +
-    (done > 0 ? '<div style="width:' + donePctW + '%;background:#10b981" title="Done: ' + done + '"></div>' : '') +
-    (inProgress > 0 ? '<div style="width:' + ipPctW + '%;background:#0052cc" title="In Progress: ' + inProgress + '"></div>' : '') +
-    (toDo > 0 ? '<div style="width:' + todoPctW + '%;background:#42526e" title="To Do: ' + toDo + '"></div>' : '') +
+  // ── Chart section helper ─────────────────────────────────────
+  function chartCard(title, desc, chartHtml, legendHtml) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px">' +
+      '<div style="margin-bottom:4px;font-size:14px;font-weight:700;color:var(--text)">' + title + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-bottom:14px">' + desc + '</div>' +
+      chartHtml + legendHtml + '</div>';
+  }
+
+  // Ideal burndown: total→0 linearly across series length
+  var idealStepPts = series.length > 1 ? totalPts / (series.length - 1) : 0;
+  var idealStepIss = series.length > 1 ? total / (series.length - 1) : 0;
+
+  var burndownChart = lineChart([
+    { label: 'Ideal', color: '#94a3b8', dash: '6,4', width: 2,
+      fn: function(s, i) { return Math.max(0, totalPts - idealStepPts * i); } },
+    { label: 'Actual Remaining', color: '#dc2626', width: 2.5,
+      fn: function(s) { return s.remainingPts || 0; } }
+  ], totalPts || 1, 'Burndown', 'Story Points');
+
+  var burnupChart = lineChart([
+    { label: 'Scope', color: '#94a3b8', dash: '6,4', width: 2,
+      fn: function() { return totalPts; } },
+    { label: 'Completed', color: '#10b981', width: 2.5,
+      fn: function(s) { return totalPts - (s.remainingPts || 0); } }
+  ], totalPts || 1, 'Burnup', 'Story Points');
+
+  c.innerHTML = '<div style="display:flex;flex-direction:column;gap:16px">' +
+    sprintSelectorHtml +
+
+    // Header bar
+    '<div style="background:#0f2d5e;border-radius:10px;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
+    '<div style="color:#fff;font-size:15px;font-weight:700">📊 Burn Chart — ' + esc(sprint.name || 'Sprint') + '</div>' +
+    '<div style="font-size:11px;color:#93c5fd">📅 ' + startStr + ' → ' + endStr + '</div>' +
     '</div>' +
-    '<div class="rpt-stacked-legend">' +
-    '<span><i style="background:#10b981"></i>Done (' + done + ')</span>' +
-    '<span><i style="background:#0052cc"></i>In Progress (' + inProgress + ')</span>' +
-    '<span><i style="background:#42526e"></i>To Do (' + toDo + ')</span>' +
-    '</div></div>';
 
-  // Points row
-  var ptsTotalPts = ptsDone + ptsLeft;
-  var ptsPct = ptsTotalPts ? Math.round((ptsDone / ptsTotalPts) * 100) : 0;
-  var ptsRow = '<div class="rpt-pts-row">' +
-    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#10b981">' + ptsDone + '</div><div class="rpt-pts-label">Pts Done</div></div>' +
-    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#f59e0b">' + ptsLeft + '</div><div class="rpt-pts-label">Pts Left</div></div>' +
-    '<div class="rpt-pts-card"><div class="rpt-pts-val" style="color:#0129ac">' + ptsTotalPts + '</div><div class="rpt-pts-label">Total Pts</div></div>' +
+    // KPI row
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+    kpi('Total Issues', total, '#0052cc') +
+    kpi('Completed', issuesDone, '#10b981', pct + '% done') +
+    kpi('Remaining Issues', total - issuesDone, '#f59e0b') +
+    kpi('Pts Done', ptsDone, '#10b981') +
+    kpi('Pts Left', ptsLeft, '#dc2626') +
+    kpi('Total Pts', totalPts, '#0052cc') +
+    '</div>' +
+
+    // Burndown chart
+    chartCard(
+      '📉 Burndown Chart',
+      'Tracks remaining story points each day. Ideal line shows the target pace — actual line should stay at or below it.',
+      burndownChart,
+      legend([
+        { label: 'Ideal (target pace)', color: '#94a3b8', dash: true },
+        { label: 'Actual Remaining', color: '#dc2626' }
+      ])
+    ) +
+
+    // Burnup chart
+    chartCard(
+      '📈 Burnup Chart',
+      'Tracks completed story points over time against total scope. Completed line should reach the scope line by sprint end.',
+      burnupChart,
+      legend([
+        { label: 'Scope (total points)', color: '#94a3b8', dash: true },
+        { label: 'Completed', color: '#10b981' }
+      ])
+    ) +
+
     '</div>';
-
-  c.innerHTML = '<div class="rpt-rich-wrap">' +
-    '<div class="rpt-rich-header">' +
-    '<div class="rpt-rich-title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>Sprint Report</div>' +
-    '<div class="rpt-rich-sprint">' + esc(sprint.name || 'Sprint') + '</div>' +
-    selectorHtml +
-    '</div>' +
-    '<div class="rpt-rich-body">' +
-    '<div class="rpt-rich-donut-col">' + donutSvg +
-    '<div class="rpt-rich-donut-stats">' +
-    '<div class="rpt-ds-row"><span class="rpt-ds-dot" style="background:#10b981"></span><span class="rpt-ds-lbl">Done</span><span class="rpt-ds-val">' + done + '</span></div>' +
-    '<div class="rpt-ds-row"><span class="rpt-ds-dot" style="background:#0052cc"></span><span class="rpt-ds-lbl">In Progress</span><span class="rpt-ds-val">' + inProgress + '</span></div>' +
-    '<div class="rpt-ds-row"><span class="rpt-ds-dot" style="background:#42526e"></span><span class="rpt-ds-lbl">To Do</span><span class="rpt-ds-val">' + toDo + '</span></div>' +
-    '<div class="rpt-ds-row rpt-ds-total"><span class="rpt-ds-lbl">Total</span><span class="rpt-ds-val">' + total + '</span></div>' +
-    '</div></div>' +
-    '<div class="rpt-rich-chart-col">' +
-    '<div class="rpt-bd-chart">' + barCols + '</div>' +
-    stackedBar +
-    ptsRow +
-    '</div>' +
-    '</div>' +
-    '</div>';
-
-  window._rptChangeSprint = async function(sprintId) {
-    window._lastSelectedSprintId = sprintId;
-    var cont = c;
-    try {
-      var d = await api("/api/reports/sprint/" + sprintId);
-      renderBurndownReport(cont, d, allSprints);
-      var sel = cont.querySelector("select"); if (sel) sel.value = sprintId;
-    } catch(e) { cont.innerHTML = "<p class=\"text-muted\">Error: " + esc(e.message) + "</p>"; }
-  };
 }
 
 // ── Sprint Summary ──────────────────────────────────────────
