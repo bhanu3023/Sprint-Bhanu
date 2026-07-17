@@ -6439,11 +6439,11 @@ function _renderActivityTab(tab, issue) {
     var user = findUser(cm.user_id);
     var name = user ? user.name : (cm.user_name || 'Unknown');
     var color = (user && user.color) || cm.user_color || '#6b7280';
-    var isOwn = cm.user_id === S.currentUser;
+    // Use == to handle string/number mismatch between cm.user_id and S.currentUser
+    var isOwn = cm.user_id == S.currentUser;
     var editBtn = isOwn
-      ? '<button onclick="window._editComment(\'' + cm.id + '\')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:3px" title="Edit comment">' +
-        '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>' +
-        'Edit</button>'
+      ? '<button onclick="window._editComment(\'' + cm.id + '\')" id="edit-btn-' + cm.id + '" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:2px 8px;border-radius:4px;display:flex;align-items:center;gap:4px;transition:background .15s" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'none\'" title="Edit comment">' +
+        '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>Edit</button>'
       : '';
     var bodyHtml = (function(body) {
       var html = esc(body).replace(/@([\w][\w.]*(?:\s[\w][\w.]*)?)/g, '<span style="color:#0052cc;font-weight:600">@$1</span>');
@@ -6453,8 +6453,35 @@ function _renderActivityTab(tab, issue) {
       html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
         return '<div style="margin-top:6px"><a href="' + url + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + fname + '</a></div>';
       });
+      if (/<[a-z][\s\S]*>/i.test(body)) return body;
       return html;
     })(cm.body);
+
+    // Rich editor toolbar (same as main comment editor)
+    var richToolbar = '<div class="jira-comment-toolbar" style="border-radius:6px 6px 0 0">' +
+      '<select class="jira-tb-select" onchange="richFormatBlock(this.value,\'edit-rich-' + cm.id + '\');this.value=\'\'" title="Text style"><option value="">Normal text</option><option value="h1">Heading 1</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option><option value="p">Normal text</option></select>' +
+      '<span class="jira-tb-sep"></span>' +
+      '<button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand(\'bold\')" title="Bold"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>' +
+      '<button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand(\'italic\')" title="Italic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>' +
+      '<button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand(\'underline\')" title="Underline"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg></button>' +
+      '<button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand(\'strikeThrough\')" title="Strikethrough"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.1 2.4 3.2 3.1H3"/><path d="M11.1 20.4c2.8 0 5.2-.7 5.2-3.8 0-1.6-1.1-2.5-3.3-3.4H21"/><line x1="3" y1="12" x2="21" y2="12"/></svg></button>' +
+      '<span class="jira-tb-sep"></span>' +
+      '<button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand(\'insertUnorderedList\')" title="Bullet list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg></button>' +
+      '<button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand(\'insertOrderedList\')" title="Numbered list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>' +
+      '<span class="jira-tb-sep"></span>' +
+      '<button type="button" class="jira-tb-btn" onmousedown="event.preventDefault();document.execCommand(\'removeFormat\')" title="Clear formatting"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M5 20h6"/><path d="M13 4l-8 16"/><line x1="17" y1="11" x2="22" y2="16"/><line x1="22" y1="11" x2="17" y2="16"/></svg></button>' +
+      '</div>';
+
+    var editArea = isOwn
+      ? '<div class="comment-edit-area-' + cm.id + '" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden">' +
+        richToolbar +
+        '<div id="edit-rich-' + cm.id + '" class="jira-editor-body" contenteditable="true" style="min-height:80px;padding:10px 12px;font-size:13px;outline:none"></div>' +
+        '<div style="display:flex;gap:8px;padding:8px 10px;background:var(--bg2);border-top:1px solid var(--border)">' +
+        '<button onclick="window._saveComment(\'' + cm.id + '\')" style="background:#0052cc;color:#fff;border:none;border-radius:4px;padding:5px 16px;font-size:12px;cursor:pointer;font-weight:600">Save</button>' +
+        '<button onclick="window._cancelEditComment(\'' + cm.id + '\')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Cancel</button>' +
+        '</div></div>'
+      : '';
+
     return '<div class="drawer-comment-item" id="comment-' + cm.id + '" style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">' +
       '<div class="drawer-comment-avatar-sm" style="background:' + color + ';width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">' + initials(name) + '</div>' +
       '<div style="flex:1;min-width:0">' +
@@ -6464,48 +6491,43 @@ function _renderActivityTab(tab, issue) {
       '<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:var(--bg3);color:var(--text3)">Comment</span>' +
       editBtn +
       '</div>' +
-      '<div class="comment-body-' + cm.id + '" data-raw="' + esc(cm.body) + '" style="font-size:13px;line-height:1.5;color:#172b4d;white-space:pre-wrap">' + bodyHtml + '</div>' +
-      '<div class="comment-edit-area-' + cm.id + '" style="display:none">' +
-      '<textarea id="comment-edit-ta-' + cm.id + '" style="width:100%;min-height:80px;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical;box-sizing:border-box"></textarea>' +
-      '<div style="display:flex;gap:8px;margin-top:6px">' +
-      '<button onclick="window._saveComment(\'' + cm.id + '\')" style="background:#0052cc;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Save</button>' +
-      '<button onclick="window._cancelEditComment(\'' + cm.id + '\')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Cancel</button>' +
-      '</div></div>' +
+      '<div class="comment-body-' + cm.id + '" style="font-size:13px;line-height:1.5;color:var(--text1)">' + bodyHtml + '</div>' +
+      editArea +
       '</div></div>';
   }
 
   window._editComment = function(id) {
-    var bodyDiv = document.querySelector('.comment-body-' + id);
     var editArea = document.querySelector('.comment-edit-area-' + id);
-    var ta = document.getElementById('comment-edit-ta-' + id);
-    if (!bodyDiv || !editArea || !ta) return;
-    // data-raw is HTML-encoded by esc(); decode it back to plain text
-    var raw = bodyDiv.getAttribute('data-raw') || '';
-    var tmp = document.createElement('textarea');
-    tmp.innerHTML = raw;
-    ta.value = tmp.value;
-    bodyDiv.style.display = 'none';
+    var richEl = document.getElementById('edit-rich-' + id);
+    var bodyDiv = document.querySelector('.comment-body-' + id);
+    if (!editArea || !richEl) return;
+    // Pre-fill with current HTML content
+    richEl.innerHTML = bodyDiv ? bodyDiv.innerHTML : '';
     editArea.style.display = '';
-    ta.focus();
+    richEl.focus();
+    // Move cursor to end
+    var range = document.createRange();
+    range.selectNodeContents(richEl);
+    range.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
   };
 
   window._cancelEditComment = function(id) {
-    var bodyDiv = document.querySelector('.comment-body-' + id);
     var editArea = document.querySelector('.comment-edit-area-' + id);
-    if (!bodyDiv || !editArea) return;
-    bodyDiv.style.display = '';
-    editArea.style.display = 'none';
+    if (editArea) editArea.style.display = 'none';
   };
 
   window._saveComment = function(id) {
-    var ta = document.getElementById('comment-edit-ta-' + id);
-    if (!ta) return;
-    var newBody = ta.value.trim();
-    if (!newBody) return;
+    var richEl = document.getElementById('edit-rich-' + id);
+    if (!richEl) return;
+    var newBody = richEl.innerHTML.trim();
+    if (!newBody || newBody === '<br>') return;
     api('/api/comments/' + id, 'PUT', { body: newBody }).then(function() {
       var issueId = S.drawerIssueId;
       if (issueId) {
-        api('/api/issues/' + issueId + '?comments=1&history=1&worklogs=1').then(function(fresh) {
+        api('/api/issues/' + issueId).then(function(fresh) {
           _drawerIssueData = fresh;
           _renderActivityTab('comment', fresh);
         }).catch(function(){});
