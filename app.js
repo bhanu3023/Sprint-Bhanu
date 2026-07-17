@@ -6439,29 +6439,79 @@ function _renderActivityTab(tab, issue) {
     var user = findUser(cm.user_id);
     var name = user ? user.name : (cm.user_name || 'Unknown');
     var color = (user && user.color) || cm.user_color || '#6b7280';
-    return '<div class="drawer-comment-item" style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">' +
+    var isOwn = cm.user_id === S.currentUser;
+    var editBtn = isOwn
+      ? '<button onclick="window._editComment(\'' + cm.id + '\')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:3px" title="Edit comment">' +
+        '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>' +
+        'Edit</button>'
+      : '';
+    var bodyHtml = (function(body) {
+      var html = esc(body).replace(/@([\w][\w.]*(?:\s[\w][\w.]*)?)/g, '<span style="color:#0052cc;font-weight:600">@$1</span>');
+      html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+        return '<div style="margin-top:8px"><img src="' + url + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" onclick="window.open(this.src)" title="' + fname + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + fname + '</div></div>';
+      });
+      html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+        return '<div style="margin-top:6px"><a href="' + url + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + fname + '</a></div>';
+      });
+      return html;
+    })(cm.body);
+    return '<div class="drawer-comment-item" id="comment-' + cm.id + '" style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">' +
       '<div class="drawer-comment-avatar-sm" style="background:' + color + ';width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">' + initials(name) + '</div>' +
-      '<div style="flex:1">' +
+      '<div style="flex:1;min-width:0">' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
       '<span style="font-weight:600;font-size:13px">' + esc(name) + '</span>' +
       '<span style="font-size:11px;color:var(--text3)">' + fmtDateTime(cm.created_at) + '</span>' +
       '<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:var(--bg3);color:var(--text3)">Comment</span>' +
+      editBtn +
       '</div>' +
-      '<div style="font-size:13px;line-height:1.5;color:#172b4d;white-space:pre-wrap">' + (function(body) {
-        // Highlight @mentions
-        var html = esc(body).replace(/@([\w][\w.]*(?:\s[\w][\w.]*)?)/g, '<span style="color:#0052cc;font-weight:600">@$1</span>');
-        // Render inline images [img:name|url]
-        html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
-          return '<div style="margin-top:8px"><img src="' + url + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" onclick="window.open(this.src)" title="' + fname + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + fname + '</div></div>';
-        });
-        // Render inline file links [file:name|url]
-        html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
-          return '<div style="margin-top:6px"><a href="' + url + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + fname + '</a></div>';
-        });
-        return html;
-      })(cm.body) + '</div>' +
+      '<div class="comment-body-' + cm.id + '" data-raw="' + esc(cm.body) + '" style="font-size:13px;line-height:1.5;color:#172b4d;white-space:pre-wrap">' + bodyHtml + '</div>' +
+      '<div class="comment-edit-area-' + cm.id + '" style="display:none">' +
+      '<textarea id="comment-edit-ta-' + cm.id + '" style="width:100%;min-height:80px;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical;box-sizing:border-box"></textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:6px">' +
+      '<button onclick="window._saveComment(\'' + cm.id + '\')" style="background:#0052cc;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Save</button>' +
+      '<button onclick="window._cancelEditComment(\'' + cm.id + '\')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Cancel</button>' +
+      '</div></div>' +
       '</div></div>';
   }
+
+  window._editComment = function(id) {
+    var bodyDiv = document.querySelector('.comment-body-' + id);
+    var editArea = document.querySelector('.comment-edit-area-' + id);
+    var ta = document.getElementById('comment-edit-ta-' + id);
+    if (!bodyDiv || !editArea || !ta) return;
+    // data-raw is HTML-encoded by esc(); decode it back to plain text
+    var raw = bodyDiv.getAttribute('data-raw') || '';
+    var tmp = document.createElement('textarea');
+    tmp.innerHTML = raw;
+    ta.value = tmp.value;
+    bodyDiv.style.display = 'none';
+    editArea.style.display = '';
+    ta.focus();
+  };
+
+  window._cancelEditComment = function(id) {
+    var bodyDiv = document.querySelector('.comment-body-' + id);
+    var editArea = document.querySelector('.comment-edit-area-' + id);
+    if (!bodyDiv || !editArea) return;
+    bodyDiv.style.display = '';
+    editArea.style.display = 'none';
+  };
+
+  window._saveComment = function(id) {
+    var ta = document.getElementById('comment-edit-ta-' + id);
+    if (!ta) return;
+    var newBody = ta.value.trim();
+    if (!newBody) return;
+    api('/api/comments/' + id, 'PUT', { body: newBody }).then(function() {
+      var issueId = S.drawerIssueId;
+      if (issueId) {
+        api('/api/issues/' + issueId + '?comments=1&history=1&worklogs=1').then(function(fresh) {
+          _drawerIssueData = fresh;
+          _renderActivityTab('comment', fresh);
+        }).catch(function(){});
+      }
+    }).catch(function() { toast('Failed to save comment', 'error'); });
+  };
 
   function historyHtml(h) {
     var user = findUser(h.user_id);
