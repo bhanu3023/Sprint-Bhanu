@@ -4065,10 +4065,29 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
       '</div>';
   }
 
+  // SVG icon library
+  var SVG = {
+    clipboard: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>',
+    checkCircle: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
+    refresh: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0052cc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
+    pin: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>',
+    bug: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>',
+    alertCircle: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    ban: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
+    thumbUp: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>',
+    trendUp: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+    star: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+    clock: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    tag: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.41 0l7.29-7.29a1 1 0 0 0 0-1.41Z"/><path d="M7 7h.01"/></svg>',
+    calendar: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    timer: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    chartBar: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>',
+  };
+
   // Metric chip (bottom detailed row)
   function metricChip(icon, label, val, sub) {
     return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;flex:1;min-width:100px;text-align:center">' +
-      '<div style="font-size:18px;margin-bottom:2px">' + icon + '</div>' +
+      '<div style="display:flex;justify-content:center;margin-bottom:4px">' + icon + '</div>' +
       '<div style="font-size:17px;font-weight:800;color:var(--text)">' + val + '</div>' +
       '<div style="font-size:11px;color:var(--text3);white-space:nowrap">' + label + '</div>' +
       (sub ? '<div style="font-size:11px;font-weight:700;color:var(--text2)">' + sub + '</div>' : '') +
@@ -4078,7 +4097,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   // Footer insight card
   function insightCard(icon, label, val, desc, color) {
     return '<div style="background:var(--bg2);border:1px solid var(--border);border-left:4px solid ' + color + ';border-radius:8px;padding:14px 18px;flex:1;min-width:160px;display:flex;align-items:flex-start;gap:12px">' +
-      '<span style="font-size:22px">' + icon + '</span>' +
+      '<span style="display:flex;align-items:center;color:' + color + '">' + icon + '</span>' +
       '<div><div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase">' + label + '</div>' +
       '<div style="font-size:16px;font-weight:800;color:' + color + '">' + val + '</div>' +
       '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + desc + '</div></div>' +
@@ -4091,10 +4110,10 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     // ── Header ──
     '<div style="background:#0f2d5e;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
     '<div><div style="display:flex;align-items:center;gap:10px">' +
-    '<span style="background:#1e4a8c;border-radius:8px;padding:6px 8px;font-size:18px">📊</span>' +
+    '<span style="background:#1e4a8c;border-radius:8px;padding:6px 8px;display:inline-flex">' + SVG.chartBar + '</span>' +
     '<div><div style="font-size:16px;font-weight:700;color:#fff">Sprint Summary</div>' +
     '<div style="font-size:11px;color:#93c5fd">Overview of current sprint progress and health</div></div></div></div>' +
-    '<div style="font-size:11px;color:#93c5fd">📅 Last Updated: ' + nowStr + '</div>' +
+    '<div style="font-size:11px;color:#93c5fd;display:flex;align-items:center;gap:5px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Last Updated: ' + nowStr + '</div>' +
     sprintSelectorHtml.replace(/style="/g, 'style="filter:invert(1) hue-rotate(180deg);') +
     '</div>' +
 
@@ -4107,11 +4126,11 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;min-width:180px;flex:0 0 auto">' +
     '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Sprint Details</div>' +
     '<div style="display:flex;flex-direction:column;gap:8px">' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="color:var(--text3)">🏷️</span><span style="color:var(--text3)">Sprint Name</span></div>' +
-    '<div style="font-size:13px;font-weight:700;color:var(--text);margin-top:-4px;margin-left:24px">' + esc(sprint.name||'—') + '</div>' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span>📅</span><span style="color:var(--text3)">Start Date</span><span style="margin-left:auto;font-weight:600;color:var(--text)">' + startStr + '</span></div>' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span>📅</span><span style="color:var(--text3)">End Date</span><span style="margin-left:auto;font-weight:600;color:var(--text)">' + endStr + '</span></div>' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span>⏱️</span><span style="color:var(--text3)">Days Remaining</span>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px">' + SVG.tag + '<span style="color:var(--text3)">Sprint Name</span></div>' +
+    '<div style="font-size:13px;font-weight:700;color:var(--text);margin-top:-4px;margin-left:22px">' + esc(sprint.name||'—') + '</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px">' + SVG.calendar + '<span style="color:var(--text3)">Start Date</span><span style="margin-left:auto;font-weight:600;color:var(--text)">' + startStr + '</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px">' + SVG.calendar + '<span style="color:var(--text3)">End Date</span><span style="margin-left:auto;font-weight:600;color:var(--text)">' + endStr + '</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px">' + SVG.timer + '<span style="color:var(--text3)">Days Remaining</span>' +
     '<span style="margin-left:auto;font-weight:700;color:' + (daysRem !== null && daysRem <= 2 ? '#dc2626' : '#f59e0b') + '">' + (daysRem !== null ? daysRem + ' Days' : '—') + '</span></div>' +
     '</div></div>' +
 
@@ -4157,21 +4176,21 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div>' +
     '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Detailed Metrics</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
-    metricChip('📋','Total Stories', total, '100%') +
-    metricChip('✅','Completed Stories', done, donePct2 + '%') +
-    metricChip('🔄','In Progress', inProgress, ipPct2 + '%') +
-    metricChip('📌','To Do Stories', toDo, todoPct2 + '%') +
-    metricChip('🐛','Total Bugs', totalBugs, '100%') +
-    metricChip('🔴','Open Bugs', openBugs, bugPct + '%') +
-    metricChip('🚫','Blocked Stories', blocked, blockedPct + '%') +
+    metricChip(SVG.clipboard,'Total Stories', total, '100%') +
+    metricChip(SVG.checkCircle,'Completed Stories', done, donePct2 + '%') +
+    metricChip(SVG.refresh,'In Progress', inProgress, ipPct2 + '%') +
+    metricChip(SVG.pin,'To Do Stories', toDo, todoPct2 + '%') +
+    metricChip(SVG.bug,'Total Bugs', totalBugs, '100%') +
+    metricChip(SVG.alertCircle,'Open Bugs', openBugs, bugPct + '%') +
+    metricChip(SVG.ban,'Blocked Stories', blocked, blockedPct + '%') +
     '</div></div>' +
 
     // ── Row 4: Footer insights ──
     '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-    insightCard('👍', 'Sprint Health', health, pct >= 80 ? 'The sprint is on track! Keep up the great work.' : pct >= 50 ? 'Sprint needs attention, monitor progress.' : 'Sprint is behind schedule.', healthColor) +
-    insightCard('📈', 'On Track', pct >= 50 ? 'On Track' : 'Behind', 'Progress is ' + (pct >= 50 ? 'as expected' : 'below target'), pct >= 50 ? '#10b981' : '#dc2626') +
-    insightCard('⭐', 'Story Points', ptsPct + '%', 'Story points completion', '#0052cc') +
-    (daysRem !== null ? insightCard('⏳', 'Days Remaining', daysRem + ' Days', 'Remaining in sprint', daysRem <= 2 ? '#dc2626' : '#f59e0b') : '') +
+    insightCard(SVG.thumbUp, 'Sprint Health', health, pct >= 80 ? 'The sprint is on track! Keep up the great work.' : pct >= 50 ? 'Sprint needs attention, monitor progress.' : 'Sprint is behind schedule.', healthColor) +
+    insightCard(SVG.trendUp, 'On Track', pct >= 50 ? 'On Track' : 'Behind', 'Progress is ' + (pct >= 50 ? 'as expected' : 'below target'), pct >= 50 ? '#10b981' : '#dc2626') +
+    insightCard(SVG.star, 'Story Points', ptsPct + '%', 'Story points completion', '#0052cc') +
+    (daysRem !== null ? insightCard(SVG.clock, 'Days Remaining', daysRem + ' Days', 'Remaining in sprint', daysRem <= 2 ? '#dc2626' : '#f59e0b') : '') +
     '</div>' +
 
     '</div></div>';
