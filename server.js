@@ -312,7 +312,17 @@ app.post('/api/sprints/:id/complete', wrap(async (req, res) => {
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   const done = await q("SELECT COALESCE(SUM(story_points),0)::int AS pts FROM issues WHERE sprint_id=$1 AND status='Done'", [sid]);
   await q("UPDATE sprints SET status='completed',velocity=$2 WHERE id=$1", [sid, done.rows[0].pts]);
+  // Capture spillover issues before moving them to backlog
+  const spilloverIssues = (await q(
+    "SELECT id FROM issues WHERE sprint_id=$1 AND status!='Done' AND deleted_at IS NULL", [sid]
+  )).rows;
   await q("UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1 AND status!='Done'", [sid]);
+  // Record sprint_id change in history so spillover report can query it
+  for (const issue of spilloverIssues) {
+    q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+       VALUES($1,$2,$3,'sprint_id',$4,NULL)`,
+      [uid(), issue.id, req.user ? req.user.id : null, sid]).catch(() => {});
+  }
   const r = await q('SELECT * FROM sprints WHERE id=$1', [sid]);
   // Notify all space members
   if (sprint) {
