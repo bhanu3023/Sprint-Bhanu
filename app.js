@@ -3730,13 +3730,30 @@ async function renderReportContent(type, selectedSprintId) {
           return '<option value="' + sp.id + '"' + (activeSprint && sp.id === activeSprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
         }).join('') + '</select></div>'
       : '';
-    if (type === 'burndown') {
-      if (!activeSprint) { c.innerHTML = '<p class="placeholder-text">No sprints found.</p>'; return; }
+    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items'];
+    if (sprintTypes.indexOf(type) >= 0 && !activeSprint) { c.innerHTML = '<p class="placeholder-text">No sprints found.</p>'; return; }
+    if (type === 'sprint-summary') {
+      var dSS = await api('/api/reports/sprint/' + activeSprint.id);
+      renderSprintSummaryReport(c, dSS, allSprints, sprintSelectorHtml);
+    } else if (type === 'burndown') {
       var data = await api('/api/reports/sprint/' + activeSprint.id);
       renderBurndownReport(c, data, allSprints, sprintSelectorHtml);
     } else if (type === 'velocity') {
       var data2 = await api('/api/reports/velocity?space_id=' + S.currentSpace);
       renderVelocityReport(c, data2, allSprints, sprintSelectorHtml);
+    } else if (type === 'team-workload') {
+      var dTW = await api('/api/reports/team-workload/' + activeSprint.id);
+      renderTeamWorkloadReport(c, dTW, activeSprint, allSprints, sprintSelectorHtml);
+    } else if (type === 'bug-summary') {
+      var dBS = await api('/api/reports/bugs/' + activeSprint.id);
+      renderBugSummaryReport(c, dBS, activeSprint, allSprints, sprintSelectorHtml);
+    } else if (type === 'epic-progress') {
+      renderEpicProgressReport(c, activeSprint, allSprints, sprintSelectorHtml);
+    } else if (type === 'scope-change') {
+      var dSC = await api('/api/reports/scope-change/' + activeSprint.id);
+      renderScopeChangeReport(c, dSC, allSprints, sprintSelectorHtml);
+    } else if (type === 'blocked-items') {
+      renderBlockedItemsReport(c, activeSprint, allSprints, sprintSelectorHtml);
     } else if (type === 'cumulative') {
       var data3 = await api('/api/reports/status?space_id=' + S.currentSpace);
       renderCumulativeReport(c, data3, allSprints, sprintSelectorHtml);
@@ -3748,19 +3765,35 @@ async function renderReportContent(type, selectedSprintId) {
       window._lastSelectedSprintId = sprintId;
       var cont = $('reportContent') || c;
       cont.innerHTML = '<p class="text-muted">Loading…</p>';
+      var selSprint = allSprints.find(function(sp){ return sp.id === sprintId; });
       try {
         var newSel = '<div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
           '<select class="input input-sm" onchange="window._globalRptSprintChange(this.value,\'' + rtype + '\')">' +
           allSprints.map(function(sp) {
             return '<option value="' + sp.id + '"' + (sp.id === sprintId ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
           }).join('') + '</select></div>';
-        if (rtype === 'burndown') {
+        if (rtype === 'sprint-summary') {
           var d = await api('/api/reports/sprint/' + sprintId);
-          renderBurndownReport(cont, d, allSprints);
-          var sel = cont.querySelector('select'); if (sel) sel.value = sprintId;
+          renderSprintSummaryReport(cont, d, allSprints, newSel);
+        } else if (rtype === 'burndown') {
+          var d = await api('/api/reports/sprint/' + sprintId);
+          renderBurndownReport(cont, d, allSprints, newSel);
         } else if (rtype === 'velocity') {
           var d2 = await api('/api/reports/velocity?space_id=' + S.currentSpace);
           renderVelocityReport(cont, d2, allSprints, newSel);
+        } else if (rtype === 'team-workload') {
+          var d = await api('/api/reports/team-workload/' + sprintId);
+          renderTeamWorkloadReport(cont, d, selSprint, allSprints, newSel);
+        } else if (rtype === 'bug-summary') {
+          var d = await api('/api/reports/bugs/' + sprintId);
+          renderBugSummaryReport(cont, d, selSprint, allSprints, newSel);
+        } else if (rtype === 'epic-progress') {
+          renderEpicProgressReport(cont, selSprint, allSprints, newSel);
+        } else if (rtype === 'scope-change') {
+          var d = await api('/api/reports/scope-change/' + sprintId);
+          renderScopeChangeReport(cont, d, allSprints, newSel);
+        } else if (rtype === 'blocked-items') {
+          renderBlockedItemsReport(cont, selSprint, allSprints, newSel);
         } else if (rtype === 'cumulative') {
           var d3 = await api('/api/reports/status?space_id=' + S.currentSpace);
           renderCumulativeReport(cont, d3, allSprints, newSel);
@@ -3888,6 +3921,234 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
       var sel = cont.querySelector("select"); if (sel) sel.value = sprintId;
     } catch(e) { cont.innerHTML = "<p class=\"text-muted\">Error: " + esc(e.message) + "</p>"; }
   };
+}
+
+// ── Sprint Summary ──────────────────────────────────────────
+function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  var sprint = data.sprint || {};
+  var issues = getSpaceIssues(S.currentSpace).filter(function(i){ return i.sprint_id === sprint.id; });
+  var total = Number(data.total) || 0;
+  var done = Number(data.done) || 0;
+  var inProgress = Number(data.in_progress) || 0;
+  var toDo = Math.max(0, total - done - inProgress);
+  var pct = total ? Math.round((done / total) * 100) : 0;
+  var ptsDone = Number(data.points_completed) || 0;
+  var ptsLeft = Number(data.points_remaining) || 0;
+  var bugs = issues.filter(function(i){ return i.type === 'bug'; });
+  var openBugs = bugs.filter(function(i){ return i.status !== 'Done'; }).length;
+  var blockedCount = issues.filter(function(i){ return i.priority === 'highest' && i.status !== 'Done'; }).length;
+  var now = new Date();
+  var endDate = sprint.end_date ? new Date(sprint.end_date) : null;
+  var daysRem = endDate ? Math.max(0, Math.ceil((endDate - now) / 86400000)) : null;
+  var health = pct >= 80 ? 'Healthy' : pct >= 50 ? 'At Risk' : 'Needs Attention';
+  var healthColor = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#dc2626';
+  var startStr = sprint.start_date ? fmtDateShort(sprint.start_date) : '—';
+  var endStr = sprint.end_date ? fmtDateShort(sprint.end_date) : '—';
+
+  var kpiCard = function(label, val, sub, color) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;min-width:140px;flex:1">' +
+      '<div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">' + label + '</div>' +
+      '<div style="font-size:26px;font-weight:700;color:' + (color||'var(--text)') + '">' + val + '</div>' +
+      (sub ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + sub + '</div>' : '') +
+      '</div>';
+  };
+
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:20px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">' +
+    '<div><span style="font-size:16px;font-weight:700">' + esc(sprint.name || 'Sprint') + '</span>' +
+    '<span style="margin-left:12px;font-size:12px;color:var(--text3)">📅 ' + startStr + ' — ' + endStr + '</span></div>' +
+    '<span style="background:' + healthColor + '22;color:' + healthColor + ';border:1px solid ' + healthColor + '44;border-radius:20px;padding:3px 14px;font-size:12px;font-weight:700">' + health + '</span>' +
+    '</div>' +
+    (sprint.goal ? '<p style="font-size:13px;color:var(--text2);margin:4px 0 0">' + esc(sprint.goal) + '</p>' : '') +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px">' +
+    kpiCard('Sprint Progress', pct + '%', done + ' of ' + total + ' issues done', pct>=80?'#10b981':pct>=50?'#f59e0b':'#dc2626') +
+    kpiCard('Completed Stories', done, 'In Progress: ' + inProgress, '#10b981') +
+    kpiCard('To Do', toDo, '', '#42526e') +
+    kpiCard('Points Done', ptsDone, 'Remaining: ' + ptsLeft, '#0052cc') +
+    kpiCard('Open Bugs', openBugs, bugs.length + ' total bugs', openBugs > 0 ? '#dc2626' : '#10b981') +
+    kpiCard('Blocked', blockedCount, 'Highest priority open', blockedCount > 0 ? '#f59e0b' : '#10b981') +
+    (daysRem !== null ? kpiCard('Days Remaining', daysRem, 'Until ' + endStr, daysRem <= 2 ? '#dc2626' : daysRem <= 5 ? '#f59e0b' : '#10b981') : '') +
+    '</div>' +
+    '<div style="margin-bottom:6px;font-size:12px;color:var(--text2)">Sprint Progress</div>' +
+    '<div style="background:var(--bg3);border-radius:8px;height:14px;overflow:hidden">' +
+    '<div style="height:100%;width:' + pct + '%;background:' + healthColor + ';border-radius:8px;transition:width .4s"></div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:4px">' +
+    '<span>' + pct + '% complete</span><span>' + done + '/' + total + ' stories</span>' +
+    '</div></div>';
+}
+
+// ── Team Workload ───────────────────────────────────────────
+function renderTeamWorkloadReport(c, rows, sprint, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  if (!rows || !rows.length) {
+    c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml + '<p class="placeholder-text">No assigned issues in this sprint.</p></div>';
+    return;
+  }
+  var maxAssigned = Math.max.apply(null, rows.map(function(r){ return r.assigned; })) || 1;
+  var tableRows = rows.map(function(r) {
+    var utilPct = r.assigned_sp ? Math.round((r.completed_sp / r.assigned_sp) * 100) : 0;
+    var utilColor = utilPct >= 80 ? '#10b981' : utilPct >= 50 ? '#f59e0b' : '#42526e';
+    var barW = Math.round((r.assigned / maxAssigned) * 100);
+    return '<tr>' +
+      '<td style="padding:10px 12px;font-weight:600;white-space:nowrap">' +
+      '<div style="display:inline-flex;align-items:center;gap:8px">' +
+      '<span style="width:28px;height:28px;border-radius:50%;background:' + (r.color||'#0052cc') + ';display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">' +
+      esc((r.name||'?').charAt(0).toUpperCase()) + '</span>' + esc(r.name||'Unknown') + '</div></td>' +
+      '<td style="padding:10px 12px;text-align:center">' + r.assigned + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;color:#10b981;font-weight:600">' + r.completed + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;color:#f59e0b;font-weight:600">' + r.remaining + '</td>' +
+      '<td style="padding:10px 12px">' +
+      '<div style="background:var(--bg3);border-radius:4px;height:8px;width:120px">' +
+      '<div style="height:100%;width:' + barW + '%;background:#0052cc;border-radius:4px"></div></div></td>' +
+      '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + utilColor + '">' + utilPct + '%</td>' +
+      '</tr>';
+  }).join('');
+  var thStyle = 'padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)';
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<h4 style="margin:0 0 16px">Team Workload — ' + esc((sprint||{}).name||'Sprint') + '</h4>' +
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+    '<thead><tr>' +
+    '<th style="' + thStyle + '">Developer</th>' +
+    '<th style="' + thStyle + ';text-align:center">Assigned</th>' +
+    '<th style="' + thStyle + ';text-align:center">Completed</th>' +
+    '<th style="' + thStyle + ';text-align:center">Remaining</th>' +
+    '<th style="' + thStyle + '">Workload</th>' +
+    '<th style="' + thStyle + ';text-align:center">Utilization</th>' +
+    '</tr></thead><tbody>' + tableRows + '</tbody></table></div></div>';
+}
+
+// ── Bug Summary ─────────────────────────────────────────────
+function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  var open = Number((data||{}).open_bugs) || 0;
+  var closed = Number((data||{}).closed_bugs) || 0;
+  var total = Number((data||{}).total_bugs) || 0;
+  var critical = Number((data||{}).critical_bugs) || 0;
+  var resolvedPct = total ? Math.round((closed / total) * 100) : 0;
+  var kpiCard = function(label, val, color) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:120px;text-align:center">' +
+      '<div style="font-size:32px;font-weight:800;color:' + color + '">' + val + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:4px;font-weight:600">' + label + '</div>' +
+      '</div>';
+  };
+  var issues = getSpaceIssues(S.currentSpace).filter(function(i){ return i.sprint_id === ((sprint||{}).id) && i.type === 'bug'; });
+  var bugRows = issues.map(function(i) {
+    var sc = {'To Do':'#42526e','In Progress':'#0052cc','In Review':'#ff991f','Done':'#10b981'}[i.status]||'#42526e';
+    return '<tr><td style="padding:8px 12px">' + esc(i.key) + '</td>' +
+      '<td style="padding:8px 12px;color:var(--text2)">' + esc(i.title) + '</td>' +
+      '<td style="padding:8px 12px"><span style="background:' + sc + '22;color:' + sc + ';border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700">' + esc(i.status) + '</span></td>' +
+      '<td style="padding:8px 12px;font-size:11px;color:var(--text3)">' + esc(i.priority||'—') + '</td></tr>';
+  }).join('');
+  var thStyle = 'padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)';
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<h4 style="margin:0 0 16px">Bug Summary — ' + esc((sprint||{}).name||'Sprint') + '</h4>' +
+    '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
+    kpiCard('Open Bugs', open, open > 0 ? '#dc2626' : '#10b981') +
+    kpiCard('Closed / Fixed', closed, '#10b981') +
+    kpiCard('Critical', critical, critical > 0 ? '#dc2626' : '#42526e') +
+    kpiCard('Total', total, '#0052cc') +
+    '</div>' +
+    '<div style="margin-bottom:6px;display:flex;justify-content:space-between;font-size:12px;color:var(--text2)">' +
+    '<span>Resolution Rate</span><span style="font-weight:700">' + resolvedPct + '%</span></div>' +
+    '<div style="background:var(--bg3);border-radius:8px;height:10px;overflow:hidden;margin-bottom:20px">' +
+    '<div style="height:100%;width:' + resolvedPct + '%;background:#10b981;border-radius:8px"></div></div>' +
+    (bugRows ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+      '<thead><tr><th style="' + thStyle + '">Key</th><th style="' + thStyle + '">Title</th><th style="' + thStyle + '">Status</th><th style="' + thStyle + '">Priority</th></tr></thead>' +
+      '<tbody>' + bugRows + '</tbody></table></div>' : '<p class="placeholder-text">No bugs in this sprint.</p>') +
+    '</div>';
+}
+
+// ── Epic Progress ───────────────────────────────────────────
+function renderEpicProgressReport(c, sprint, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  var allIssues = getSpaceIssues(S.currentSpace);
+  var epics = allIssues.filter(function(i){ return i.type === 'epic'; });
+  if (!epics.length) {
+    c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml + '<p class="placeholder-text">No epics found in this space.</p></div>';
+    return;
+  }
+  var bars = epics.map(function(epic) {
+    var children = allIssues.filter(function(i){ return i.parent_id === epic.id && i.type !== 'epic'; });
+    var done = children.filter(function(i){ return i.status === 'Done'; }).length;
+    var total = children.length;
+    var pct = total ? Math.round((done / total) * 100) : 0;
+    var color = pct >= 80 ? '#10b981' : pct >= 50 ? '#0052cc' : '#f59e0b';
+    return '<div style="margin-bottom:16px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+      '<span style="font-size:13px;font-weight:600;color:var(--text)">' + esc(epic.key) + ' · ' + esc(epic.title) + '</span>' +
+      '<span style="font-size:12px;font-weight:700;color:' + color + '">' + pct + '%</span>' +
+      '</div>' +
+      '<div style="background:var(--bg3);border-radius:8px;height:12px;overflow:hidden">' +
+      '<div style="height:100%;width:' + pct + '%;background:' + color + ';border-radius:8px;transition:width .4s"></div></div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + done + ' / ' + total + ' issues done</div>' +
+      '</div>';
+  }).join('');
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<h4 style="margin:0 0 20px">Epic Progress</h4>' +
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px">' +
+    bars + '</div></div>';
+}
+
+// ── Scope Change ────────────────────────────────────────────
+function renderScopeChangeReport(c, data, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  var sprint = data.sprint || {};
+  var committed = Number(data.committed) || 0;
+  var added = Number(data.added) || 0;
+  var removed = Number(data.removed) || 0;
+  var total = committed + added;
+  var kpi = function(label, val, color, desc) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:140px;text-align:center">' +
+      '<div style="font-size:32px;font-weight:800;color:' + color + '">' + val + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:4px;font-weight:600">' + label + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + desc + '</div></div>';
+  };
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<h4 style="margin:0 0 16px">Scope Change — ' + esc(sprint.name||'Sprint') + '</h4>' +
+    '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
+    kpi('Committed at Start', committed, '#0052cc', 'Stories at sprint start') +
+    kpi('Added Mid-Sprint', added, '#f59e0b', 'Added after sprint started') +
+    kpi('Removed', removed, '#dc2626', 'Moved out of sprint') +
+    kpi('Current Total', total, '#10b981', 'Committed + Added') +
+    '</div>' +
+    (added > 0 || removed > 0
+      ? '<div style="background:#f59e0b22;border:1px solid #f59e0b44;border-radius:8px;padding:12px 16px;font-size:13px;color:#92400e">' +
+        '⚠️ Scope changed during sprint: +' + added + ' added, −' + removed + ' removed. Monitor for scope creep.' +
+        '</div>'
+      : '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:12px 16px;font-size:13px;color:#065f46">' +
+        '✅ No scope changes detected — sprint scope was stable.' + '</div>') +
+    '</div>';
+}
+
+// ── Blocked Items ───────────────────────────────────────────
+function renderBlockedItemsReport(c, sprint, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  var issues = getSpaceIssues(S.currentSpace).filter(function(i){
+    return i.sprint_id === ((sprint||{}).id) && i.status !== 'Done' && i.priority === 'highest';
+  });
+  var thStyle = 'padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)';
+  var tableRows = issues.map(function(i) {
+    var assignee = findUser(i.assignee_id);
+    var sc = {'To Do':'#42526e','In Progress':'#0052cc','In Review':'#ff991f'}[i.status]||'#42526e';
+    return '<tr><td style="padding:10px 12px;font-weight:600">' + esc(i.key) + '</td>' +
+      '<td style="padding:10px 12px;color:var(--text)">' + esc(i.title) + '</td>' +
+      '<td style="padding:10px 12px"><span style="background:' + sc + '22;color:' + sc + ';border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700">' + esc(i.status) + '</span></td>' +
+      '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">' + esc(assignee ? assignee.name : 'Unassigned') + '</td>' +
+      '</tr>';
+  }).join('');
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<h4 style="margin:0 0 6px">Blocked / High-Risk Items — ' + esc((sprint||{}).name||'Sprint') + '</h4>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Showing open issues with Highest priority</p>' +
+    (issues.length
+      ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+        '<thead><tr><th style="' + thStyle + '">Key</th><th style="' + thStyle + '">Title</th><th style="' + thStyle + '">Status</th><th style="' + thStyle + '">Owner</th></tr></thead>' +
+        '<tbody>' + tableRows + '</tbody></table></div>'
+      : '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:16px;font-size:13px;color:#065f46">✅ No blocked or highest-priority open items in this sprint.</div>') +
+    '</div>';
 }
 
 function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {

@@ -994,6 +994,64 @@ app.get('/api/reports/cycle-time', requireAuth, wrap(async (req, res) => {
   res.json(rows);
 }));
 
+// Sprint-specific team workload
+app.get('/api/reports/team-workload/:sprintId', requireAuth, wrap(async (req, res) => {
+  const sid = req.params.sprintId;
+  const r = await q(`
+    SELECT u.id, u.name, u.color, u.avatar_url,
+      COUNT(i.id)::int AS assigned,
+      COUNT(i.id) FILTER (WHERE i.status='Done')::int AS completed,
+      COUNT(i.id) FILTER (WHERE i.status!='Done')::int AS remaining,
+      COALESCE(SUM(i.story_points),0)::int AS assigned_sp,
+      COALESCE(SUM(i.story_points) FILTER (WHERE i.status='Done'),0)::int AS completed_sp
+    FROM issues i
+    JOIN users u ON u.id = i.assignee_id
+    WHERE i.sprint_id=$1 AND i.deleted_at IS NULL
+    GROUP BY u.id, u.name, u.color, u.avatar_url
+    ORDER BY assigned DESC
+  `, [sid]);
+  res.json(r.rows);
+}));
+
+// Scope change for a sprint (committed vs added/removed after start)
+app.get('/api/reports/scope-change/:sprintId', requireAuth, wrap(async (req, res) => {
+  const sid = req.params.sprintId;
+  const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  const current = (await q(
+    'SELECT id, key, title, status, story_points FROM issues WHERE sprint_id=$1 AND deleted_at IS NULL', [sid]
+  )).rows;
+  const addedRows = sprint.start_date ? (await q(
+    `SELECT DISTINCT issue_id FROM issue_history
+     WHERE field_name='sprint_id' AND new_value=$1 AND created_at > $2`,
+    [sid, sprint.start_date]
+  )).rows : [];
+  const addedIds = new Set(addedRows.map(r => r.issue_id));
+  const committed = current.filter(i => !addedIds.has(i.id));
+  const added = current.filter(i => addedIds.has(i.id));
+  const removed = sprint.start_date ? (await q(
+    `SELECT DISTINCT ih.issue_id, i.key, i.title FROM issue_history ih
+     JOIN issues i ON i.id=ih.issue_id
+     WHERE ih.field_name='sprint_id' AND ih.old_value=$1 AND ih.created_at > $2 AND i.sprint_id!=$1`,
+    [sid, sprint.start_date]
+  )).rows : [];
+  res.json({ sprint, committed: committed.length, added: added.length, removed: removed.length });
+}));
+
+// Bug summary for a sprint
+app.get('/api/reports/bugs/:sprintId', requireAuth, wrap(async (req, res) => {
+  const sid = req.params.sprintId;
+  const r = (await q(`
+    SELECT
+      COUNT(*) FILTER (WHERE status!='Done')::int AS open_bugs,
+      COUNT(*) FILTER (WHERE status='Done')::int AS closed_bugs,
+      COUNT(*)::int AS total_bugs,
+      COUNT(*) FILTER (WHERE priority='highest')::int AS critical_bugs
+    FROM issues WHERE sprint_id=$1 AND type='bug' AND deleted_at IS NULL
+  `, [sid])).rows[0];
+  res.json(r);
+}));
+
 // ── Notifications ─────────────────────────────────────────
 
 // Helper: create a notification (fire-and-forget, never throws)
