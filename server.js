@@ -1070,8 +1070,9 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
 
   let spillover = [];
   if (sprint.status === 'completed') {
-    // Issues that had their sprint_id changed away from this sprint (moved to backlog on completion)
-    const r = await q(`
+    // Approach 1: issues explicitly recorded in history as moved out (old_value=sprint → NULL)
+    // This works for sprints completed after the fix was deployed.
+    const fromHistory = (await q(`
       SELECT DISTINCT ON (i.id) i.id, i.key, i.title, i.status, i.priority, i.type,
         i.story_points, i.assignee_id, ih.created_at AS spilled_at
       FROM issue_history ih
@@ -1081,18 +1082,35 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
         AND (ih.new_value IS NULL OR ih.new_value = '' OR ih.new_value = 'null')
         AND i.deleted_at IS NULL
       ORDER BY i.id, ih.created_at DESC
-    `, [sid]);
-    spillover = r.rows;
+    `, [sid])).rows;
+
+    if (fromHistory.length > 0) {
+      spillover = fromHistory;
+    } else {
+      // Fallback for old sprints: find backlog issues that were ever assigned to this sprint
+      // (recorded as new_value=sprintId in history) and are now not Done
+      spillover = (await q(`
+        SELECT DISTINCT ON (i.id) i.id, i.key, i.title, i.status, i.priority, i.type,
+          i.story_points, i.assignee_id, ih.created_at AS spilled_at
+        FROM issue_history ih
+        JOIN issues i ON i.id = ih.issue_id
+        WHERE ih.field_name = 'sprint_id'
+          AND ih.new_value = $1
+          AND i.sprint_id IS NULL
+          AND i.status != 'Done'
+          AND i.deleted_at IS NULL
+        ORDER BY i.id, ih.created_at DESC
+      `, [sid])).rows;
+    }
   } else {
     // Active/planning sprint: projected spillover = current non-done issues
-    const r = await q(`
+    spillover = (await q(`
       SELECT i.id, i.key, i.title, i.status, i.priority, i.type,
         i.story_points, i.assignee_id, NULL AS spilled_at
       FROM issues i
       WHERE i.sprint_id = $1 AND i.status != 'Done' AND i.deleted_at IS NULL
       ORDER BY i.key
-    `, [sid]);
-    spillover = r.rows;
+    `, [sid])).rows;
   }
 
   const assigneeIds = [...new Set(spillover.map(i => i.assignee_id).filter(Boolean))];
