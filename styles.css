@@ -3999,3 +3999,17 @@ body.light .db-space-card { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0
 .multi-sprint-section { margin-bottom: 32px; }
 .multi-sprint-section .board-cols { display: flex; gap: 12px; margin-top: 12px; overflow-x: auto; }
 .multi-sprint-section .board-col { flex: 1; min-width: 200px; }
+
+/* Sprint info header card on Active Sprint view */
+.sprint-info {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+body.light .sprint-info { background: #ffffff; border-color: #d0d7de; }
+.sprint-info h3 { font-size: 16px; font-weight: 700; color: var(--text); }
+.sprint-info .sprint-goal { font-size: 13px; color: var(--text2); margin: 4px 0 10px; line-height: 1.5; }
+.sprint-info .sprint-stats-row { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; flex-wrap: wrap; }
+.sprint-info .sprint-stats-row span { font-size: 12px; color: var(--text3); }

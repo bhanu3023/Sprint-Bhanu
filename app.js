@@ -3574,16 +3574,19 @@ function renderSprintBoard() {
 
     allBoardHtml += '<div class="multi-sprint-section">' +
       '<div class="sprint-info">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">' +
       '<h3 style="margin:0">' + esc(activeSprint.name) + '</h3>' +
       '<button class="btn btn-sm btn-secondary" onclick="window._completeSprint(\'' + activeSprint.id + '\')">Complete Sprint</button>' +
       '</div>' +
-      (activeSprint.goal ? '<p class="text-muted" style="margin:4px 0 0">' + esc(activeSprint.goal) + '</p>' : '') +
-      '<div class="sprint-meta">' +
-      '<span>' + fmtDateShort(activeSprint.start_date) + ' \u2014 ' + fmtDateShort(activeSprint.end_date) + '</span>' +
-      '<span>' + doneCount + '/' + issues.length + ' issues</span>' +
-      '<span>' + donePoints + '/' + totalPoints + ' pts</span></div>' +
-      '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div></div>' +
+      (activeSprint.goal ? '<p class="sprint-goal">' + esc(activeSprint.goal) + '</p>' : '') +
+      '<div class="sprint-stats-row">' +
+      '<span>\ud83d\udcc5 ' + fmtDateShort(activeSprint.start_date) + ' \u2014 ' + fmtDateShort(activeSprint.end_date) + '</span>' +
+      '<span>\ud83c\udfaf ' + doneCount + '/' + issues.length + ' issues</span>' +
+      '<span>\u2b50 ' + donePoints + '/' + totalPoints + ' pts</span>' +
+      '<span style="margin-left:auto;font-size:12px;font-weight:600;color:var(--text2)">' + pct + '%</span>' +
+      '</div>' +
+      '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
+      '</div>' +
       '<div class="board-cols">';
 
     for (var c = 0; c < statuses.length; c++) {
