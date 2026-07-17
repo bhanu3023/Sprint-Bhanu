@@ -3931,53 +3931,199 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   var total = Number(data.total) || 0;
   var done = Number(data.done) || 0;
   var inProgress = Number(data.in_progress) || 0;
-  var toDo = Math.max(0, total - done - inProgress);
+  var inReview = issues.filter(function(i){ return i.status === 'In Review'; }).length;
+  var toDo = Math.max(0, total - done - inProgress - inReview);
+  var blocked = issues.filter(function(i){ return i.priority === 'highest' && i.status !== 'Done'; }).length;
   var pct = total ? Math.round((done / total) * 100) : 0;
   var ptsDone = Number(data.points_completed) || 0;
   var ptsLeft = Number(data.points_remaining) || 0;
+  var totalPts = ptsDone + ptsLeft;
+  var ptsPct = totalPts ? Math.round((ptsDone / totalPts) * 100) : 0;
   var bugs = issues.filter(function(i){ return i.type === 'bug'; });
   var openBugs = bugs.filter(function(i){ return i.status !== 'Done'; }).length;
-  var blockedCount = issues.filter(function(i){ return i.priority === 'highest' && i.status !== 'Done'; }).length;
+  var totalBugs = bugs.length;
+  var bugPct = totalBugs ? Math.round((openBugs / totalBugs) * 100) : 0;
+  var blockedPct = total ? Math.round((blocked / total) * 100) : 0;
   var now = new Date();
   var endDate = sprint.end_date ? new Date(sprint.end_date) : null;
   var daysRem = endDate ? Math.max(0, Math.ceil((endDate - now) / 86400000)) : null;
-  var health = pct >= 80 ? 'Healthy' : pct >= 50 ? 'At Risk' : 'Needs Attention';
+  var health = pct >= 80 ? 'GOOD' : pct >= 50 ? 'AT RISK' : 'NEEDS ATTENTION';
   var healthColor = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#dc2626';
   var startStr = sprint.start_date ? fmtDateShort(sprint.start_date) : '—';
   var endStr = sprint.end_date ? fmtDateShort(sprint.end_date) : '—';
+  var nowStr = (function(){ var d = new Date(); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) + ' ' + d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); })();
 
-  var kpiCard = function(label, val, sub, color) {
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;min-width:140px;flex:1">' +
-      '<div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">' + label + '</div>' +
-      '<div style="font-size:26px;font-weight:700;color:' + (color||'var(--text)') + '">' + val + '</div>' +
-      (sub ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + sub + '</div>' : '') +
+  // Donut SVG helper
+  function donutSvg(segments, cx, cy, r, label, sublabel) {
+    var circ = 2 * Math.PI * r;
+    var offset = circ * 0.25;
+    var arcs = '';
+    var cur = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var len = seg.pct / 100 * circ;
+      if (len > 0) {
+        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + seg.color + '" stroke-width="14"' +
+          ' stroke-dasharray="' + len.toFixed(2) + ' ' + (circ - len).toFixed(2) + '"' +
+          ' stroke-dashoffset="' + (offset - cur).toFixed(2) + '" stroke-linecap="butt"/>';
+        cur += len;
+      }
+    }
+    return '<svg width="' + (cx*2) + '" height="' + (cy*2) + '" viewBox="0 0 ' + (cx*2) + ' ' + (cy*2) + '">' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--bg3)" stroke-width="14"/>' +
+      arcs +
+      '<text x="' + cx + '" y="' + (cy-6) + '" text-anchor="middle" font-size="20" font-weight="800" fill="var(--text)">' + label + '</text>' +
+      '<text x="' + cx + '" y="' + (cy+14) + '" text-anchor="middle" font-size="10" fill="var(--text3)">' + sublabel + '</text>' +
+      '</svg>';
+  }
+
+  // Progress donut (single segment)
+  var progressDonut = donutSvg(
+    [{ pct: pct, color: healthColor }, { pct: 100-pct, color: 'transparent' }],
+    70, 70, 54, pct + '%', 'Complete'
+  );
+
+  // Story Status donut (multi-segment)
+  var donePct2 = total ? Math.round(done/total*100) : 0;
+  var ipPct2 = total ? Math.round(inProgress/total*100) : 0;
+  var todoPct2 = total ? Math.round(toDo/total*100) : 0;
+  var blkPct2 = total ? Math.round(blocked/total*100) : 0;
+  var statusDonut = donutSvg(
+    [{pct:donePct2,color:'#10b981'},{pct:ipPct2,color:'#f59e0b'},{pct:todoPct2,color:'#0052cc'},{pct:blkPct2,color:'#dc2626'}],
+    70, 70, 54, total, 'Total Stories'
+  );
+
+  // Horizontal bar helper
+  function hBar(label, val, maxVal, color) {
+    var w = maxVal ? Math.round((val/maxVal)*100) : 0;
+    return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">' +
+      '<span style="width:130px;font-size:12px;color:var(--text2);flex-shrink:0">' + label + '</span>' +
+      '<div style="flex:1;background:var(--bg3);border-radius:4px;height:14px;overflow:hidden">' +
+      '<div style="height:100%;width:' + w + '%;background:' + color + ';border-radius:4px;transition:width .4s"></div></div>' +
+      '<span style="width:32px;font-size:12px;font-weight:700;color:var(--text);text-align:right">' + val + '</span>' +
       '</div>';
-  };
+  }
 
-  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
-    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:20px">' +
-    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">' +
-    '<div><span style="font-size:16px;font-weight:700">' + esc(sprint.name || 'Sprint') + '</span>' +
-    '<span style="margin-left:12px;font-size:12px;color:var(--text3)">📅 ' + startStr + ' — ' + endStr + '</span></div>' +
-    '<span style="background:' + healthColor + '22;color:' + healthColor + ';border:1px solid ' + healthColor + '44;border-radius:20px;padding:3px 14px;font-size:12px;font-weight:700">' + health + '</span>' +
+  // KPI tile (top right 4 cards)
+  function kpiTile(title, mainNum, total2, subLabel, accentColor) {
+    var p = total2 ? Math.round(mainNum/total2*100) : 0;
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;flex:1;min-width:130px">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">' + title + '</div>' +
+      '<div style="font-size:22px;font-weight:800;color:' + accentColor + '">' + mainNum +
+        '<span style="font-size:14px;font-weight:500;color:var(--text3)"> / ' + total2 + '</span></div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + p + '% ' + subLabel + '</div>' +
+      '</div>';
+  }
+
+  // Metric chip (bottom detailed row)
+  function metricChip(icon, label, val, sub) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;flex:1;min-width:100px;text-align:center">' +
+      '<div style="font-size:18px;margin-bottom:2px">' + icon + '</div>' +
+      '<div style="font-size:17px;font-weight:800;color:var(--text)">' + val + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);white-space:nowrap">' + label + '</div>' +
+      (sub ? '<div style="font-size:11px;font-weight:700;color:var(--text2)">' + sub + '</div>' : '') +
+      '</div>';
+  }
+
+  // Footer insight card
+  function insightCard(icon, label, val, desc, color) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-left:4px solid ' + color + ';border-radius:8px;padding:14px 18px;flex:1;min-width:160px;display:flex;align-items:flex-start;gap:12px">' +
+      '<span style="font-size:22px">' + icon + '</span>' +
+      '<div><div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase">' + label + '</div>' +
+      '<div style="font-size:16px;font-weight:800;color:' + color + '">' + val + '</div>' +
+      '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + desc + '</div></div>' +
+      '</div>';
+  }
+
+  c.innerHTML =
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:0">' +
+
+    // ── Header ──
+    '<div style="background:#0f2d5e;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
+    '<div><div style="display:flex;align-items:center;gap:10px">' +
+    '<span style="background:#1e4a8c;border-radius:8px;padding:6px 8px;font-size:18px">📊</span>' +
+    '<div><div style="font-size:16px;font-weight:700;color:#fff">Sprint Summary</div>' +
+    '<div style="font-size:11px;color:#93c5fd">Overview of current sprint progress and health</div></div></div></div>' +
+    '<div style="font-size:11px;color:#93c5fd">📅 Last Updated: ' + nowStr + '</div>' +
+    sprintSelectorHtml.replace(/style="/g, 'style="filter:invert(1) hue-rotate(180deg);') +
     '</div>' +
-    (sprint.goal ? '<p style="font-size:13px;color:var(--text2);margin:4px 0 0">' + esc(sprint.goal) + '</p>' : '') +
+
+    '<div style="padding:20px;display:flex;flex-direction:column;gap:16px">' +
+
+    // ── Row 1: Sprint Details | Progress Donut | 4 KPI tiles ──
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch">' +
+
+    // Sprint Details card
+    '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;min-width:180px;flex:0 0 auto">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Sprint Details</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="color:var(--text3)">🏷️</span><span style="color:var(--text3)">Sprint Name</span></div>' +
+    '<div style="font-size:13px;font-weight:700;color:var(--text);margin-top:-4px;margin-left:24px">' + esc(sprint.name||'—') + '</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span>📅</span><span style="color:var(--text3)">Start Date</span><span style="margin-left:auto;font-weight:600;color:var(--text)">' + startStr + '</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span>📅</span><span style="color:var(--text3)">End Date</span><span style="margin-left:auto;font-weight:600;color:var(--text)">' + endStr + '</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span>⏱️</span><span style="color:var(--text3)">Days Remaining</span>' +
+    '<span style="margin-left:auto;font-weight:700;color:' + (daysRem !== null && daysRem <= 2 ? '#dc2626' : '#f59e0b') + '">' + (daysRem !== null ? daysRem + ' Days' : '—') + '</span></div>' +
+    '</div></div>' +
+
+    // Sprint Progress donut
+    '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:160px;flex:0 0 auto">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Sprint Progress</div>' +
+    progressDonut + '</div>' +
+
+    // 4 KPI tiles (2x2)
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-width:300px">' +
+    kpiTile('Stories Completed', done, total, 'of total stories', '#10b981') +
+    kpiTile('Story Points Completed', ptsDone, totalPts||1, 'of total points', '#0052cc') +
+    kpiTile('Open Bugs', openBugs, Math.max(totalBugs,1), 'of total bugs', '#f59e0b') +
+    kpiTile('Blocked Stories', blocked, Math.max(total,1), 'of total stories', '#dc2626') +
+    '</div></div>' +
+
+    // ── Row 2: Story Status donut | Story Points horizontal bars ──
+    '<div style="display:flex;gap:14px;flex-wrap:wrap">' +
+
+    // Story Status donut + legend
+    '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;flex:1;min-width:240px">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px">Story Status</div>' +
+    '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">' +
+    statusDonut +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#10b981;display:inline-block"></span><span style="color:var(--text2)">Completed</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + done + ' (' + donePct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#f59e0b;display:inline-block"></span><span style="color:var(--text2)">In Progress</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + inProgress + ' (' + ipPct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#0052cc;display:inline-block"></span><span style="color:var(--text2)">To Do</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + toDo + ' (' + todoPct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#dc2626;display:inline-block"></span><span style="color:var(--text2)">Blocked</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + blocked + ' (' + blkPct2 + '%)</span></div>' +
+    '</div></div></div>' +
+
+    // Story Points horizontal bars
+    '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;flex:1;min-width:240px">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:.5px">Story Points Summary</div>' +
+    hBar('Total Story Points', totalPts, totalPts||1, '#0052cc') +
+    hBar('Completing', ptsDone, totalPts||1, '#10b981') +
+    hBar('Remaining', ptsLeft, totalPts||1, '#f59e0b') +
+    '<div style="display:flex;gap:6px;font-size:10px;color:var(--text3);margin-top:8px">' +
+    '<span>0</span><span style="flex:1;text-align:center">Story Points</span><span>' + totalPts + '</span>' +
+    '</div></div></div>' +
+
+    // ── Row 3: Detailed Metrics chips ──
+    '<div>' +
+    '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Detailed Metrics</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    metricChip('📋','Total Stories', total, '100%') +
+    metricChip('✅','Completed Stories', done, donePct2 + '%') +
+    metricChip('🔄','In Progress', inProgress, ipPct2 + '%') +
+    metricChip('📌','To Do Stories', toDo, todoPct2 + '%') +
+    metricChip('🐛','Total Bugs', totalBugs, '100%') +
+    metricChip('🔴','Open Bugs', openBugs, bugPct + '%') +
+    metricChip('🚫','Blocked Stories', blocked, blockedPct + '%') +
+    '</div></div>' +
+
+    // ── Row 4: Footer insights ──
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+    insightCard('👍', 'Sprint Health', health, pct >= 80 ? 'The sprint is on track! Keep up the great work.' : pct >= 50 ? 'Sprint needs attention, monitor progress.' : 'Sprint is behind schedule.', healthColor) +
+    insightCard('📈', 'On Track', pct >= 50 ? 'On Track' : 'Behind', 'Progress is ' + (pct >= 50 ? 'as expected' : 'below target'), pct >= 50 ? '#10b981' : '#dc2626') +
+    insightCard('⭐', 'Story Points', ptsPct + '%', 'Story points completion', '#0052cc') +
+    (daysRem !== null ? insightCard('⏳', 'Days Remaining', daysRem + ' Days', 'Remaining in sprint', daysRem <= 2 ? '#dc2626' : '#f59e0b') : '') +
     '</div>' +
-    '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px">' +
-    kpiCard('Sprint Progress', pct + '%', done + ' of ' + total + ' issues done', pct>=80?'#10b981':pct>=50?'#f59e0b':'#dc2626') +
-    kpiCard('Completed Stories', done, 'In Progress: ' + inProgress, '#10b981') +
-    kpiCard('To Do', toDo, '', '#42526e') +
-    kpiCard('Points Done', ptsDone, 'Remaining: ' + ptsLeft, '#0052cc') +
-    kpiCard('Open Bugs', openBugs, bugs.length + ' total bugs', openBugs > 0 ? '#dc2626' : '#10b981') +
-    kpiCard('Blocked', blockedCount, 'Highest priority open', blockedCount > 0 ? '#f59e0b' : '#10b981') +
-    (daysRem !== null ? kpiCard('Days Remaining', daysRem, 'Until ' + endStr, daysRem <= 2 ? '#dc2626' : daysRem <= 5 ? '#f59e0b' : '#10b981') : '') +
-    '</div>' +
-    '<div style="margin-bottom:6px;font-size:12px;color:var(--text2)">Sprint Progress</div>' +
-    '<div style="background:var(--bg3);border-radius:8px;height:14px;overflow:hidden">' +
-    '<div style="height:100%;width:' + pct + '%;background:' + healthColor + ';border-radius:8px;transition:width .4s"></div>' +
-    '</div>' +
-    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:4px">' +
-    '<span>' + pct + '% complete</span><span>' + done + '/' + total + ' stories</span>' +
+
     '</div></div>';
 }
 
