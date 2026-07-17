@@ -6441,7 +6441,7 @@ function _renderActivityTab(tab, issue) {
     var color = (user && user.color) || cm.user_color || '#6b7280';
     var isOwn = String(cm.user_id) === String(S.currentUser);
     var isAdmin = S.currentUserObj && (S.currentUserObj.role === 'admin' || S.currentUserObj.role === 'owner');
-    var canEdit = isOwn;
+    var canEdit = isOwn || isAdmin;
     var canDelete = isOwn || isAdmin;
     var btnStyle = 'background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:2px 8px;border-radius:4px;display:inline-flex;align-items:center;gap:4px';
     var actionBtns = (canEdit || canDelete)
