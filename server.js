@@ -1052,6 +1052,55 @@ app.get('/api/reports/bugs/:sprintId', requireAuth, wrap(async (req, res) => {
   res.json(r);
 }));
 
+// Spillover report — issues that were in a sprint but not completed
+app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) => {
+  const sid = req.params.sprintId;
+  const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+
+  let spillover = [];
+  if (sprint.status === 'completed') {
+    // Issues that had their sprint_id changed away from this sprint (moved to backlog on completion)
+    const r = await q(`
+      SELECT DISTINCT ON (i.id) i.id, i.key, i.title, i.status, i.priority, i.type,
+        i.story_points, i.assignee_id, ih.created_at AS spilled_at
+      FROM issue_history ih
+      JOIN issues i ON i.id = ih.issue_id
+      WHERE ih.field_name = 'sprint_id'
+        AND ih.old_value = $1
+        AND (ih.new_value IS NULL OR ih.new_value = '' OR ih.new_value = 'null')
+        AND i.deleted_at IS NULL
+      ORDER BY i.id, ih.created_at DESC
+    `, [sid]);
+    spillover = r.rows;
+  } else {
+    // Active/planning sprint: projected spillover = current non-done issues
+    const r = await q(`
+      SELECT i.id, i.key, i.title, i.status, i.priority, i.type,
+        i.story_points, i.assignee_id, NULL AS spilled_at
+      FROM issues i
+      WHERE i.sprint_id = $1 AND i.status != 'Done' AND i.deleted_at IS NULL
+      ORDER BY i.key
+    `, [sid]);
+    spillover = r.rows;
+  }
+
+  const assigneeIds = [...new Set(spillover.map(i => i.assignee_id).filter(Boolean))];
+  let userMap = {};
+  if (assigneeIds.length) {
+    const users = (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [assigneeIds])).rows;
+    users.forEach(u => { userMap[u.id] = u; });
+  }
+
+  const totalPts = spillover.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
+  res.json({
+    sprint,
+    spillover: spillover.map(i => ({ ...i, assignee: userMap[i.assignee_id] || null })),
+    count: spillover.length,
+    totalPts
+  });
+}));
+
 // ── Notifications ─────────────────────────────────────────
 
 // Helper: create a notification (fire-and-forget, never throws)

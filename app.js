@@ -3731,7 +3731,7 @@ async function renderReportContent(type, selectedSprintId) {
           return '<option value="' + sp.id + '"' + (activeSprint && sp.id === activeSprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
         }).join('') + '</select></div>'
       : '';
-    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items'];
+    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items','spillover'];
     if (sprintTypes.indexOf(type) >= 0 && !activeSprint) { c.innerHTML = '<p class="placeholder-text">No sprints found.</p>'; return; }
     if (type === 'sprint-summary') {
       var dSS = await api('/api/reports/sprint/' + activeSprint.id);
@@ -3755,6 +3755,9 @@ async function renderReportContent(type, selectedSprintId) {
       renderScopeChangeReport(c, dSC, allSprints, sprintSelectorHtml);
     } else if (type === 'blocked-items') {
       renderBlockedItemsReport(c, activeSprint, allSprints, sprintSelectorHtml);
+    } else if (type === 'spillover') {
+      var dSP = await api('/api/reports/spillover/' + activeSprint.id);
+      renderSpilloverReport(c, dSP, allSprints, sprintSelectorHtml);
     } else if (type === 'cumulative') {
       var data3 = await api('/api/reports/status?space_id=' + S.currentSpace);
       renderCumulativeReport(c, data3, allSprints, sprintSelectorHtml);
@@ -3795,6 +3798,9 @@ async function renderReportContent(type, selectedSprintId) {
           renderScopeChangeReport(cont, d, allSprints, newSel);
         } else if (rtype === 'blocked-items') {
           renderBlockedItemsReport(cont, selSprint, allSprints, newSel);
+        } else if (rtype === 'spillover') {
+          var d = await api('/api/reports/spillover/' + sprintId);
+          renderSpilloverReport(cont, d, allSprints, newSel);
         } else if (rtype === 'cumulative') {
           var d3 = await api('/api/reports/status?space_id=' + S.currentSpace);
           renderCumulativeReport(cont, d3, allSprints, newSel);
@@ -4338,6 +4344,78 @@ function renderBlockedItemsReport(c, sprint, allSprints, sprintSelectorHtml) {
         '<thead><tr><th style="' + thStyle + '">Key</th><th style="' + thStyle + '">Title</th><th style="' + thStyle + '">Status</th><th style="' + thStyle + '">Owner</th></tr></thead>' +
         '<tbody>' + tableRows + '</tbody></table></div>'
       : '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:16px;font-size:13px;color:#065f46">✅ No blocked or highest-priority open items in this sprint.</div>') +
+    '</div>';
+}
+
+// ── Spillover ───────────────────────────────────────────────
+function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  var sprint = data.sprint || {};
+  var issues = Array.isArray(data.spillover) ? data.spillover : [];
+  var count = Number(data.count) || 0;
+  var totalPts = Number(data.totalPts) || 0;
+  var isCompleted = sprint.status === 'completed';
+  var isProjected = !isCompleted;
+
+  // Count by type
+  var stories = issues.filter(function(i){ return i.type === 'story'; }).length;
+  var tasks = issues.filter(function(i){ return i.type === 'task'; }).length;
+  var bugs = issues.filter(function(i){ return i.type === 'bug'; }).length;
+
+  var kpi = function(label, val, color, desc) {
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:130px;text-align:center">' +
+      '<div style="font-size:32px;font-weight:800;color:' + color + '">' + val + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:4px;font-weight:600">' + label + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + desc + '</div></div>';
+  };
+
+  var PCOLORS = {highest:'#dc2626',high:'#ef4444',medium:'#f59e0b',low:'#3b82f6',lowest:'#6b7280'};
+  var SCOLORS = {'To Do':'#42526e','In Progress':'#0052cc','In Review':'#ff991f','Blocked':'#dc2626'};
+
+  var thStyle = 'padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)';
+  var tableRows = issues.map(function(i) {
+    var sc = SCOLORS[i.status] || '#42526e';
+    var pc = PCOLORS[i.priority] || '#6b7280';
+    var assigneeName = i.assignee ? esc(i.assignee.name) : '<span style="color:var(--text3)">Unassigned</span>';
+    var typeIcon = {story:'◈',task:'☑',bug:'⚡',epic:'⬡',subtask:'⊡'}[i.type] || '◈';
+    return '<tr style="border-bottom:1px solid var(--border)">' +
+      '<td style="padding:10px 12px;font-weight:600;white-space:nowrap"><span style="color:var(--text3);margin-right:4px">' + typeIcon + '</span>' + esc(i.key) + '</td>' +
+      '<td style="padding:10px 12px;color:var(--text);max-width:280px">' + esc(i.title) + '</td>' +
+      '<td style="padding:10px 12px"><span style="background:' + sc + '22;color:' + sc + ';border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700">' + esc(i.status) + '</span></td>' +
+      '<td style="padding:10px 12px"><span style="background:' + pc + '22;color:' + pc + ';border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">' + esc(i.priority||'—') + '</span></td>' +
+      '<td style="padding:10px 12px;font-size:12px">' + assigneeName + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px;text-align:center;color:var(--text2)">' + (i.story_points != null ? i.story_points : '—') + '</td>' +
+      '</tr>';
+  }).join('');
+
+  var banner = isProjected
+    ? '<div style="background:#f59e0b22;border:1px solid #f59e0b55;border-radius:8px;padding:12px 16px;font-size:13px;color:#92400e;margin-bottom:16px">⚠️ This sprint is still <strong>' + esc(sprint.status) + '</strong>. These are <strong>projected spillovers</strong> — issues currently not Done that may spill if the sprint were completed now.</div>'
+    : (count === 0
+        ? '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:12px 16px;font-size:13px;color:#065f46;margin-bottom:16px">🎉 No spillover — all issues were completed before the sprint ended!</div>'
+        : '<div style="background:#dc262622;border:1px solid #dc262644;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b;margin-bottom:16px">📋 <strong>' + count + ' issue' + (count !== 1 ? 's' : '') + '</strong> spilled over when this sprint was completed and moved back to the backlog.</div>');
+
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<h4 style="margin:0 0 4px">Spillover — ' + esc(sprint.name || 'Sprint') + '</h4>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">' + (isProjected ? 'Projected incomplete issues' : 'Issues not completed at sprint end') + '</p>' +
+    banner +
+    '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
+    kpi('Spilled Issues', count, count > 0 ? '#dc2626' : '#10b981', 'Total not completed') +
+    kpi('Story Points Lost', totalPts, totalPts > 0 ? '#f59e0b' : '#10b981', 'Points not delivered') +
+    kpi('Stories', stories, '#0052cc', 'User stories spilled') +
+    kpi('Tasks / Bugs', tasks + bugs, '#7c3aed', 'Tasks & bugs spilled') +
+    '</div>' +
+    (issues.length
+      ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+        '<thead><tr>' +
+        '<th style="' + thStyle + '">Key</th>' +
+        '<th style="' + thStyle + '">Title</th>' +
+        '<th style="' + thStyle + '">Status</th>' +
+        '<th style="' + thStyle + '">Priority</th>' +
+        '<th style="' + thStyle + '">Assignee</th>' +
+        '<th style="' + thStyle + ';text-align:center">SP</th>' +
+        '</tr></thead>' +
+        '<tbody>' + tableRows + '</tbody></table></div>'
+      : '') +
     '</div>';
 }
 
