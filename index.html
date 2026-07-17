@@ -539,6 +539,7 @@
                     <label style="font-size:12px"><input type="checkbox" value="In Progress"> In Progress</label>
                     <label style="font-size:12px"><input type="checkbox" value="In Review"> In Review</label>
                     <label style="font-size:12px"><input type="checkbox" value="Done"> Done</label>
+                    <label style="font-size:12px"><input type="checkbox" value="Blocked"> Blocked</label>
                   </div>
                 </div>
                 <div style="margin-bottom:10px">
@@ -865,7 +866,7 @@
               <h4 class="drawer-sidebar-heading">Details</h4>
               <table class="drawer-fields-table">
                 <tbody>
-                  <tr><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
+                  <tr><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
                   <tr><td class="dfl">Priority</td><td class="dfv"><select id="drawerPriority" class="drawer-select" size="1"><option value="highest">Highest</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></td></tr>
                   <tr><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
                   <tr><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>

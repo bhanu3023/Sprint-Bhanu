@@ -288,7 +288,8 @@ var STATUS_COLORS = {
   'To Do': '#42526e',
   'In Progress': '#0052cc',
   'In Review': '#ff991f',
-  'Done': '#00875a'
+  'Done': '#00875a',
+  'Blocked': '#dc2626'
 };
 var PRIORITY_COLORS = {
   highest: '#dc2626', high: '#ef4444', medium: '#f59e0b', low: '#3b82f6', lowest: '#6b7280'
@@ -3562,7 +3563,7 @@ function renderSprintBoard() {
 
   $('sprintHeader').innerHTML = '';
   var allBoardHtml = '';
-  var statuses = ['To Do', 'In Progress', 'In Review', 'Done'];
+  var statuses = ['To Do', 'In Progress', 'In Review', 'Done', 'Blocked'];
 
   for (var si = 0; si < activeSprints.length; si++) {
     var activeSprint = activeSprints[si];
@@ -3932,8 +3933,8 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   var done = Number(data.done) || 0;
   var inProgress = Number(data.in_progress) || 0;
   var inReview = issues.filter(function(i){ return i.status === 'In Review'; }).length;
-  var toDo = Math.max(0, total - done - inProgress - inReview);
-  var blocked = issues.filter(function(i){ return i.priority === 'highest' && i.status !== 'Done'; }).length;
+  var blocked = issues.filter(function(i){ return i.status === 'Blocked'; }).length;
+  var toDo = Math.max(0, total - done - inProgress - inReview - blocked);
   var pct = total ? Math.round((done / total) * 100) : 0;
   var ptsDone = Number(data.points_completed) || 0;
   var ptsLeft = Number(data.points_remaining) || 0;
@@ -4074,8 +4075,8 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-width:300px">' +
     kpiTile('Stories Completed', done, total, 'of total stories', '#10b981') +
     kpiTile('Story Points Completed', ptsDone, totalPts||1, 'of total points', '#0052cc') +
-    kpiTile('Open Bugs', openBugs, Math.max(totalBugs,1), 'of total bugs', '#f59e0b') +
-    kpiTile('Blocked Stories', blocked, Math.max(total,1), 'of total stories', '#dc2626') +
+    kpiTile('Open Bugs', openBugs, totalBugs || openBugs || 1, totalBugs ? 'of total bugs' : 'no bugs', '#f59e0b') +
+    kpiTile('Blocked Stories', blocked, total || 1, 'of total stories', '#dc2626') +
     '</div></div>' +
 
     // ── Row 2: Story Status donut | Story Points horizontal bars ──
@@ -4336,7 +4337,7 @@ function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {
 
 function renderCumulativeReport(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
-  var STATUSES = ['To Do', 'In Progress', 'In Review', 'Done'];
+  var STATUSES = ['To Do', 'In Progress', 'In Review', 'Done', 'Blocked'];
   var issues = getSpaceIssues(S.currentSpace);
   var counts = STATUSES.map(function(s) {
     var apiRow = Array.isArray(data) ? data.find(function(x){ return x.status === s; }) : null;
@@ -4425,7 +4426,7 @@ var AW_FILTER_FIELDS = [
   { key: 'type',      label: 'Type',       kind: 'multi',
     opts: [{v:'task',l:'Task'},{v:'bug',l:'Bug'},{v:'story',l:'Story'},{v:'epic',l:'Epic'},{v:'subtask',l:'Subtask'}] },
   { key: 'status',    label: 'Status',     kind: 'multi',
-    opts: [{v:'To Do',l:'To Do'},{v:'In Progress',l:'In Progress'},{v:'In Review',l:'In Review'},{v:'Done',l:'Done'}] },
+    opts: [{v:'To Do',l:'To Do'},{v:'In Progress',l:'In Progress'},{v:'In Review',l:'In Review'},{v:'Done',l:'Done'},{v:'Blocked',l:'Blocked'}] },
   { key: 'priority',  label: 'Priority',   kind: 'multi',
     opts: [{v:'critical',l:'Critical'},{v:'high',l:'High'},{v:'medium',l:'Medium'},{v:'low',l:'Low'}] },
   { key: 'assignee',  label: 'Assignee',   kind: 'multi', opts: [] },
@@ -4920,7 +4921,8 @@ function renderAllWork(opts) {
       '<div class="bulk-actions">' +
       '<select id="bulkStatusChange" class="input input-sm" title="Change status"><option value="">Status\u2026</option>' +
         '<option value="To Do">To Do</option><option value="In Progress">In Progress</option>' +
-        '<option value="In Review">In Review</option><option value="Done">Done</option></select>' +
+        '<option value="In Review">In Review</option><option value="Done">Done</option>' +
+        '<option value="Blocked">Blocked</option></select>' +
       '<select id="bulkPriorityChange" class="input input-sm" title="Change priority"><option value="">Priority\u2026</option>' +
         '<option value="critical">Critical</option><option value="high">High</option>' +
         '<option value="medium">Medium</option><option value="low">Low</option></select>' +
@@ -9385,7 +9387,8 @@ var STATUS_BTN_STYLES = {
   'To Do':      'background:#dfe1e6;color:#42526e',
   'In Progress':'background:#0052cc;color:#ffffff',
   'In Review':  'background:#ff991f;color:#ffffff',
-  'Done':       'background:#00875a;color:#ffffff'
+  'Done':       'background:#00875a;color:#ffffff',
+  'Blocked':    'background:#dc2626;color:#ffffff'
 };
 
 function updateStatusBtn(status) {
@@ -9402,7 +9405,7 @@ function updateStatusBtn(status) {
 }
 
 function toggleStatusDropdown() {
-  var statuses = ['To Do','In Progress','In Review','Done'];
+  var statuses = ['To Do','In Progress','In Review','Done','Blocked'];
   var current = document.getElementById('drawerStatus').value;
   var btn = document.getElementById('drawerStatusBtn');
   var old = document.getElementById('_statusBtnMenu');
