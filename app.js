@@ -3449,10 +3449,17 @@ function backlogRow(iss) {
 
 // Backlog global handlers
 window._toggleBacklogLane = function (header) {
+  var scrollEl = document.querySelector('.main-content') || document.documentElement;
+  var scrollTop = scrollEl.scrollTop || window.scrollY;
   var body = header.nextElementSibling;
   body.classList.toggle('collapsed');
   var toggle = header.querySelector('.lane-toggle');
   toggle.textContent = body.classList.contains('collapsed') ? '\u25B8' : '\u25BE';
+  // Restore scroll position so page doesn't jump
+  requestAnimationFrame(function() {
+    if (scrollEl === document.documentElement) window.scrollTo(0, scrollTop);
+    else scrollEl.scrollTop = scrollTop;
+  });
 };
 
 // Drag-leave: only remove highlight when cursor truly leaves the lane (not into a child)
