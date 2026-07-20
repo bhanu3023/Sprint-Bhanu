@@ -9814,15 +9814,20 @@ window.addEventListener("popstate", function(e) {
 
 // ── Back button from issue ──────────────────────────────
 function goBackFromIssue() {
+  var savedIssueId = S.drawerIssueId;
   _exitIssuePage();
   history.replaceState(null, '', window.location.pathname);
-  var returnTab = S._prevTab || window._issueReturnTab || 'allwork';
+  var returnTab = S._prevTab || window._issueReturnTab || 'backlog';
   var returnSpace = S._prevSpace || window._issueReturnSpace || S.currentSpace;
+  // Last resort: look up the issue's space from loaded data
+  if (!returnSpace && savedIssueId && S.data && S.data.issues) {
+    var savedIss = S.data.issues.find(function(i) { return i.id === savedIssueId; });
+    if (savedIss && savedIss.space_id) returnSpace = savedIss.space_id;
+  }
   window._issueReturnTab = null;
   window._issueReturnSpace = null;
   if (returnSpace) {
     S.currentSpace = returnSpace;
-    // Show space nav
     var spaceNavEl = $('spaceNav');
     if (spaceNavEl) spaceNavEl.removeAttribute('hidden');
     qsa('.space-item').forEach(function(el) {
