@@ -420,6 +420,61 @@ function populateUserSelect(sel, members, selectedId) {
   sel.style.height = '34px';
 }
 
+// Searchable user dropdown for Create Issue modal
+function initUserSearchDropdown(searchInputId, hiddenInputId, dropdownId, members, selectedId) {
+  var searchEl = $(searchInputId);
+  var hiddenEl = $(hiddenInputId);
+  var dropEl   = $(dropdownId);
+  if (!searchEl || !hiddenEl || !dropEl) return;
+
+  var sorted = members.slice().sort(function(a, b) {
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  var allOptions = [{ id: '', name: 'Unassigned', color: '#6b7280' }].concat(sorted);
+
+  // Set initial display value
+  var preselected = selectedId ? allOptions.find(function(u){ return String(u.id) === String(selectedId); }) : null;
+  hiddenEl.value = selectedId || '';
+  searchEl.value = preselected ? preselected.name : '';
+
+  function renderDropdown(filter) {
+    var q = (filter || '').toLowerCase();
+    var filtered = allOptions.filter(function(u){ return !q || u.name.toLowerCase().indexOf(q) >= 0; });
+    if (!filtered.length) {
+      dropEl.innerHTML = '<div class="user-search-none">No results</div>';
+    } else {
+      dropEl.innerHTML = filtered.map(function(u) {
+        var initials = u.name ? u.name.split(' ').map(function(w){ return w[0]; }).slice(0,2).join('').toUpperCase() : '?';
+        var bg = u.color || '#6b7280';
+        return '<div class="user-search-option" data-id="' + esc(u.id) + '" data-name="' + esc(u.name) + '">' +
+          '<span class="user-search-avatar" style="background:' + bg + '">' + initials + '</span>' +
+          esc(u.name) + '</div>';
+      }).join('');
+    }
+    dropEl.style.display = 'block';
+    dropEl.querySelectorAll('.user-search-option').forEach(function(opt) {
+      opt.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        hiddenEl.value = opt.dataset.id;
+        searchEl.value = opt.dataset.name;
+        dropEl.style.display = 'none';
+      });
+    });
+  }
+
+  searchEl.addEventListener('focus', function() { renderDropdown(searchEl.value); });
+  searchEl.addEventListener('input', function() { renderDropdown(searchEl.value); });
+  searchEl.addEventListener('blur', function() { setTimeout(function(){ dropEl.style.display = 'none'; }, 150); });
+  searchEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { dropEl.style.display = 'none'; searchEl.blur(); }
+  });
+
+  // Close on outside click
+  document.addEventListener('click', function(e) {
+    if (!searchEl.contains(e.target) && !dropEl.contains(e.target)) dropEl.style.display = 'none';
+  });
+}
+
 function populateSprintSelect(sel, sprints, selectedId) {
   var html = '<option value="">None</option>';
   for (var i = 0; i < sprints.length; i++) {
@@ -7626,6 +7681,12 @@ function resetIssueForm() {
   $('issueStartDate').value = fmtDateISO(new Date()); // default to today
   $('issueDueDate').value = '';
   var descEl = $('issueDescription'); if (descEl) { if (descEl.value !== undefined) descEl.value = ''; else descEl.innerHTML = ''; }
+  if ($('issueAssigneeSearch')) $('issueAssigneeSearch').value = '';
+  if ($('issueAssignee')) $('issueAssignee').value = '';
+  if ($('issueReporterSearch')) $('issueReporterSearch').value = '';
+  if ($('issueReporter')) $('issueReporter').value = '';
+  if ($('assigneeDropdown')) $('assigneeDropdown').style.display = 'none';
+  if ($('reporterDropdown')) $('reporterDropdown').style.display = 'none';
   _selectedFiles = [];
   _renderAttachmentFileList();
   var fi = $('issueAttachments');
@@ -7640,8 +7701,8 @@ function populateIssueFormSelects() {
   if (!members.length) members = S.data.users || [];
   var sprints = spaceId ? getSpaceSprints(spaceId) : [];
 
-  populateUserSelect($('issueAssignee'), members, null);
-  populateUserSelect($('issueReporter'), members, S.currentUser);
+  initUserSearchDropdown('issueAssigneeSearch', 'issueAssignee', 'assigneeDropdown', members, null);
+  initUserSearchDropdown('issueReporterSearch', 'issueReporter', 'reporterDropdown', members, S.currentUser);
   populateSprintSelect($('issueSprint'), sprints, null);
 }
 

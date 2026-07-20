@@ -1064,12 +1064,20 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label" for="issueAssignee">Assignee</label>
-              <select id="issueAssignee" class="input"></select>
+              <label class="form-label">Assignee</label>
+              <div class="user-search-wrap" id="assigneeWrap">
+                <input type="text" id="issueAssigneeSearch" class="input" placeholder="Search assignee…" autocomplete="off">
+                <input type="hidden" id="issueAssignee">
+                <div class="user-search-dropdown" id="assigneeDropdown" style="display:none"></div>
+              </div>
             </div>
             <div class="form-group">
-              <label class="form-label" for="issueReporter">Reporter</label>
-              <select id="issueReporter" class="input"></select>
+              <label class="form-label">Reporter</label>
+              <div class="user-search-wrap" id="reporterWrap">
+                <input type="text" id="issueReporterSearch" class="input" placeholder="Search reporter…" autocomplete="off">
+                <input type="hidden" id="issueReporter">
+                <div class="user-search-dropdown" id="reporterDropdown" style="display:none"></div>
+              </div>
             </div>
           </div>
           <div class="form-row">
