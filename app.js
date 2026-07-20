@@ -5804,6 +5804,9 @@ document.addEventListener('change', function(e) {
 document.addEventListener('paste', function(e) {
   var modal = document.getElementById('modal-issue');
   if (!modal || modal.hidden) return;
+  // Don't intercept pastes inside the description editor — let them go inline
+  var active = document.activeElement;
+  if (active && active.id === 'issueDescContent') return;
   var items = e.clipboardData && e.clipboardData.items;
   if (!items) return;
   var added = 0;
@@ -9430,7 +9433,7 @@ async function renderAdminAuditLog(el) {
 // ── Image paste in description (base64 inline) ─────────────
 document.addEventListener('paste', function(e) {
   var active = document.activeElement;
-  if (!active || (active.id !== 'drawerDesc' && active.id !== 'drawerFixDesc')) return;
+  if (!active || (active.id !== 'drawerDesc' && active.id !== 'drawerFixDesc' && active.id !== 'issueDescContent')) return;
   var items = (e.clipboardData || e.originalEvent.clipboardData).items;
   for (var i = 0; i < items.length; i++) {
     if (items[i].type.indexOf('image') === -1) continue;
