@@ -3490,6 +3490,7 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 .jira-editor-body pre { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; font-family: 'Courier New', monospace; font-size: 12px; overflow-x: auto; margin: 8px 0; white-space: pre-wrap; line-height: 1.6; }
 .jira-editor-body blockquote { border-left: 3px solid #0052cc; margin: 8px 0; padding: 4px 0 4px 14px; color: var(--text2); font-style: italic; }
 .jira-editor-body a { color: #0052cc; text-decoration: underline; }
+.jira-editor-body img, .drawer-desc img { max-width: 100%; height: auto; display: block; border-radius: 4px; margin: 4px 0; }
 
 /* ------------------------------------------------------------
    SPACES VIEW
