@@ -727,6 +727,13 @@ app.post('/api/roadmap/colors', requireAuth, wrap(async (req, res) => {
 // ── Issue Links ───────────────────────────────────────────
 app.post('/api/links', wrap(async (req, res) => {
   const { source_id, target_id, link_type } = req.body;
+  if (!source_id || !target_id || !link_type) return res.status(400).json({ error: 'source_id, target_id and link_type are required' });
+  // Check for existing link in either direction to avoid duplicate constraint error
+  const existing = await q(
+    'SELECT id FROM issue_links WHERE (source_id=$1 AND target_id=$2 AND link_type=$3) OR (source_id=$2 AND target_id=$1 AND link_type=$3)',
+    [source_id, target_id, link_type]
+  );
+  if (existing.rows.length) return res.status(409).json({ error: 'This link already exists between these two issues' });
   const r = await q('INSERT INTO issue_links(id,source_id,target_id,link_type) VALUES($1,$2,$3,$4) RETURNING *',
     [uid(), source_id, target_id, link_type]);
   res.status(201).json(r.rows[0]);
