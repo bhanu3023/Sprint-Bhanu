@@ -7759,34 +7759,9 @@ async function handleIssueSubmit(e) {
     labels: $('issueLabels') ? $('issueLabels').value : '',
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
-    description: await (async function(){
+    description: (function(){
       var el = $('issueDescription');
       if (!el) return '';
-      var html = el.tagName === "TEXTAREA" || el.tagName === "INPUT" ? el.value : el.innerHTML;
-      // Upload any base64/blob images in description
-      var imgs = el.querySelectorAll ? el.querySelectorAll('img[src^="data:"],img[src^="blob:"]') : [];
-      for (var i = 0; i < imgs.length; i++) {
-        try {
-          var imgEl = imgs[i];
-          var resp = await fetch(imgEl.src);
-          var blob = await resp.blob();
-          var fd = new FormData();
-          fd.append('files', blob, 'image-' + Date.now() + '.png');
-          var spaceId = $('issueSpaceId').value || S.currentSpace;
-          // Upload to temp endpoint and get URL
-          var uploadResp = await fetch('/api/upload-temp', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() },
-            body: fd
-          });
-          if (uploadResp.ok) {
-            var uploadData = await uploadResp.json();
-            if (uploadData.url) {
-              imgEl.src = uploadData.url;
-            }
-          }
-        } catch(e) {}
-      }
       return el.tagName === "TEXTAREA" || el.tagName === "INPUT" ? el.value : el.innerHTML;
     })(),
     original_estimate: $('issueEstimate') ? parseEstimate($('issueEstimate').value) : 0,
