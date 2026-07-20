@@ -5743,6 +5743,22 @@ document.addEventListener('change', function(e) {
   }
 });
 
+// Paste screenshot support for Create Issue modal (Ctrl+V)
+document.addEventListener('paste', function(e) {
+  var modal = document.getElementById('modal-issue');
+  if (!modal || modal.hidden) return;
+  var items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  var added = 0;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].kind === 'file') {
+      var file = items[i].getAsFile();
+      if (file) { _selectedFiles.push(file); added++; }
+    }
+  }
+  if (added) { _renderAttachmentFileList(); toast(added + ' file' + (added > 1 ? 's' : '') + ' pasted', 'success'); }
+});
+
 // ── Comment file attachment helpers ──────────────────────
 var _commentFiles = [];
 
