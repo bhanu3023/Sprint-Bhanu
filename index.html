@@ -1125,7 +1125,20 @@
           </div>
           <div class="form-group">
             <label class="form-label">Description</label>
-            <textarea id="issueDescription" class="input" rows="5" style="resize:vertical;min-height:100px" placeholder="Add a description..."></textarea>
+            <div class="rte-wrap">
+              <div class="rte-toolbar">
+                <button type="button" class="rte-btn" onclick="rteCmd('bold')" title="Bold"><b>B</b></button>
+                <button type="button" class="rte-btn" onclick="rteCmd('italic')" title="Italic"><i>I</i></button>
+                <button type="button" class="rte-btn" onclick="rteCmd('underline')" title="Underline"><u>U</u></button>
+                <span class="rte-sep"></span>
+                <button type="button" class="rte-btn" onclick="rteCmd('insertUnorderedList')" title="Bullet list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1.5" fill="currentColor"/><circle cx="4" cy="12" r="1.5" fill="currentColor"/><circle cx="4" cy="18" r="1.5" fill="currentColor"/></svg></button>
+                <button type="button" class="rte-btn" onclick="rteCmd('insertOrderedList')" title="Numbered list"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 10h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+                <span class="rte-sep"></span>
+                <button type="button" class="rte-btn" onclick="rteLink()" title="Link">🔗</button>
+              </div>
+              <div id="issueDescContent" class="rte-content" contenteditable="true" data-placeholder="Add a description..."></div>
+            </div>
+            <input type="hidden" id="issueDescription">
           </div>
           <div id="issueCustomFieldsContainer"></div>
           <div class="form-group">

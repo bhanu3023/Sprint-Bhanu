@@ -7683,7 +7683,7 @@ function resetIssueForm() {
   if ($('issueProductType')) $('issueProductType').value = '';
   $('issueStartDate').value = fmtDateISO(new Date()); // default to today
   $('issueDueDate').value = '';
-  var descEl = $('issueDescription'); if (descEl) descEl.value = '';
+  var descEl = document.getElementById('issueDescContent'); if (descEl) descEl.innerHTML = '';
   if ($('issueAssigneeSearch')) $('issueAssigneeSearch').value = '';
   if ($('issueAssignee')) $('issueAssignee').value = '';
   if ($('issueReporterSearch')) $('issueReporterSearch').value = '';
@@ -7762,7 +7762,7 @@ async function handleIssueSubmit(e) {
     labels: $('issueLabels') ? $('issueLabels').value : '',
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
-    description: ($('issueDescription') ? $('issueDescription').value : ''),
+    description: (function() { var el = document.getElementById('issueDescContent'); if (!el) return ''; var h = el.innerHTML.trim(); return (h === '' || h === '<br>') ? '' : h; })(),
     original_estimate: $('issueEstimate') ? parseEstimate($('issueEstimate').value) : 0,
     status: 'To Do',
     _customFields: (function() {
@@ -10160,4 +10160,19 @@ window._filterUsers = function(query) {
       noRes.style.display = 'none';
     }
   });
+};
+
+// ── Rich Text Editor helpers (Create Issue description) ──────
+window.rteCmd = function(cmd) {
+  var el = document.getElementById('issueDescContent');
+  if (el) el.focus();
+  document.execCommand(cmd, false, null);
+};
+window.rteLink = function() {
+  var url = prompt('Enter URL:');
+  if (url) {
+    var el = document.getElementById('issueDescContent');
+    if (el) el.focus();
+    document.execCommand('createLink', false, url);
+  }
 };
