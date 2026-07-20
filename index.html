@@ -7,7 +7,6 @@
   <link rel="icon" type="image/png" href="assets/neutara-logo.png">
   <link rel="apple-touch-icon" href="assets/neutara-logo.png">
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="https://cdn.quilljs.com/1.3.7/quill.snow.css">
   <script>
     // Pick up OAuth token from URL param after Microsoft SSO redirect
     (function() {
@@ -1126,11 +1125,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Description</label>
-            <div id="issueDescWrap">
-              <div id="issueDescToolbar"></div>
-              <div id="issueDescEditor"></div>
-            </div>
-            <input type="hidden" id="issueDescription">
+            <textarea id="issueDescription" class="input" rows="5" style="resize:vertical;min-height:100px" placeholder="Add a description..."></textarea>
           </div>
           <div id="issueCustomFieldsContainer"></div>
           <div class="form-group">
@@ -1395,7 +1390,6 @@
   <div id="toastContainer" class="toast-container"></div>
 
   <!-- 5. Scripts -->
-  <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
   <script src="app.js"></script>
 
 </body>

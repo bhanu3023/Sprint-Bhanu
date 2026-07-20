@@ -7683,7 +7683,7 @@ function resetIssueForm() {
   if ($('issueProductType')) $('issueProductType').value = '';
   $('issueStartDate').value = fmtDateISO(new Date()); // default to today
   $('issueDueDate').value = '';
-  if (window._descQuill) { window._descQuill.setContents([]); } else { var descEl = $('issueDescription'); if (descEl) { if (descEl.value !== undefined) descEl.value = ''; else descEl.innerHTML = ''; } }
+  var descEl = $('issueDescription'); if (descEl) descEl.value = '';
   if ($('issueAssigneeSearch')) $('issueAssigneeSearch').value = '';
   if ($('issueAssignee')) $('issueAssignee').value = '';
   if ($('issueReporterSearch')) $('issueReporterSearch').value = '';
@@ -7762,15 +7762,7 @@ async function handleIssueSubmit(e) {
     labels: $('issueLabels') ? $('issueLabels').value : '',
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
-    description: (function(){
-      if (window._descQuill) {
-        var html = window._descQuill.root.innerHTML;
-        return (html === '<p><br></p>' || html === '') ? '' : html;
-      }
-      var el = $('issueDescription');
-      if (!el) return '';
-      return el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' ? el.value : el.innerHTML;
-    })(),
+    description: ($('issueDescription') ? $('issueDescription').value : ''),
     original_estimate: $('issueEstimate') ? parseEstimate($('issueEstimate').value) : 0,
     status: 'To Do',
     _customFields: (function() {
@@ -9851,137 +9843,6 @@ window._copyIssueUrl = function() {
   });
 };
 
-// ═══════════════════════════════════════════════════════════════
-// QUILL RICH TEXT EDITOR — Create Issue Description
-// ═══════════════════════════════════════════════════════════════
-(function() {
-  window._descQuill = null;
-
-  var EMOJIS = [
-    '😀','😁','😂','🤣','😊','😍','🤔','😎','😢','😡','🥳','🤩','😴','🤗','😱',
-    '👍','👎','👏','🙌','🤝','✌️','👋','🤜','💪','🙏','❤️','💙','💚','💛','🧡',
-    '🔥','⭐','✅','❌','⚠️','🚀','💡','🐛','🔧','📌','📋','📝','📊','📈','🔍',
-    '🎉','🎊','🏆','🥇','💯','🔔','📧','💬','🗒️','🔗','📎','🖼️','🎯','⚡','🌟'
-  ];
-
-  function buildEmojiPicker() {
-    var picker = document.createElement('div');
-    picker.id = 'quillEmojiPicker';
-    picker.innerHTML = EMOJIS.map(function(e) {
-      return '<span title="' + e + '" data-e="' + e + '">' + e + '</span>';
-    }).join('');
-    document.body.appendChild(picker);
-    picker.addEventListener('mousedown', function(ev) {
-      ev.preventDefault();
-      var em = ev.target.dataset.e;
-      if (!em || !window._descQuill) return;
-      var range = window._descQuill.getSelection(true);
-      var idx = range ? range.index : window._descQuill.getLength() - 1;
-      window._descQuill.insertText(idx, em, 'user');
-      window._descQuill.setSelection(idx + em.length, 0, 'silent');
-      picker.style.display = 'none';
-    });
-    document.addEventListener('mousedown', function(ev) {
-      if (picker.style.display !== 'none' && !picker.contains(ev.target)) {
-        picker.style.display = 'none';
-      }
-    }, true);
-    return picker;
-  }
-
-  function initDescQuill() {
-    if (typeof Quill === 'undefined') return;
-    var editorEl = document.getElementById('issueDescEditor');
-    if (!editorEl) return;
-
-    if (window._descQuill) {
-      window._descQuill.setContents([]);
-      return;
-    }
-
-    // Register custom icons
-    var icons = Quill.import('ui/icons');
-    icons['undo'] = '<svg viewBox="0 0 18 18"><polygon class="ql-fill ql-stroke" points="6 10 4 12 2 10 6 10"/><path class="ql-stroke" d="M8.09,13.91A4.6,4.6,0,0,0,9,14,5,5,0,1,0,4,9"/></svg>';
-    icons['redo'] = '<svg viewBox="0 0 18 18"><polygon class="ql-fill ql-stroke" points="12 10 14 12 16 10 12 10"/><path class="ql-stroke" d="M9.91,13.91A4.6,4.6,0,0,1,9,14a5,5,0,1,1,5-5"/></svg>';
-    icons['emoji'] = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="9" r="7"/><path d="M6 11s1 2 3 2 3-2 3-2"/><circle cx="6.5" cy="7.5" r="1" fill="currentColor" stroke="none"/><circle cx="11.5" cy="7.5" r="1" fill="currentColor" stroke="none"/></svg>';
-    icons['table'] = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="14" height="14" rx="1"/><line x1="2" y1="6" x2="16" y2="6"/><line x1="9" y1="2" x2="9" y2="16"/></svg>';
-
-    var emojiPicker = buildEmojiPicker();
-
-    window._descQuill = new Quill('#issueDescEditor', {
-      theme: 'snow',
-      modules: {
-        toolbar: {
-          container: [
-            ['undo', 'redo'],
-            [{ header: [1, 2, 3, false] }],
-            ['bold', 'italic', 'underline', 'strike'],
-            [{ color: [] }, { background: [] }],
-            [{ list: 'ordered' }, { list: 'bullet' }],
-            [{ indent: '-1' }, { indent: '+1' }],
-            [{ align: [] }],
-            ['blockquote', 'code-block'],
-            ['link', 'image', 'table', 'emoji'],
-            ['clean']
-          ],
-          handlers: {
-            undo: function() { window._descQuill.history.undo(); },
-            redo: function() { window._descQuill.history.redo(); },
-            image: function() {
-              var input = document.createElement('input');
-              input.type = 'file';
-              input.accept = 'image/*';
-              input.click();
-              input.onchange = function() {
-                var file = input.files[0];
-                if (!file) return;
-                var reader = new FileReader();
-                reader.onload = function(ev) {
-                  var q = window._descQuill;
-                  var range = q.getSelection(true);
-                  var idx = range ? range.index : q.getLength() - 1;
-                  q.insertEmbed(idx, 'image', ev.target.result, 'user');
-                  q.setSelection(idx + 1, 0, 'silent');
-                };
-                reader.readAsDataURL(file);
-              };
-            },
-            table: function() {
-              var q = window._descQuill;
-              var range = q.getSelection(true);
-              var idx = range ? range.index : q.getLength() - 1;
-              var tableHtml = '<table style="border-collapse:collapse;width:100%;margin:8px 0">' +
-                ['', '', ''].map(function() {
-                  return '<tr>' + ['', '', ''].map(function() {
-                    return '<td style="border:1px solid #ccc;padding:6px 10px;min-width:60px">&nbsp;</td>';
-                  }).join('') + '</tr>';
-                }).join('') + '</table><p><br></p>';
-              q.clipboard.dangerouslyPasteHTML(idx, tableHtml, 'user');
-            },
-            emoji: function() {
-              var btn = document.querySelector('#issueDescWrap .ql-emoji');
-              if (btn) {
-                var rect = btn.getBoundingClientRect();
-                emojiPicker.style.left = rect.left + 'px';
-                emojiPicker.style.top = (rect.bottom + 4) + 'px';
-              }
-              emojiPicker.style.display = emojiPicker.style.display === 'block' ? 'none' : 'block';
-            }
-          }
-        },
-        history: { delay: 1000, maxStack: 100, userOnly: true }
-      },
-      placeholder: 'Add a description...'
-    });
-  }
-
-  // Hook modal open
-  var origOpen = window.openModal;
-  window.openModal = function(id) {
-    if (origOpen) origOpen(id);
-    if (id === 'modal-issue') setTimeout(initDescQuill, 80);
-  };
-})();
 
 // Show/hide description toolbars on focus
 (function() {
