@@ -251,11 +251,13 @@ function goBackToSavedPage() {
     navigateToSpace(pSpace, pTab);
   } else if (pView && pView !== 'home') {
     navigateTo(pView);
+  } else if (window.history.length > 1) {
+    window.history.back();
   } else if (S.currentSpace) {
-    navigateToSpace(S.currentSpace, 'allwork');
+    navigateToSpace(S.currentSpace, 'backlog');
   } else {
     var firstSpace = S.data && S.data.spaces && S.data.spaces[0];
-    if (firstSpace) navigateToSpace(firstSpace.id, 'allwork');
+    if (firstSpace) navigateToSpace(firstSpace.id, 'backlog');
     else navigateTo('home');
   }
 }
