@@ -6920,6 +6920,7 @@ function renderDrawerLinks(issue) {
           '<span style="font-size:11px;font-weight:700;color:var(--accent);cursor:pointer" onclick="openIssuePage(\'' + it.id + '\')">' + esc(it.key) + '</span>' +
           '<span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openIssuePage(\'' + it.id + '\')">' + esc(it.title) + '</span>' +
           statusBadge(it.status) +
+          '<button class="btn-icon" style="width:22px;height:22px;flex-shrink:0;opacity:0.55;padding:2px" title="Copy link" onclick="event.stopPropagation();(function(){var url=window.location.origin+\'/?issue=\'+\'' + esc(it.key) + '\';navigator.clipboard.writeText(url).then(function(){toast(\'Link copied\',\'success\');}).catch(function(){var ta=document.createElement(\'textarea\');ta.value=url;document.body.appendChild(ta);ta.select();document.execCommand(\'copy\');document.body.removeChild(ta);toast(\'Link copied\',\'success\');});})()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>' +
           '<button class="btn-icon" style="width:18px;height:18px;font-size:10px;opacity:0.4;flex-shrink:0" onclick="event.stopPropagation();window._removeLink(\'' + it.linkId + '\')" title="Remove link">\u2715</button>' +
           '</div>';
       }
