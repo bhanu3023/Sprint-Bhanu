@@ -8163,17 +8163,18 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   };
 
-  $('createIssueBtn').addEventListener('click', function () {
+  window.openCreateIssueModal = function() {
     resetIssueForm();
     $('issueModalTitle').textContent = 'Create Issue';
-    // Use current space or fall back to first available space so custom fields always load
     var spaceToUse = S.currentSpace || ((S.data && S.data.spaces && S.data.spaces[0]) ? S.data.spaces[0].id : '');
     $('issueSpaceId').value = spaceToUse;
     window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(spaceToUse);
     window._onIssueSpaceChange && window._onIssueSpaceChange(spaceToUse);
     populateIssueFormSelects();
     openModal('modal-issue');
-  });
+  };
+
+  $('createIssueBtn').addEventListener('click', window.openCreateIssueModal);
 
   // Create sprint
   $('createSprintBtn').addEventListener('click', function () { window._openSprintModal(null); });

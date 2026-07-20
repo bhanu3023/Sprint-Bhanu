@@ -683,6 +683,10 @@
           </div>
           <div class="drawer-topbar-right">
             <span id="drawerSaveBtn" style="display:none"></span>
+            <button onclick="openCreateIssueModal()" style="display:inline-flex;align-items:center;gap:6px;background:#0052cc;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap" onmouseover="this.style.background='#0041a8'" onmouseout="this.style.background='#0052cc'">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Create Issue
+            </button>
             <button class="btn-icon" id="drawerStarBtn" title="Star">☆</button>
             <button class="btn-icon" id="drawerActionsBtn" title="More actions">⋯</button>
             <button class="btn-icon drawer-close-btn" id="closeDrawer" onclick="closeDrawer()">✕</button>
