@@ -6062,7 +6062,7 @@ async function openDrawer(issueId) {
   var actBody = $('activitySectionBody');
   if (actBody) actBody.dataset.activeTab = 'comments';
   renderDrawerActivity(issue);
-  renderDrawerCustomFields(issue.custom_field_values || [], issue.id, issue.space_id || S.currentSpace);
+  await renderDrawerCustomFields(issue.custom_field_values || [], issue.id, issue.space_id || S.currentSpace);
   renderDrawerAttachments(issue.attachments || []);
 
   $('drawerCreated').textContent = fmtDateTime(issue.created_at);
@@ -6124,7 +6124,7 @@ function startDrawerLiveSync(issueId) {
       // Refresh custom fields silently (only if no input is focused inside them)
       var cfSection = $('drawerCustomFields');
       var cfFocused = cfSection && cfSection.contains(document.activeElement);
-      if (!cfFocused) renderDrawerCustomFields(fresh.custom_field_values || [], issueId, fresh.space_id || S.currentSpace);
+      if (!cfFocused) await renderDrawerCustomFields(fresh.custom_field_values || [], issueId, fresh.space_id || S.currentSpace);
       // Refresh worklog tab if it is currently active
       var actBody = $('activitySectionBody');
       if (actBody && actBody.dataset.activeTab === 'worklog') _renderActivityTab('worklog', fresh);
@@ -7372,12 +7372,21 @@ window.deleteAttachment = async function(id) {
   } catch(e) {}
 };
 
-function renderDrawerCustomFields(cfValues, issueId, spaceId) {
+async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   var c = $('drawerCustomFields');
   if (!c) return;
 
   // Get ALL custom fields defined for this space
   var spaceFields = (S.data.custom_fields || []).filter(function(f) { return f.space_id == spaceId; });
+
+  // Fallback: fetch from API if local cache doesn't have this space's fields
+  if (!spaceFields.length && spaceId) {
+    try {
+      var fetched = await api('/api/custom-fields?space_id=' + spaceId);
+      if (fetched && fetched.length) spaceFields = fetched;
+    } catch(e) {}
+  }
+
   if (!spaceFields.length) { c.innerHTML = ''; return; }
 
   // Build a lookup map of existing values: field_id → value
@@ -7442,7 +7451,7 @@ function renderDrawerCustomFields(cfValues, issueId, spaceId) {
       '</div>';
   });
 
-  c.innerHTML = html;
+  c.innerHTML = html ? '<div class="drawer-sidebar-section"><div class="drawer-section-title" style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);letter-spacing:0.04em;margin-bottom:10px">Custom Fields</div>' + html + '</div>' : '';
 
   // Bind save-on-change for all inputs
   c.querySelectorAll('[data-cf-id]').forEach(function(el) {
