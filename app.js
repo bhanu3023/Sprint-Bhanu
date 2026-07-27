@@ -7445,13 +7445,10 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
       inputHtml = '<select class="input input-sm" data-cf-id="' + fid + '"><option value="">—</option>' + uopts + '</select>';
     }
 
-    html += '<div class="drawer-field">' +
-      '<label class="drawer-label">' + fname + req + '</label>' +
-      '<div class="drawer-cf-input">' + inputHtml + '</div>' +
-      '</div>';
+    html += '<tr><td class="dfl">' + fname + req + '</td><td class="dfv">' + inputHtml + '</td></tr>';
   });
 
-  c.innerHTML = html ? '<div class="drawer-sidebar-section"><div class="drawer-section-title" style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);letter-spacing:0.04em;margin-bottom:10px">Custom Fields</div>' + html + '</div>' : '';
+  c.innerHTML = html;
 
   // Bind save-on-change for all inputs
   c.querySelectorAll('[data-cf-id]').forEach(function(el) {
