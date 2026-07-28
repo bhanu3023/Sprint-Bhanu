@@ -4486,18 +4486,33 @@ function renderTeamWorkloadReport(c, rows, sprint, allSprints, sprintSelectorHtm
 // ── Bug Summary ─────────────────────────────────────────────
 function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
-  var open = Number((data||{}).open_bugs) || 0;
-  var closed = Number((data||{}).closed_bugs) || 0;
-  var total = Number((data||{}).total_bugs) || 0;
-  var critical = Number((data||{}).critical_bugs) || 0;
+  var issues = getSpaceIssues(S.currentSpace).filter(function(i){ return i.sprint_id === ((sprint||{}).id) && i.type === 'bug'; });
+  var openBugsArr = issues.filter(function(i){ return i.status !== 'Done'; });
+  var closedBugsArr = issues.filter(function(i){ return i.status === 'Done'; });
+  var criticalBugsArr = issues.filter(function(i){ return i.priority === 'highest'; });
+  var inProgressBugsArr = issues.filter(function(i){ return i.status === 'In Progress'; });
+  var open = openBugsArr.length;
+  var closed = closedBugsArr.length;
+  var total = issues.length;
+  var critical = criticalBugsArr.length;
+  var inProgress = inProgressBugsArr.length;
   var resolvedPct = total ? Math.round((closed / total) * 100) : 0;
-  var kpiCard = function(label, val, color) {
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:120px;text-align:center">' +
+  Object.assign(window._reportDrillData, {
+    bs_open:       { label: 'Open Bugs',        issues: openBugsArr },
+    bs_closed:     { label: 'Closed / Fixed Bugs', issues: closedBugsArr },
+    bs_critical:   { label: 'Critical Bugs',    issues: criticalBugsArr },
+    bs_total:      { label: 'Total Bugs',       issues: issues },
+    bs_inprogress: { label: 'In Progress Bugs', issues: inProgressBugsArr }
+  });
+  var kpiCard = function(label, val, color, key) {
+    var clickable = key
+      ? ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      : '';
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:120px;text-align:center' + (key ? ';cursor:pointer' : '') + '"' + clickable + '>' +
       '<div style="font-size:32px;font-weight:800;color:' + color + '">' + val + '</div>' +
       '<div style="font-size:12px;color:var(--text3);margin-top:4px;font-weight:600">' + label + '</div>' +
       '</div>';
   };
-  var issues = getSpaceIssues(S.currentSpace).filter(function(i){ return i.sprint_id === ((sprint||{}).id) && i.type === 'bug'; });
   var bugRows = issues.map(function(i) {
     var sc = {'To Do':'#42526e','In Progress':'#0052cc','In Review':'#ff991f','Done':'#10b981'}[i.status]||'#42526e';
     return '<tr><td style="padding:8px 12px">' + esc(i.key) + '</td>' +
@@ -4509,10 +4524,11 @@ function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml)
   c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
     '<h4 style="margin:0 0 16px">Bug Summary — ' + esc((sprint||{}).name||'Sprint') + '</h4>' +
     '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
-    kpiCard('Open Bugs', open, open > 0 ? '#dc2626' : '#10b981') +
-    kpiCard('Closed / Fixed', closed, '#10b981') +
-    kpiCard('Critical', critical, critical > 0 ? '#dc2626' : '#42526e') +
-    kpiCard('Total', total, '#0052cc') +
+    kpiCard('Open Bugs', open, open > 0 ? '#dc2626' : '#10b981', 'bs_open') +
+    kpiCard('In Progress', inProgress, '#0052cc', 'bs_inprogress') +
+    kpiCard('Closed / Fixed', closed, '#10b981', 'bs_closed') +
+    kpiCard('Critical', critical, critical > 0 ? '#dc2626' : '#42526e', 'bs_critical') +
+    kpiCard('Total', total, '#0052cc', 'bs_total') +
     '</div>' +
     '<div style="margin-bottom:6px;display:flex;justify-content:space-between;font-size:12px;color:var(--text2)">' +
     '<span>Resolution Rate</span><span style="font-weight:700">' + resolvedPct + '%</span></div>' +
