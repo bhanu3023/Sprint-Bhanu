@@ -3922,18 +3922,32 @@ window._showReportIssues = function(key) {
   var existing = document.getElementById('_reportDrillOverlay');
   if (existing) existing.remove();
 
+  // Point-based groups (Story Points Completed/Remaining/Total) show each
+  // issue's own point value so the list visibly adds up to the tile's number,
+  // instead of mixing in 0/unpointed issues that inflate the list without
+  // affecting the sum.
   var rows = group.issues.length
     ? group.issues.map(function(iss) {
         var assignee = findUser(iss.assignee_id);
+        var ptsBadge = group.points
+          ? '<span style="font-size:11px;font-weight:700;color:#0052cc;background:#deebff;border-radius:10px;padding:2px 8px;flex-shrink:0">' + (Number(iss.story_points) || 0) + ' pt' + (Number(iss.story_points) === 1 ? '' : 's') + '</span>'
+          : '';
         return '<div class="_reportDrillRow" data-id="' + iss.id + '" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
           '<span style="flex-shrink:0">' + typeIcon(iss.type) + '</span>' +
           '<span style="font-size:12px;font-weight:700;color:#6b778c;flex-shrink:0;min-width:64px">' + esc(issueKeyStr(iss)) + '</span>' +
           '<span style="flex:1;font-size:13px;color:#172b4d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(iss.title || '') + '</span>' +
+          ptsBadge +
           statusBadge(iss.status) +
           (assignee ? avatarHtml(assignee, 24) : '') +
         '</div>';
       }).join('')
     : '<div style="padding:28px;text-align:center;color:#6b778c;font-size:13px">No issues in this group.</div>';
+
+  var headerCount = group.issues.length + (group.issues.length === 1 ? ' issue' : ' issues');
+  if (group.points) {
+    var ptsSum = group.issues.reduce(function(s, i) { return s + (Number(i.story_points) || 0); }, 0);
+    headerCount = ptsSum + ' pt' + (ptsSum === 1 ? '' : 's') + ' across ' + headerCount;
+  }
 
   var overlay = document.createElement('div');
   overlay.id = '_reportDrillOverlay';
@@ -3941,7 +3955,7 @@ window._showReportIssues = function(key) {
   overlay.innerHTML =
     '<div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden">' +
       '<div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">' +
-        '<div style="font-size:15px;font-weight:700;color:#0f172a">' + esc(group.label) + ' (' + group.issues.length + ')</div>' +
+        '<div style="font-size:15px;font-weight:700;color:#0f172a">' + esc(group.label) + ' (' + headerCount + ')</div>' +
         '<button id="_reportDrillClose" style="width:28px;height:28px;border:none;background:#f1f5f9;border-radius:8px;cursor:pointer;font-size:16px;color:#64748b">&times;</button>' +
       '</div>' +
       '<div style="overflow-y:auto">' + rows + '</div>' +
@@ -4044,13 +4058,17 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   var sprintIssues = getSpaceIssues(S.currentSpace).filter(function(i) { return i.sprint_id === sprint.id; });
   var doneIssuesArr = sprintIssues.filter(function(i) { return i.status === 'Done'; });
   var remainingIssuesArr = sprintIssues.filter(function(i) { return i.status !== 'Done'; });
+  var hasPoints = function(i) { return Number(i.story_points) > 0; };
   Object.assign(window._reportDrillData, {
     total:     { label: 'Total Issues',      issues: sprintIssues },
     completed: { label: 'Completed Issues',  issues: doneIssuesArr },
     remaining: { label: 'Remaining Issues',  issues: remainingIssuesArr },
-    ptsDone:   { label: 'Issues — Points Done',  issues: doneIssuesArr },
-    ptsLeft:   { label: 'Issues — Points Left',  issues: remainingIssuesArr },
-    totalPts:  { label: 'All Issues (Total Points)', issues: sprintIssues }
+    // Points-based tiles only list issues that actually carry story points —
+    // matches the point SUM shown on the tile instead of every issue regardless
+    // of whether it has points set.
+    ptsDone:   { label: 'Story Points Completed', issues: doneIssuesArr.filter(hasPoints), points: true },
+    ptsLeft:   { label: 'Story Points Remaining', issues: remainingIssuesArr.filter(hasPoints), points: true },
+    totalPts:  { label: 'Total Story Points', issues: sprintIssues.filter(hasPoints), points: true }
   });
 
   function kpi(label, val, color, sub, key) {
@@ -4171,6 +4189,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   var blockedIssuesArr = issues.filter(function(i){ return i.status === 'Blocked'; });
   var remainingIssuesArr = issues.filter(function(i){ return i.status !== 'Done'; });
   var openBugsArr = bugs.filter(function(i){ return i.status !== 'Done'; });
+  var hasPoints = function(i) { return Number(i.story_points) > 0; };
   Object.assign(window._reportDrillData, {
     ss_total:      { label: 'Total Stories',       issues: issues },
     ss_done:       { label: 'Completed Stories',   issues: doneIssuesArr },
@@ -4179,8 +4198,12 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     ss_blocked:    { label: 'Blocked Stories',     issues: blockedIssuesArr },
     ss_totalbugs:  { label: 'Total Bugs',          issues: bugs },
     ss_openbugs:   { label: 'Open Bugs',           issues: openBugsArr },
-    ss_ptsdone:    { label: 'Stories — Points Completed', issues: doneIssuesArr },
-    ss_ptsleft:    { label: 'Stories — Points Remaining', issues: remainingIssuesArr }
+    // Points-based tiles only list issues that actually carry story points —
+    // matches the point SUM shown on the tile instead of every issue in that
+    // status regardless of whether it has points set.
+    ss_totalpts:   { label: 'Total Story Points',       issues: issues.filter(hasPoints), points: true },
+    ss_ptsdone:    { label: 'Story Points Completed',   issues: doneIssuesArr.filter(hasPoints), points: true },
+    ss_ptsleft:    { label: 'Story Points Remaining',   issues: remainingIssuesArr.filter(hasPoints), points: true }
   });
 
   // Donut SVG helper
@@ -4359,7 +4382,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     // Story Points horizontal bars
     '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;flex:1;min-width:240px">' +
     '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:.5px">Story Points Summary</div>' +
-    hBar('Total Story Points', totalPts, totalPts||1, '#0052cc', 'ss_total') +
+    hBar('Total Story Points', totalPts, totalPts||1, '#0052cc', 'ss_totalpts') +
     hBar('Completing', ptsDone, totalPts||1, '#10b981', 'ss_ptsdone') +
     hBar('Remaining', ptsLeft, totalPts||1, '#f59e0b', 'ss_ptsleft') +
     '<div style="display:flex;gap:6px;font-size:10px;color:var(--text3);margin-top:8px">' +
