@@ -3952,13 +3952,74 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   var startStr = sprint.start_date ? fmtDateShort(sprint.start_date) : '—';
   var endStr = sprint.end_date ? fmtDateShort(sprint.end_date) : '—';
 
-  function kpi(label, val, color, sub) {
-    return '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 18px;flex:1;min-width:110px;text-align:center">' +
+  // ── Issue groups behind each KPI tile, for click-to-drill-down ──
+  var sprintIssues = getSpaceIssues(S.currentSpace).filter(function(i) { return i.sprint_id === sprint.id; });
+  var doneIssuesArr = sprintIssues.filter(function(i) { return i.status === 'Done'; });
+  var remainingIssuesArr = sprintIssues.filter(function(i) { return i.status !== 'Done'; });
+  window._burnKpiData = {
+    total:     { label: 'Total Issues',      issues: sprintIssues },
+    completed: { label: 'Completed Issues',  issues: doneIssuesArr },
+    remaining: { label: 'Remaining Issues',  issues: remainingIssuesArr },
+    ptsDone:   { label: 'Issues — Points Done',  issues: doneIssuesArr },
+    ptsLeft:   { label: 'Issues — Points Left',  issues: remainingIssuesArr },
+    totalPts:  { label: 'All Issues (Total Points)', issues: sprintIssues }
+  };
+
+  function kpi(label, val, color, sub, key) {
+    var clickable = key
+      ? ' onclick="window._showBurnKpiIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      : '';
+    return '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 18px;flex:1;min-width:110px;text-align:center' + (key ? ';cursor:pointer' : '') + '"' + clickable + '>' +
       '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">' + label + '</div>' +
       '<div style="font-size:24px;font-weight:800;color:' + color + '">' + val + '</div>' +
       (sub ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + sub + '</div>' : '') +
       '</div>';
   }
+
+  // ── Popup listing the issues behind a clicked KPI tile ──────────
+  window._showBurnKpiIssues = function(key) {
+    var group = (window._burnKpiData || {})[key];
+    if (!group) return;
+    var existing = document.getElementById('_burnKpiOverlay');
+    if (existing) existing.remove();
+
+    var rows = group.issues.length
+      ? group.issues.map(function(iss) {
+          var assignee = findUser(iss.assignee_id);
+          return '<div class="_burnKpiRow" data-id="' + iss.id + '" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
+            '<span style="flex-shrink:0">' + typeIcon(iss.type) + '</span>' +
+            '<span style="font-size:12px;font-weight:700;color:#6b778c;flex-shrink:0;min-width:64px">' + esc(issueKeyStr(iss)) + '</span>' +
+            '<span style="flex:1;font-size:13px;color:#172b4d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(iss.title || '') + '</span>' +
+            statusBadge(iss.status) +
+            (assignee ? avatarHtml(assignee, 24) : '') +
+          '</div>';
+        }).join('')
+      : '<div style="padding:28px;text-align:center;color:#6b778c;font-size:13px">No issues in this group.</div>';
+
+    var overlay = document.createElement('div');
+    overlay.id = '_burnKpiOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+    overlay.innerHTML =
+      '<div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden">' +
+        '<div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">' +
+          '<div style="font-size:15px;font-weight:700;color:#0f172a">' + esc(group.label) + ' (' + group.issues.length + ')</div>' +
+          '<button id="_burnKpiClose" style="width:28px;height:28px;border:none;background:#f1f5f9;border-radius:8px;cursor:pointer;font-size:16px;color:#64748b">&times;</button>' +
+        '</div>' +
+        '<div style="overflow-y:auto">' + rows + '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+    var close = function() { if (document.body.contains(overlay)) overlay.remove(); };
+    overlay.querySelector('#_burnKpiClose').onclick = close;
+    overlay.onclick = function(e) { if (e.target === overlay) close(); };
+    overlay.querySelectorAll('._burnKpiRow').forEach(function(row) {
+      row.onclick = function() {
+        var id = row.dataset.id;
+        close();
+        openDrawer(id);
+      };
+    });
+  };
 
   // ── Chart section helper ─────────────────────────────────────
   function chartCard(title, desc, chartHtml, legendHtml) {
@@ -3997,12 +4058,12 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
 
     // KPI row
     '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-    kpi('Total Issues', total, '#0052cc') +
-    kpi('Completed', issuesDone, '#10b981', pct + '% done') +
-    kpi('Remaining Issues', total - issuesDone, '#f59e0b') +
-    kpi('Pts Done', ptsDone, '#10b981') +
-    kpi('Pts Left', ptsLeft, '#dc2626') +
-    kpi('Total Pts', totalPts, '#0052cc') +
+    kpi('Total Issues', total, '#0052cc', null, 'total') +
+    kpi('Completed', issuesDone, '#10b981', pct + '% done', 'completed') +
+    kpi('Remaining Issues', total - issuesDone, '#f59e0b', null, 'remaining') +
+    kpi('Pts Done', ptsDone, '#10b981', null, 'ptsDone') +
+    kpi('Pts Left', ptsLeft, '#dc2626', null, 'ptsLeft') +
+    kpi('Total Pts', totalPts, '#0052cc', null, 'totalPts') +
     '</div>' +
 
     // Burndown chart
@@ -6320,6 +6381,10 @@ function bindDrawerEdits(issue) {
   // ── @mention autocomplete ─────────────────────────────────
   (function() {
     var textarea = $('drawerCommentInput');
+    // Bind once — this block previously re-ran on every drawer open, stacking
+    // duplicate 'input'/'keydown'/'click' listeners on the same persistent element.
+    if (!textarea || textarea._mentionBound) return;
+    textarea._mentionBound = true;
     var dropdown = $('mentionDropdown');
     var mentionStart = -1;
 
@@ -6492,10 +6557,16 @@ function bindDrawerEdits(issue) {
     });
   })();
 
-  $('drawerCommentSubmit').onclick = async function () {
-  // Paste image support for comment box
-  var _commentPasteEl = $('drawerCommentInput');
-  if (_commentPasteEl) {
+  // Paste image support for comment box — bind ONCE per drawer element, not per click.
+  // (Previously this was registered inside the onclick handler below, so every
+  // "Comment" click added another listener; a later paste would then fire all of
+  // them and push the same image into _commentFiles multiple times, producing
+  // duplicate uploaded images and eventually failing once the server's file-count
+  // limit was exceeded.)
+  (function () {
+    var _commentPasteEl = $('drawerCommentInput');
+    if (!_commentPasteEl || _commentPasteEl._pasteBound) return;
+    _commentPasteEl._pasteBound = true;
     _commentPasteEl.addEventListener('paste', function(e) {
       var items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
@@ -6511,7 +6582,9 @@ function bindDrawerEdits(issue) {
         }
       }
     });
-  }
+  })();
+
+  $('drawerCommentSubmit').onclick = async function () {
     var _ci = $('drawerCommentInput');
     var body;
     if (!_ci) { body = ''; }
@@ -6551,8 +6624,10 @@ function bindDrawerEdits(issue) {
           headers: { 'Authorization': 'Bearer ' + getAuthToken() },
           body: fd
         });
-        var uploadData = await uploadRes.json();
-        if (uploadData.files && uploadData.files.length) {
+        var uploadData = await uploadRes.json().catch(function () { return {}; });
+        if (!uploadRes.ok) {
+          toast(uploadData.error || 'Attachment upload failed', 'error');
+        } else if (uploadData.files && uploadData.files.length) {
           var fileRefs = uploadData.files.map(function(f) {
             var isImg = f.type && f.type.startsWith('image/');
             return (isImg ? '[img:' : '[file:') + f.name + '|' + f.url + ']';
@@ -6581,19 +6656,15 @@ function bindDrawerEdits(issue) {
         renderDrawerActivity(_drawerIssueData);
       }
       var _ci2 = $('drawerCommentInput'); if (_ci2) { if (_ci2.value !== undefined) _ci2.value = ''; else _ci2.innerHTML = ''; }
-      // Re-enable button immediately
-      submitBtn._submitting = false;
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Comment';
-      // Post in background then refresh
+      // Post the real comment — button stays disabled until this actually finishes,
+      // so a fast repeat click can't slip through while the first request is in flight.
       await api('/api/comments', 'POST', { issue_id: issueId, user_id: S.currentUser, body: commentBody });
     } else {
       var _ci3 = $('drawerCommentInput'); if (_ci3) { if (_ci3.value !== undefined) _ci3.value = ''; else _ci3.innerHTML = ''; }
-      // Re-enable button
-      submitBtn._submitting = false;
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Comment';
     }
+    submitBtn._submitting = false;
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Comment';
     // Refresh in background to get real comment ID
     api('/api/issues/' + issueId).then(function(updated) {
       if (updated) {
@@ -6601,7 +6672,7 @@ function bindDrawerEdits(issue) {
         renderDrawerActivity(updated);
       }
     });
-    toast('Comment added');
+    if (commentBody) toast('Comment added');
   };
 
   $('drawerLogTimeBtn').onclick = function () {
@@ -7171,8 +7242,7 @@ function _renderActivityTab(tab, issue) {
       var issueId = S.drawerIssueId;
       if (issueId) {
         api('/api/issues/' + issueId).then(function(fresh) {
-          _drawerIssueData = fresh;
-          _renderActivityTab('comment', fresh);
+          renderDrawerActivity(fresh);
         }).catch(function(){});
       }
     }).catch(function() { toast('Failed to delete comment', 'error'); });
@@ -7187,8 +7257,7 @@ function _renderActivityTab(tab, issue) {
       var issueId = S.drawerIssueId;
       if (issueId) {
         api('/api/issues/' + issueId).then(function(fresh) {
-          _drawerIssueData = fresh;
-          _renderActivityTab('comment', fresh);
+          renderDrawerActivity(fresh);
         }).catch(function(){});
       }
     }).catch(function() { toast('Failed to save comment', 'error'); });
