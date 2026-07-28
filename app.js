@@ -3819,14 +3819,18 @@ async function renderReportContent(type, selectedSprintId) {
       || allSprints.find(function(sp){ return sp.status === 'active'; })
       || allSprints[allSprints.length - 1];
     if (activeSprint) window._lastSelectedSprintId = activeSprint.id;
-    var sprintSelectorHtml = allSprints && allSprints.length > 0
+    // Only reports actually scoped to one sprint get a Sprint picker. Velocity
+    // Trend, Cumulative Flow, and Control Chart are cross-sprint/space-wide —
+    // their data queries never look at activeSprint, so showing a "Sprint:"
+    // dropdown there looked interactive but silently did nothing when changed.
+    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items','spillover'];
+    var sprintSelectorHtml = (sprintTypes.indexOf(type) >= 0 && allSprints && allSprints.length > 0)
       ? '<div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
         '<select class="input input-sm" onchange="window._globalRptSprintChange(this.value,\'' + type + '\')">' +
         allSprints.map(function(sp) {
           return '<option value="' + sp.id + '"' + (activeSprint && sp.id === activeSprint.id ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
         }).join('') + '</select></div>'
       : '';
-    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items','spillover'];
     if (sprintTypes.indexOf(type) >= 0 && !activeSprint) { c.innerHTML = '<p class="placeholder-text">No sprints found.</p>'; return; }
     if (type === 'sprint-summary') {
       var dSS = await api('/api/reports/sprint/' + activeSprint.id);
