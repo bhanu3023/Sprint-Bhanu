@@ -4020,10 +4020,16 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
       return '<polyline points="' + pts + '" fill="none" stroke="' + line.color + '" stroke-width="' + (line.width || 2.5) + '"' + dashAttr + ' stroke-linejoin="round" stroke-linecap="round"/>';
     }).join('');
 
-    // Dots on actual lines
+    // Dots on actual lines — each carries a native tooltip so hovering shows
+    // the exact date and value that point represents, instead of having to
+    // guess from the gridlines.
     var dots = lines.filter(function(l) { return !l.dash; }).map(function(line) {
       return series.map(function(s, i4) {
-        return '<circle cx="' + xp(i4).toFixed(1) + '" cy="' + yp(line.fn(s, i4)).toFixed(1) + '" r="3" fill="' + line.color + '" stroke="var(--bg2)" stroke-width="1.5"/>';
+        var val = line.fn(s, i4);
+        var cx = xp(i4).toFixed(1), cy = yp(val).toFixed(1);
+        var tip = esc(line.label) + ' — ' + esc(s.date || '') + ': ' + val + ' ' + esc(yLabel);
+        return '<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="transparent" style="cursor:pointer"><title>' + tip + '</title></circle>' +
+          '<circle cx="' + cx + '" cy="' + cy + '" r="3" fill="' + line.color + '" stroke="var(--bg2)" stroke-width="1.5" style="pointer-events:none"/>';
       }).join('');
     }).join('');
 
