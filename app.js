@@ -580,7 +580,31 @@ async function init() {
       }
     }
     var issueParam = new URLSearchParams(window.location.search).get('issue');
-    if (!issueParam) navigateTo('home');
+    if (!issueParam) {
+      // Restore whichever view/space/tab was open before the last refresh,
+      // instead of always resetting to Home.
+      var restoredNav = false;
+      try {
+        var savedNav = JSON.parse(localStorage.getItem('sb-last-nav') || 'null');
+        if (savedNav) {
+          if (savedNav.view === 'space' && savedNav.spaceId && getSpace(savedNav.spaceId)) {
+            var wantTab = savedNav.tab || 'summary';
+            if ((wantTab === 'reports' || wantTab === 'space-settings') && !isSpaceOwner(savedNav.spaceId)) {
+              wantTab = 'summary';
+            }
+            navigateToSpace(savedNav.spaceId, wantTab);
+            restoredNav = true;
+          } else if (['home','yourwork','spaces','worklog-report','product-roadmap','user-management','settings'].indexOf(savedNav.view) !== -1) {
+            navigateTo(savedNav.view);
+            restoredNav = true;
+          } else if (savedNav.view === 'global-reports' && isSpaceOwner(null)) {
+            navigateTo('global-reports');
+            restoredNav = true;
+          }
+        }
+      } catch (_) {}
+      if (!restoredNav) navigateTo('home');
+    }
     if (issueParam) {
       // Resolve key to UUID (e.g. BRT-76 -> UUID)
       // First try local data
@@ -837,6 +861,18 @@ function _exitIssuePage() {
   window._currentIssueKey = null;
 }
 
+// Remember which view/space/tab the user is on so a page refresh reopens
+// the same place instead of always resetting to Home.
+function saveNavState() {
+  try {
+    localStorage.setItem('sb-last-nav', JSON.stringify({
+      view: S.currentView,
+      spaceId: S.currentSpace,
+      tab: S.currentTab
+    }));
+  } catch (_) {}
+}
+
 function navigateTo(view) {
   document.body.classList.remove('settings-active');
   // Guard: global Reports is owner-only
@@ -848,6 +884,7 @@ function navigateTo(view) {
   S.currentView = view;
   S.currentSpace = null;
   S.currentTab = null;
+  saveNavState();
 
   // Hide everything
   qsa('.view').forEach(function (v) { v.setAttribute('hidden', ''); });
@@ -987,6 +1024,7 @@ function renderTab(tab) {
   }
   _exitIssuePage();
   S.currentTab = tab;
+  saveNavState();
   qsa('.view').forEach(function (v) { v.setAttribute('hidden', ''); });
   qsa('.nav-item[data-tab]').forEach(function (el) { el.classList.toggle('active', el.dataset.tab === tab); });
 
