@@ -4185,6 +4185,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   // ── Issue groups behind each stat, for click-to-drill-down ──────
   var doneIssuesArr = issues.filter(function(i){ return i.status === 'Done'; });
   var inProgressIssuesArr = issues.filter(function(i){ return i.status === 'In Progress'; });
+  var inReviewIssuesArr = issues.filter(function(i){ return i.status === 'In Review'; });
   var toDoIssuesArr = issues.filter(function(i){ return i.status === 'To Do'; });
   var blockedIssuesArr = issues.filter(function(i){ return i.status === 'Blocked'; });
   var remainingIssuesArr = issues.filter(function(i){ return i.status !== 'Done'; });
@@ -4194,6 +4195,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     ss_total:      { label: 'Total Stories',       issues: issues },
     ss_done:       { label: 'Completed Stories',   issues: doneIssuesArr },
     ss_inprogress: { label: 'In Progress Stories', issues: inProgressIssuesArr },
+    ss_inreview:   { label: 'In Review Stories',   issues: inReviewIssuesArr },
     ss_todo:       { label: 'To Do Stories',       issues: toDoIssuesArr },
     ss_blocked:    { label: 'Blocked Stories',     issues: blockedIssuesArr },
     ss_totalbugs:  { label: 'Total Bugs',          issues: bugs },
@@ -4239,10 +4241,11 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   // Story Status donut (multi-segment)
   var donePct2 = total ? Math.round(done/total*100) : 0;
   var ipPct2 = total ? Math.round(inProgress/total*100) : 0;
+  var inReviewPct2 = total ? Math.round(inReview/total*100) : 0;
   var todoPct2 = total ? Math.round(toDo/total*100) : 0;
   var blkPct2 = total ? Math.round(blocked/total*100) : 0;
   var statusDonut = donutSvg(
-    [{pct:donePct2,color:'#10b981'},{pct:ipPct2,color:'#f59e0b'},{pct:todoPct2,color:'#0052cc'},{pct:blkPct2,color:'#dc2626'}],
+    [{pct:donePct2,color:'#10b981'},{pct:ipPct2,color:'#f59e0b'},{pct:inReviewPct2,color:'#8b5cf6'},{pct:todoPct2,color:'#0052cc'},{pct:blkPct2,color:'#dc2626'}],
     70, 70, 54, total, 'Total Stories'
   );
 
@@ -4279,6 +4282,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     clipboard: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>',
     checkCircle: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
     refresh: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0052cc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
+    eye: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
     pin: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>',
     bug: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>',
     alertCircle: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
@@ -4375,6 +4379,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div style="display:flex;flex-direction:column;gap:8px">' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_done\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#10b981;display:inline-block"></span><span style="color:var(--text2)">Completed</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + done + ' (' + donePct2 + '%)</span></div>' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_inprogress\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#f59e0b;display:inline-block"></span><span style="color:var(--text2)">In Progress</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + inProgress + ' (' + ipPct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_inreview\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#8b5cf6;display:inline-block"></span><span style="color:var(--text2)">In Review</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + inReview + ' (' + inReviewPct2 + '%)</span></div>' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_todo\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#0052cc;display:inline-block"></span><span style="color:var(--text2)">To Do</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + toDo + ' (' + todoPct2 + '%)</span></div>' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_blocked\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#dc2626;display:inline-block"></span><span style="color:var(--text2)">Blocked</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + blocked + ' (' + blkPct2 + '%)</span></div>' +
     '</div></div></div>' +
@@ -4396,6 +4401,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     metricChip(SVG.clipboard,'Total Stories', total, '100%', 'ss_total') +
     metricChip(SVG.checkCircle,'Completed Stories', done, donePct2 + '%', 'ss_done') +
     metricChip(SVG.refresh,'In Progress', inProgress, ipPct2 + '%', 'ss_inprogress') +
+    metricChip(SVG.eye,'In Review', inReview, inReviewPct2 + '%', 'ss_inreview') +
     metricChip(SVG.pin,'To Do Stories', toDo, todoPct2 + '%', 'ss_todo') +
     metricChip(SVG.bug,'Total Bugs', totalBugs, '100%', 'ss_totalbugs') +
     metricChip(SVG.alertCircle,'Open Bugs', openBugs, bugPct + '%', 'ss_openbugs') +
