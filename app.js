@@ -3872,6 +3872,56 @@ async function renderReportContent(type, selectedSprintId) {
   }
 }
 
+// ── Shared drill-down popup used by every report's clickable metrics ──
+// A report populates window._reportDrillData[key] = { label, issues } for
+// each stat it wants clickable, then wires that tile's onclick to
+// window._showReportIssues('key'). Shared across reports so every metric
+// (Burn Chart KPIs, Sprint Summary tiles/chips/bars, etc.) uses one popup.
+window._reportDrillData = window._reportDrillData || {};
+window._showReportIssues = function(key) {
+  var group = (window._reportDrillData || {})[key];
+  if (!group) return;
+  var existing = document.getElementById('_reportDrillOverlay');
+  if (existing) existing.remove();
+
+  var rows = group.issues.length
+    ? group.issues.map(function(iss) {
+        var assignee = findUser(iss.assignee_id);
+        return '<div class="_reportDrillRow" data-id="' + iss.id + '" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
+          '<span style="flex-shrink:0">' + typeIcon(iss.type) + '</span>' +
+          '<span style="font-size:12px;font-weight:700;color:#6b778c;flex-shrink:0;min-width:64px">' + esc(issueKeyStr(iss)) + '</span>' +
+          '<span style="flex:1;font-size:13px;color:#172b4d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(iss.title || '') + '</span>' +
+          statusBadge(iss.status) +
+          (assignee ? avatarHtml(assignee, 24) : '') +
+        '</div>';
+      }).join('')
+    : '<div style="padding:28px;text-align:center;color:#6b778c;font-size:13px">No issues in this group.</div>';
+
+  var overlay = document.createElement('div');
+  overlay.id = '_reportDrillOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">' +
+        '<div style="font-size:15px;font-weight:700;color:#0f172a">' + esc(group.label) + ' (' + group.issues.length + ')</div>' +
+        '<button id="_reportDrillClose" style="width:28px;height:28px;border:none;background:#f1f5f9;border-radius:8px;cursor:pointer;font-size:16px;color:#64748b">&times;</button>' +
+      '</div>' +
+      '<div style="overflow-y:auto">' + rows + '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  var close = function() { if (document.body.contains(overlay)) overlay.remove(); };
+  overlay.querySelector('#_reportDrillClose').onclick = close;
+  overlay.onclick = function(e) { if (e.target === overlay) close(); };
+  overlay.querySelectorAll('._reportDrillRow').forEach(function(row) {
+    row.onclick = function() {
+      var id = row.dataset.id;
+      close();
+      openDrawer(id);
+    };
+  });
+};
+
 function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
   var sprint = data.sprint || {};
@@ -3956,18 +4006,18 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   var sprintIssues = getSpaceIssues(S.currentSpace).filter(function(i) { return i.sprint_id === sprint.id; });
   var doneIssuesArr = sprintIssues.filter(function(i) { return i.status === 'Done'; });
   var remainingIssuesArr = sprintIssues.filter(function(i) { return i.status !== 'Done'; });
-  window._burnKpiData = {
+  Object.assign(window._reportDrillData, {
     total:     { label: 'Total Issues',      issues: sprintIssues },
     completed: { label: 'Completed Issues',  issues: doneIssuesArr },
     remaining: { label: 'Remaining Issues',  issues: remainingIssuesArr },
     ptsDone:   { label: 'Issues — Points Done',  issues: doneIssuesArr },
     ptsLeft:   { label: 'Issues — Points Left',  issues: remainingIssuesArr },
     totalPts:  { label: 'All Issues (Total Points)', issues: sprintIssues }
-  };
+  });
 
   function kpi(label, val, color, sub, key) {
     var clickable = key
-      ? ' onclick="window._showBurnKpiIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      ? ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
       : '';
     return '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 18px;flex:1;min-width:110px;text-align:center' + (key ? ';cursor:pointer' : '') + '"' + clickable + '>' +
       '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">' + label + '</div>' +
@@ -3975,51 +4025,6 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
       (sub ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + sub + '</div>' : '') +
       '</div>';
   }
-
-  // ── Popup listing the issues behind a clicked KPI tile ──────────
-  window._showBurnKpiIssues = function(key) {
-    var group = (window._burnKpiData || {})[key];
-    if (!group) return;
-    var existing = document.getElementById('_burnKpiOverlay');
-    if (existing) existing.remove();
-
-    var rows = group.issues.length
-      ? group.issues.map(function(iss) {
-          var assignee = findUser(iss.assignee_id);
-          return '<div class="_burnKpiRow" data-id="' + iss.id + '" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
-            '<span style="flex-shrink:0">' + typeIcon(iss.type) + '</span>' +
-            '<span style="font-size:12px;font-weight:700;color:#6b778c;flex-shrink:0;min-width:64px">' + esc(issueKeyStr(iss)) + '</span>' +
-            '<span style="flex:1;font-size:13px;color:#172b4d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(iss.title || '') + '</span>' +
-            statusBadge(iss.status) +
-            (assignee ? avatarHtml(assignee, 24) : '') +
-          '</div>';
-        }).join('')
-      : '<div style="padding:28px;text-align:center;color:#6b778c;font-size:13px">No issues in this group.</div>';
-
-    var overlay = document.createElement('div');
-    overlay.id = '_burnKpiOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
-    overlay.innerHTML =
-      '<div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden">' +
-        '<div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">' +
-          '<div style="font-size:15px;font-weight:700;color:#0f172a">' + esc(group.label) + ' (' + group.issues.length + ')</div>' +
-          '<button id="_burnKpiClose" style="width:28px;height:28px;border:none;background:#f1f5f9;border-radius:8px;cursor:pointer;font-size:16px;color:#64748b">&times;</button>' +
-        '</div>' +
-        '<div style="overflow-y:auto">' + rows + '</div>' +
-      '</div>';
-
-    document.body.appendChild(overlay);
-    var close = function() { if (document.body.contains(overlay)) overlay.remove(); };
-    overlay.querySelector('#_burnKpiClose').onclick = close;
-    overlay.onclick = function(e) { if (e.target === overlay) close(); };
-    overlay.querySelectorAll('._burnKpiRow').forEach(function(row) {
-      row.onclick = function() {
-        var id = row.dataset.id;
-        close();
-        openDrawer(id);
-      };
-    });
-  };
 
   // ── Chart section helper ─────────────────────────────────────
   function chartCard(title, desc, chartHtml, legendHtml) {
@@ -4121,6 +4126,25 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   var endStr = sprint.end_date ? fmtDateShort(sprint.end_date) : '—';
   var nowStr = (function(){ var d = new Date(); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) + ' ' + d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); })();
 
+  // ── Issue groups behind each stat, for click-to-drill-down ──────
+  var doneIssuesArr = issues.filter(function(i){ return i.status === 'Done'; });
+  var inProgressIssuesArr = issues.filter(function(i){ return i.status === 'In Progress'; });
+  var toDoIssuesArr = issues.filter(function(i){ return i.status === 'To Do'; });
+  var blockedIssuesArr = issues.filter(function(i){ return i.status === 'Blocked'; });
+  var remainingIssuesArr = issues.filter(function(i){ return i.status !== 'Done'; });
+  var openBugsArr = bugs.filter(function(i){ return i.status !== 'Done'; });
+  Object.assign(window._reportDrillData, {
+    ss_total:      { label: 'Total Stories',       issues: issues },
+    ss_done:       { label: 'Completed Stories',   issues: doneIssuesArr },
+    ss_inprogress: { label: 'In Progress Stories', issues: inProgressIssuesArr },
+    ss_todo:       { label: 'To Do Stories',       issues: toDoIssuesArr },
+    ss_blocked:    { label: 'Blocked Stories',     issues: blockedIssuesArr },
+    ss_totalbugs:  { label: 'Total Bugs',          issues: bugs },
+    ss_openbugs:   { label: 'Open Bugs',           issues: openBugsArr },
+    ss_ptsdone:    { label: 'Stories — Points Completed', issues: doneIssuesArr },
+    ss_ptsleft:    { label: 'Stories — Points Remaining', issues: remainingIssuesArr }
+  });
+
   // Donut SVG helper
   function donutSvg(segments, cx, cy, r, label, sublabel) {
     var circ = 2 * Math.PI * r;
@@ -4162,9 +4186,12 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   );
 
   // Horizontal bar helper
-  function hBar(label, val, maxVal, color) {
+  function hBar(label, val, maxVal, color, key) {
     var w = maxVal ? Math.round((val/maxVal)*100) : 0;
-    return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">' +
+    var clickable = key
+      ? ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view issues" style="cursor:pointer"'
+      : '';
+    return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"' + clickable + '>' +
       '<span style="width:130px;font-size:12px;color:var(--text2);flex-shrink:0">' + label + '</span>' +
       '<div style="flex:1;background:var(--bg3);border-radius:4px;height:14px;overflow:hidden">' +
       '<div style="height:100%;width:' + w + '%;background:' + color + ';border-radius:4px;transition:width .4s"></div></div>' +
@@ -4173,9 +4200,12 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   }
 
   // KPI tile (top right 4 cards)
-  function kpiTile(title, mainNum, total2, subLabel, accentColor) {
+  function kpiTile(title, mainNum, total2, subLabel, accentColor, key) {
     var p = total2 ? Math.round(mainNum/total2*100) : 0;
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;flex:1;min-width:130px">' +
+    var clickable = key
+      ? ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      : '';
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;flex:1;min-width:130px' + (key ? ';cursor:pointer' : '') + '"' + clickable + '>' +
       '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">' + title + '</div>' +
       '<div style="font-size:22px;font-weight:800;color:' + accentColor + '">' + mainNum +
         '<span style="font-size:14px;font-weight:500;color:var(--text3)"> / ' + total2 + '</span></div>' +
@@ -4203,8 +4233,11 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   };
 
   // Metric chip (bottom detailed row)
-  function metricChip(icon, label, val, sub) {
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;flex:1;min-width:100px;text-align:center">' +
+  function metricChip(icon, label, val, sub, key) {
+    var clickable = key
+      ? ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      : '';
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;flex:1;min-width:100px;text-align:center' + (key ? ';cursor:pointer' : '') + '"' + clickable + '>' +
       '<div style="display:flex;justify-content:center;margin-bottom:4px">' + icon + '</div>' +
       '<div style="font-size:17px;font-weight:800;color:var(--text)">' + val + '</div>' +
       '<div style="font-size:11px;color:var(--text3);white-space:nowrap">' + label + '</div>' +
@@ -4264,10 +4297,10 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
 
     // 4 KPI tiles (2x2)
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-width:300px">' +
-    kpiTile('Stories Completed', done, total, 'of total stories', '#10b981') +
-    kpiTile('Story Points Completed', ptsDone, totalPts||1, 'of total points', '#0052cc') +
-    kpiTile('Open Bugs', openBugs, totalBugs || openBugs || 1, totalBugs ? 'of total bugs' : 'no bugs', '#f59e0b') +
-    kpiTile('Blocked Stories', blocked, total || 1, 'of total stories', '#dc2626') +
+    kpiTile('Stories Completed', done, total, 'of total stories', '#10b981', 'ss_done') +
+    kpiTile('Story Points Completed', ptsDone, totalPts||1, 'of total points', '#0052cc', 'ss_ptsdone') +
+    kpiTile('Open Bugs', openBugs, totalBugs || openBugs || 1, totalBugs ? 'of total bugs' : 'no bugs', '#f59e0b', 'ss_openbugs') +
+    kpiTile('Blocked Stories', blocked, total || 1, 'of total stories', '#dc2626', 'ss_blocked') +
     '</div></div>' +
 
     // ── Row 2: Story Status donut | Story Points horizontal bars ──
@@ -4279,18 +4312,18 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">' +
     statusDonut +
     '<div style="display:flex;flex-direction:column;gap:8px">' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#10b981;display:inline-block"></span><span style="color:var(--text2)">Completed</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + done + ' (' + donePct2 + '%)</span></div>' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#f59e0b;display:inline-block"></span><span style="color:var(--text2)">In Progress</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + inProgress + ' (' + ipPct2 + '%)</span></div>' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#0052cc;display:inline-block"></span><span style="color:var(--text2)">To Do</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + toDo + ' (' + todoPct2 + '%)</span></div>' +
-    '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:#dc2626;display:inline-block"></span><span style="color:var(--text2)">Blocked</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + blocked + ' (' + blkPct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_done\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#10b981;display:inline-block"></span><span style="color:var(--text2)">Completed</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + done + ' (' + donePct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_inprogress\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#f59e0b;display:inline-block"></span><span style="color:var(--text2)">In Progress</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + inProgress + ' (' + ipPct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_todo\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#0052cc;display:inline-block"></span><span style="color:var(--text2)">To Do</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + toDo + ' (' + todoPct2 + '%)</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer" onclick="window._showReportIssues(\'ss_blocked\')" title="Click to view issues"><span style="width:12px;height:12px;border-radius:3px;background:#dc2626;display:inline-block"></span><span style="color:var(--text2)">Blocked</span><span style="margin-left:auto;font-weight:700;color:var(--text)">' + blocked + ' (' + blkPct2 + '%)</span></div>' +
     '</div></div></div>' +
 
     // Story Points horizontal bars
     '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;flex:1;min-width:240px">' +
     '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:.5px">Story Points Summary</div>' +
-    hBar('Total Story Points', totalPts, totalPts||1, '#0052cc') +
-    hBar('Completing', ptsDone, totalPts||1, '#10b981') +
-    hBar('Remaining', ptsLeft, totalPts||1, '#f59e0b') +
+    hBar('Total Story Points', totalPts, totalPts||1, '#0052cc', 'ss_total') +
+    hBar('Completing', ptsDone, totalPts||1, '#10b981', 'ss_ptsdone') +
+    hBar('Remaining', ptsLeft, totalPts||1, '#f59e0b', 'ss_ptsleft') +
     '<div style="display:flex;gap:6px;font-size:10px;color:var(--text3);margin-top:8px">' +
     '<span>0</span><span style="flex:1;text-align:center">Story Points</span><span>' + totalPts + '</span>' +
     '</div></div></div>' +
@@ -4299,13 +4332,13 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div>' +
     '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Detailed Metrics</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
-    metricChip(SVG.clipboard,'Total Stories', total, '100%') +
-    metricChip(SVG.checkCircle,'Completed Stories', done, donePct2 + '%') +
-    metricChip(SVG.refresh,'In Progress', inProgress, ipPct2 + '%') +
-    metricChip(SVG.pin,'To Do Stories', toDo, todoPct2 + '%') +
-    metricChip(SVG.bug,'Total Bugs', totalBugs, '100%') +
-    metricChip(SVG.alertCircle,'Open Bugs', openBugs, bugPct + '%') +
-    metricChip(SVG.ban,'Blocked Stories', blocked, blockedPct + '%') +
+    metricChip(SVG.clipboard,'Total Stories', total, '100%', 'ss_total') +
+    metricChip(SVG.checkCircle,'Completed Stories', done, donePct2 + '%', 'ss_done') +
+    metricChip(SVG.refresh,'In Progress', inProgress, ipPct2 + '%', 'ss_inprogress') +
+    metricChip(SVG.pin,'To Do Stories', toDo, todoPct2 + '%', 'ss_todo') +
+    metricChip(SVG.bug,'Total Bugs', totalBugs, '100%', 'ss_totalbugs') +
+    metricChip(SVG.alertCircle,'Open Bugs', openBugs, bugPct + '%', 'ss_openbugs') +
+    metricChip(SVG.ban,'Blocked Stories', blocked, blockedPct + '%', 'ss_blocked') +
     '</div></div>' +
 
     // ── Row 4: Footer insights ──
