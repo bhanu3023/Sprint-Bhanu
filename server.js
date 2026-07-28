@@ -918,7 +918,7 @@ app.get('/api/reports/sprint/:sprintId', requireAuth, wrap(async (req, res) => {
       COUNT(*) FILTER (WHERE status='In Progress')::int AS in_progress,
       COALESCE(SUM(story_points) FILTER (WHERE status='Done'),0)::int AS points_completed,
       COALESCE(SUM(story_points) FILTER (WHERE status!='Done'),0)::int AS points_remaining
-    FROM issues WHERE sprint_id=$1`, [sid])).rows[0];
+    FROM issues WHERE sprint_id=$1 AND deleted_at IS NULL`, [sid])).rows[0];
   res.json({ sprint, ...stats });
 }));
 
