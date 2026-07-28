@@ -9576,6 +9576,30 @@ async function renderAdminAuditLog(el) {
     '</div>';
 }
 
+// ── Normalize pasted text in description editors ───────────
+// Contenteditable fields paste the source page's full HTML by default (Word,
+// Google Docs, browser pages all carry their own margins/empty paragraphs),
+// which shows up here as large gaps between lines. Paste as plain text
+// instead — line breaks are kept, but the source's own spacing is dropped.
+document.addEventListener('paste', function(e) {
+  var active = document.activeElement;
+  if (!active || (active.id !== 'drawerDesc' && active.id !== 'drawerFixDesc' && active.id !== 'issueDescContent')) return;
+  var cd = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
+  if (!cd) return;
+  var items = cd.items || [];
+  for (var i = 0; i < items.length; i++) { if (items[i].type.indexOf('image') !== -1) return; } // let the image-paste handler below take it
+  var text = cd.getData('text/plain');
+  if (text === '' || text == null) return;
+  e.preventDefault();
+  var html = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n') // collapse runs of blank lines down to one
+    .split('\n')
+    .map(function(line) { return esc(line); })
+    .join('<br>');
+  document.execCommand('insertHTML', false, html);
+});
+
 // ── Image paste in description (base64 inline) ─────────────
 document.addEventListener('paste', function(e) {
   var active = document.activeElement;
