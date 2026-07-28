@@ -1807,6 +1807,14 @@ app.post('/api/admin/sync-db', async (req, res) => {
       await pool.query(`ALTER TABLE invitations ADD CONSTRAINT invitations_status_check CHECK (status IN ('pending','accepted','expired','cancelled'))`);
     } catch(e) { console.error('Migration warning (invitations status):', e.message); }
 
+    // Migration: add 'Blocked' to issues status constraint — the app already has
+    // full UI/color/report support for a Blocked status, but the DB never allowed
+    // the value, so issues could never actually be saved as Blocked.
+    try {
+      await pool.query(`ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_status_check`);
+      await pool.query(`ALTER TABLE issues ADD CONSTRAINT issues_status_check CHECK (status IN ('To Do','In Progress','In Review','Done','Blocked'))`);
+    } catch(e) { console.error('Migration warning (issues status):', e.message); }
+
     // Migration: create issue_history table
     try {
       await pool.query(`CREATE TABLE IF NOT EXISTS issue_history (

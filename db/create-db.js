@@ -189,7 +189,7 @@ async function main() {
         description TEXT,
         fix_description TEXT,
         type VARCHAR CHECK (type IN ('epic','story','task','bug','subtask')) DEFAULT 'task',
-        status VARCHAR CHECK (status IN ('To Do','In Progress','In Review','Done')) DEFAULT 'To Do',
+        status VARCHAR CHECK (status IN ('To Do','In Progress','In Review','Done','Blocked')) DEFAULT 'To Do',
         priority VARCHAR CHECK (priority IN ('highest','high','medium','low','lowest')) DEFAULT 'medium',
         assignee_id VARCHAR REFERENCES users(id),
         reporter_id VARCHAR REFERENCES users(id),

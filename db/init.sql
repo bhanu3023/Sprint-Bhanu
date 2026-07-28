@@ -134,7 +134,7 @@ CREATE TABLE public.issues (
     product_type character varying(50),
     deleted_by uuid,
     CONSTRAINT issues_priority_check CHECK (((priority)::text = ANY ((ARRAY['highest'::character varying, 'high'::character varying, 'medium'::character varying, 'low'::character varying, 'lowest'::character varying])::text[]))),
-    CONSTRAINT issues_status_check CHECK (((status)::text = ANY ((ARRAY['To Do'::character varying, 'In Progress'::character varying, 'In Review'::character varying, 'Done'::character varying])::text[]))),
+    CONSTRAINT issues_status_check CHECK (((status)::text = ANY ((ARRAY['To Do'::character varying, 'In Progress'::character varying, 'In Review'::character varying, 'Done'::character varying, 'Blocked'::character varying])::text[]))),
     CONSTRAINT issues_type_check CHECK (((type)::text = ANY ((ARRAY['epic'::character varying, 'story'::character varying, 'task'::character varying, 'bug'::character varying, 'subtask'::character varying])::text[])))
 );
 ALTER TABLE public.issues OWNER TO postgres;
