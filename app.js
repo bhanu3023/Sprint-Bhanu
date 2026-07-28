@@ -4710,12 +4710,22 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
   }
 
   // Count by type
-  var stories = issues.filter(function(i){ return i.type === 'story'; }).length;
+  var storiesArr = issues.filter(function(i){ return i.type === 'story'; });
+  var tasksBugsArr = issues.filter(function(i){ return i.type === 'task' || i.type === 'bug'; });
+  var stories = storiesArr.length;
   var tasks = issues.filter(function(i){ return i.type === 'task'; }).length;
   var bugs = issues.filter(function(i){ return i.type === 'bug'; }).length;
+  Object.assign(window._reportDrillData, {
+    sp_all:       { label: 'Spilled Issues',   issues: issues },
+    sp_stories:   { label: 'Spilled Stories',  issues: storiesArr },
+    sp_tasksbugs: { label: 'Spilled Tasks / Bugs', issues: tasksBugsArr }
+  });
 
-  var kpi = function(label, val, color, desc) {
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:130px;text-align:center">' +
+  var kpi = function(label, val, color, desc, key) {
+    var clickable = key
+      ? ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      : '';
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:130px;text-align:center' + (key ? ';cursor:pointer' : '') + '"' + clickable + '>' +
       '<div style="font-size:32px;font-weight:800;color:' + color + '">' + val + '</div>' +
       '<div style="font-size:12px;color:var(--text3);margin-top:4px;font-weight:600">' + label + '</div>' +
       '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + desc + '</div></div>';
@@ -4744,16 +4754,50 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
     ? '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:12px 16px;font-size:13px;color:#065f46;margin-bottom:16px">🎉 No spillover — all issues were completed before the sprint ended!</div>'
     : '<div style="background:#dc262622;border:1px solid #dc262644;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b;margin-bottom:16px">📋 <strong>' + count + ' issue' + (count !== 1 ? 's' : '') + '</strong> spilled over when this sprint was completed and moved back to the backlog.</div>';
 
+  // ── Spillover by Developer — who's carrying the spilled-over work ──
+  var devGroups = {};
+  issues.forEach(function(i) {
+    var aid = i.assignee_id || '_unassigned';
+    if (!devGroups[aid]) devGroups[aid] = { assignee: i.assignee || null, issues: [] };
+    devGroups[aid].issues.push(i);
+  });
+  var devRows = Object.keys(devGroups).map(function(aid) {
+    var g = devGroups[aid];
+    var name = g.assignee ? g.assignee.name : 'Unassigned';
+    var safeKey = aid.replace(/[^a-zA-Z0-9_-]/g, '_');
+    window._reportDrillData['sp_dev_' + safeKey] = { label: name + ' — Spillover', issues: g.issues };
+    return { name: name, assignee: g.assignee, count: g.issues.length, safeKey: safeKey };
+  }).sort(function(a, b) { return b.count - a.count; });
+  var maxDevCount = Math.max.apply(null, devRows.map(function(d) { return d.count; })) || 1;
+  var devChartHtml = devRows.length
+    ? '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:20px">' +
+      '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:14px">Spillover by Developer</div>' +
+      devRows.map(function(d) {
+        var w = Math.round((d.count / maxDevCount) * 100);
+        var avatar = d.assignee ? avatarHtml(d.assignee, 26) : '<span class="avatar" style="width:26px;height:26px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#94a3b8;color:#fff;font-weight:700;flex-shrink:0">?</span>';
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+          avatar +
+          '<span style="width:120px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(d.name) + '</span>' +
+          '<div style="flex:1;background:var(--bg3);border-radius:4px;height:18px;overflow:hidden">' +
+          '<div onclick="window._showReportIssues(\'sp_dev_' + d.safeKey + '\')" title="' + esc(d.name) + ' — ' + d.count + ' spilled" style="cursor:pointer;width:' + Math.max(w, 4) + '%;height:100%;background:#dc2626"></div>' +
+          '</div>' +
+          '<span style="width:90px;font-size:11px;color:var(--text3);text-align:right;flex-shrink:0">' + d.count + ' spilled</span>' +
+          '</div>';
+      }).join('') +
+      '</div>'
+    : '';
+
   c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
     '<h4 style="margin:0 0 4px">Spillover — ' + esc(sprint.name || 'Sprint') + '</h4>' +
     '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Issues not completed at sprint end</p>' +
     banner +
     '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
-    kpi('Spilled Issues', count, count > 0 ? '#dc2626' : '#10b981', 'Total not completed') +
-    kpi('Story Points Lost', totalPts, totalPts > 0 ? '#f59e0b' : '#10b981', 'Points not delivered') +
-    kpi('Stories', stories, '#0052cc', 'User stories spilled') +
-    kpi('Tasks / Bugs', tasks + bugs, '#7c3aed', 'Tasks & bugs spilled') +
+    kpi('Spilled Issues', count, count > 0 ? '#dc2626' : '#10b981', 'Total not completed', 'sp_all') +
+    kpi('Story Points Lost', totalPts, totalPts > 0 ? '#f59e0b' : '#10b981', 'Points not delivered', 'sp_all') +
+    kpi('Stories', stories, '#0052cc', 'User stories spilled', 'sp_stories') +
+    kpi('Tasks / Bugs', tasks + bugs, '#7c3aed', 'Tasks & bugs spilled', 'sp_tasksbugs') +
     '</div>' +
+    devChartHtml +
     (issues.length
       ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
         '<thead><tr>' +
