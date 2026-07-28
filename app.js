@@ -4190,6 +4190,14 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   var blockedIssuesArr = issues.filter(function(i){ return i.status === 'Blocked'; });
   var remainingIssuesArr = issues.filter(function(i){ return i.status !== 'Done'; });
   var openBugsArr = bugs.filter(function(i){ return i.status !== 'Done'; });
+  // Bug status breakdown for Detailed Metrics (separate from the "Open Bugs"
+  // KPI tile above, which intentionally still means "any non-Done bug").
+  var closedBugsArr = bugs.filter(function(i){ return i.status === 'Done'; });
+  var inProgressBugsArr = bugs.filter(function(i){ return i.status === 'In Progress'; });
+  var toDoBugsArr = bugs.filter(function(i){ return i.status === 'To Do'; });
+  var closedBugsPct = totalBugs ? Math.round(closedBugsArr.length / totalBugs * 100) : 0;
+  var inProgressBugsPct = totalBugs ? Math.round(inProgressBugsArr.length / totalBugs * 100) : 0;
+  var toDoBugsPct = totalBugs ? Math.round(toDoBugsArr.length / totalBugs * 100) : 0;
   var hasPoints = function(i) { return Number(i.story_points) > 0; };
   Object.assign(window._reportDrillData, {
     ss_total:      { label: 'Total Stories',       issues: issues },
@@ -4200,6 +4208,9 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     ss_blocked:    { label: 'Blocked Stories',     issues: blockedIssuesArr },
     ss_totalbugs:  { label: 'Total Bugs',          issues: bugs },
     ss_openbugs:   { label: 'Open Bugs',           issues: openBugsArr },
+    ss_closedbugs:     { label: 'Closed Bugs',      issues: closedBugsArr },
+    ss_inprogressbugs: { label: 'In Progress Bugs', issues: inProgressBugsArr },
+    ss_todobugs:       { label: 'To Do Bugs',       issues: toDoBugsArr },
     // Points-based tiles only list issues that actually carry story points —
     // matches the point SUM shown on the tile instead of every issue in that
     // status regardless of whether it has points set.
@@ -4400,11 +4411,13 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
     metricChip(SVG.clipboard,'Total Stories', total, '100%', 'ss_total') +
     metricChip(SVG.checkCircle,'Completed Stories', done, donePct2 + '%', 'ss_done') +
-    metricChip(SVG.refresh,'In Progress', inProgress, ipPct2 + '%', 'ss_inprogress') +
+    metricChip(SVG.refresh,'In Progress Stories', inProgress, ipPct2 + '%', 'ss_inprogress') +
     metricChip(SVG.eye,'In Review', inReview, inReviewPct2 + '%', 'ss_inreview') +
     metricChip(SVG.pin,'To Do Stories', toDo, todoPct2 + '%', 'ss_todo') +
     metricChip(SVG.bug,'Total Bugs', totalBugs, '100%', 'ss_totalbugs') +
-    metricChip(SVG.alertCircle,'Open Bugs', openBugs, bugPct + '%', 'ss_openbugs') +
+    metricChip(SVG.checkCircle,'Closed Bugs', closedBugsArr.length, closedBugsPct + '%', 'ss_closedbugs') +
+    metricChip(SVG.refresh,'In Progress Bugs', inProgressBugsArr.length, inProgressBugsPct + '%', 'ss_inprogressbugs') +
+    metricChip(SVG.pin,'To Do Bugs', toDoBugsArr.length, toDoBugsPct + '%', 'ss_todobugs') +
     metricChip(SVG.ban,'Blocked Stories', blocked, blockedPct + '%', 'ss_blocked') +
     '</div></div>' +
 
