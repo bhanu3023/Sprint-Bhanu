@@ -4521,6 +4521,53 @@ function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml)
       '<td style="padding:8px 12px;font-size:11px;color:var(--text3)">' + esc(i.priority||'—') + '</td></tr>';
   }).join('');
   var thStyle = 'padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)';
+
+  // ── Bugs by Developer — assigned count, split into open vs closed ──
+  var devGroups = {};
+  issues.forEach(function(i) {
+    var aid = i.assignee_id || '_unassigned';
+    if (!devGroups[aid]) devGroups[aid] = { assigneeId: i.assignee_id, open: [], closed: [] };
+    (i.status === 'Done' ? devGroups[aid].closed : devGroups[aid].open).push(i);
+  });
+  var devRows = Object.keys(devGroups).map(function(aid) {
+    var g = devGroups[aid];
+    var user = g.assigneeId ? findUser(g.assigneeId) : null;
+    var name = user ? user.name : 'Unassigned';
+    var devTotal = g.open.length + g.closed.length;
+    var safeKey = aid.replace(/[^a-zA-Z0-9_-]/g, '_');
+    Object.assign(window._reportDrillData, {
+      ['bs_dev_' + safeKey + '_open']:   { label: name + ' — Open Bugs',   issues: g.open },
+      ['bs_dev_' + safeKey + '_closed']: { label: name + ' — Closed Bugs', issues: g.closed }
+    });
+    return { name: name, user: user, devTotal: devTotal, openCount: g.open.length, closedCount: g.closed.length, safeKey: safeKey };
+  }).sort(function(a, b) { return b.devTotal - a.devTotal; });
+
+  var maxDevTotal = Math.max.apply(null, devRows.map(function(d) { return d.devTotal; })) || 1;
+  var devChartHtml = devRows.length
+    ? '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:20px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
+      '<div style="font-size:14px;font-weight:700;color:var(--text)">Bugs by Developer</div>' +
+      '<div style="display:flex;gap:14px;font-size:11px;color:var(--text2)">' +
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#dc2626;display:inline-block"></span>Open</span>' +
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#10b981;display:inline-block"></span>Closed</span>' +
+      '</div></div>' +
+      devRows.map(function(d) {
+        var openW = Math.round((d.openCount / maxDevTotal) * 100);
+        var closedW = Math.round((d.closedCount / maxDevTotal) * 100);
+        var avatar = d.user ? avatarHtml(d.user, 26) : '<span class="avatar" style="width:26px;height:26px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#94a3b8;color:#fff;font-weight:700;flex-shrink:0">?</span>';
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+          avatar +
+          '<span style="width:120px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(d.name) + '</span>' +
+          '<div style="flex:1;background:var(--bg3);border-radius:4px;height:18px;overflow:hidden;display:flex">' +
+          (d.openCount ? '<div onclick="window._showReportIssues(\'bs_dev_' + d.safeKey + '_open\')" title="' + esc(d.name) + ' — ' + d.openCount + ' open" style="cursor:pointer;width:' + Math.max(openW, 2) + '%;background:#dc2626"></div>' : '') +
+          (d.closedCount ? '<div onclick="window._showReportIssues(\'bs_dev_' + d.safeKey + '_closed\')" title="' + esc(d.name) + ' — ' + d.closedCount + ' closed" style="cursor:pointer;width:' + Math.max(closedW, 2) + '%;background:#10b981"></div>' : '') +
+          '</div>' +
+          '<span style="width:110px;font-size:11px;color:var(--text3);text-align:right;flex-shrink:0">' + d.devTotal + ' total (' + d.openCount + ' open, ' + d.closedCount + ' closed)</span>' +
+          '</div>';
+      }).join('') +
+      '</div>'
+    : '';
+
   c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
     '<h4 style="margin:0 0 16px">Bug Summary — ' + esc((sprint||{}).name||'Sprint') + '</h4>' +
     '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
@@ -4534,6 +4581,7 @@ function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml)
     '<span>Resolution Rate</span><span style="font-weight:700">' + resolvedPct + '%</span></div>' +
     '<div style="background:var(--bg3);border-radius:8px;height:10px;overflow:hidden;margin-bottom:20px">' +
     '<div style="height:100%;width:' + resolvedPct + '%;background:#10b981;border-radius:8px"></div></div>' +
+    devChartHtml +
     (bugRows ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
       '<thead><tr><th style="' + thStyle + '">Key</th><th style="' + thStyle + '">Title</th><th style="' + thStyle + '">Status</th><th style="' + thStyle + '">Priority</th></tr></thead>' +
       '<tbody>' + bugRows + '</tbody></table></div>' : '<p class="placeholder-text">No bugs in this sprint.</p>') +
