@@ -4623,12 +4623,24 @@ function renderEpicProgressReport(c, sprint, allSprints, sprintSelectorHtml) {
 function renderScopeChangeReport(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
   var sprint = data.sprint || {};
-  var committed = Number(data.committed) || 0;
-  var added = Number(data.added) || 0;
-  var removed = Number(data.removed) || 0;
+  var committedArr = Array.isArray(data.committed) ? data.committed : [];
+  var addedArr = Array.isArray(data.added) ? data.added : [];
+  var removedArr = Array.isArray(data.removed) ? data.removed : [];
+  var committed = committedArr.length;
+  var added = addedArr.length;
+  var removed = removedArr.length;
   var total = committed + added;
-  var kpi = function(label, val, color, desc) {
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:140px;text-align:center">' +
+  Object.assign(window._reportDrillData, {
+    sc_committed: { label: 'Committed at Start', issues: committedArr },
+    sc_added:     { label: 'Added Mid-Sprint',   issues: addedArr },
+    sc_removed:   { label: 'Removed from Sprint', issues: removedArr },
+    sc_total:     { label: 'Current Total',      issues: committedArr.concat(addedArr) }
+  });
+  var kpi = function(label, val, color, desc, key) {
+    var clickable = key
+      ? ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view issues" onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      : '';
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:140px;text-align:center' + (key ? ';cursor:pointer' : '') + '"' + clickable + '>' +
       '<div style="font-size:32px;font-weight:800;color:' + color + '">' + val + '</div>' +
       '<div style="font-size:12px;color:var(--text3);margin-top:4px;font-weight:600">' + label + '</div>' +
       '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + desc + '</div></div>';
@@ -4636,10 +4648,10 @@ function renderScopeChangeReport(c, data, allSprints, sprintSelectorHtml) {
   c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
     '<h4 style="margin:0 0 16px">Scope Change — ' + esc(sprint.name||'Sprint') + '</h4>' +
     '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
-    kpi('Committed at Start', committed, '#0052cc', 'Stories at sprint start') +
-    kpi('Added Mid-Sprint', added, '#f59e0b', 'Added after sprint started') +
-    kpi('Removed', removed, '#dc2626', 'Moved out of sprint') +
-    kpi('Current Total', total, '#10b981', 'Committed + Added') +
+    kpi('Committed at Start', committed, '#0052cc', 'Stories at sprint start', 'sc_committed') +
+    kpi('Added Mid-Sprint', added, '#f59e0b', 'Added after sprint started', 'sc_added') +
+    kpi('Removed', removed, '#dc2626', 'Moved out of sprint', 'sc_removed') +
+    kpi('Current Total', total, '#10b981', 'Committed + Added', 'sc_total') +
     '</div>' +
     (added > 0 || removed > 0
       ? '<div style="background:#f59e0b22;border:1px solid #f59e0b44;border-radius:8px;padding:12px 16px;font-size:13px;color:#92400e">' +

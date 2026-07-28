@@ -1036,7 +1036,7 @@ app.get('/api/reports/scope-change/:sprintId', requireAuth, wrap(async (req, res
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   const current = (await q(
-    'SELECT id, key, title, status, story_points FROM issues WHERE sprint_id=$1 AND deleted_at IS NULL', [sid]
+    'SELECT id, key, title, status, type, priority, assignee_id, story_points FROM issues WHERE sprint_id=$1 AND deleted_at IS NULL', [sid]
   )).rows;
   const addedRows = sprint.start_date ? (await q(
     `SELECT DISTINCT issue_id FROM issue_history
@@ -1047,12 +1047,15 @@ app.get('/api/reports/scope-change/:sprintId', requireAuth, wrap(async (req, res
   const committed = current.filter(i => !addedIds.has(i.id));
   const added = current.filter(i => addedIds.has(i.id));
   const removed = sprint.start_date ? (await q(
-    `SELECT DISTINCT ih.issue_id, i.key, i.title FROM issue_history ih
+    `SELECT DISTINCT ON (i.id) i.id, i.key, i.title, i.status, i.type, i.priority, i.assignee_id, i.story_points
+     FROM issue_history ih
      JOIN issues i ON i.id=ih.issue_id
-     WHERE ih.field_name='sprint_id' AND ih.old_value=$1 AND ih.created_at > $2 AND i.sprint_id!=$1`,
+     WHERE ih.field_name='sprint_id' AND ih.old_value=$1 AND ih.created_at > $2
+       AND (i.sprint_id IS NULL OR i.sprint_id != $1) AND i.deleted_at IS NULL
+     ORDER BY i.id, ih.created_at DESC`,
     [sid, sprint.start_date]
   )).rows : [];
-  res.json({ sprint, committed: committed.length, added: added.length, removed: removed.length });
+  res.json({ sprint, committed, added, removed });
 }));
 
 // Bug summary for a sprint
