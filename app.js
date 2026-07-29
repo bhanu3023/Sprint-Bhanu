@@ -1095,6 +1095,18 @@ async function refreshData() {
   S.data = data;
 }
 
+// refreshData() scopes custom_fields to S.currentSpace like everything else
+// it loads, which is fine normally — but a bulk action that touches every
+// board (apply-to-all / create-for-all) needs the FULL cross-board list
+// afterward, or every other board's cached fields silently go stale/empty
+// until a full page reload.
+async function refreshAllCustomFields() {
+  try {
+    var all = await api('/api/custom-fields');
+    if (Array.isArray(all)) S.data.custom_fields = all;
+  } catch (e) {}
+}
+
 async function refreshAfterIssueChange() {
   await refreshData();
   if (S.currentSpace && S.currentTab) renderTab(S.currentTab);
@@ -5896,6 +5908,7 @@ function renderSettingsCustomFields(space) {
       try {
         var result = await api('/api/custom-fields/' + fieldId + '/apply-to-all', 'POST');
         await refreshData();
+        await refreshAllCustomFields();
         if (result.added > 0) {
           toast('Added "' + fieldName + '" to: ' + result.addedTo.join(', '));
         } else if (result.totalSpaces === 0) {
@@ -6239,6 +6252,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
     } else if (applyAll) {
       var result = await api('/api/custom-fields/create-for-all', 'POST', { name: name, field_type: type, is_required: required, options: options });
       await refreshData();
+      await refreshAllCustomFields();
       closeModal('modal-custom-field');
       if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
         renderSettingsCustomFields(getSpace(S.currentSpace));

@@ -803,7 +803,13 @@ app.patch('/api/attachments/:id', requireAuth, wrap(async (req, res) => {
 
 // ── Custom Fields ─────────────────────────────────────────
 app.get('/api/custom-fields', wrap(async (req, res) => {
-  const r = await q('SELECT * FROM custom_fields WHERE space_id=$1 ORDER BY position', [req.query.space_id]);
+  // With no space_id, return every field across every space — used to
+  // refresh the full client-side cache after a bulk action like
+  // apply-to-all/create-for-all that touches more than just the current space.
+  const sid = req.query.space_id;
+  const r = sid
+    ? await q('SELECT * FROM custom_fields WHERE space_id=$1 ORDER BY position', [sid])
+    : await q('SELECT * FROM custom_fields ORDER BY position');
   res.json(r.rows);
 }));
 
