@@ -817,6 +817,36 @@ app.post('/api/custom-fields', wrap(async (req, res) => {
   res.status(201).json(r.rows[0]);
 }));
 
+// Create a brand-new field definition on every non-archived space at once
+// (for when the field doesn't exist anywhere yet — as opposed to
+// apply-to-all below, which copies one that already exists on some board).
+// Skips any space that already has a field with the same name.
+app.post('/api/custom-fields/create-for-all', requireAuth, wrap(async (req, res) => {
+  const b = req.body;
+  if (!b.name || !b.field_type) return res.status(400).json({ error: 'name and field_type are required' });
+  const opts = b.options != null ? JSON.stringify(Array.isArray(b.options) ? b.options : []) : '[]';
+  const showIn = b.show_in && b.show_in.length ? b.show_in : ['drawer'];
+  const spaces = (await q(
+    'SELECT id, name FROM spaces WHERE (is_archived = false OR is_archived IS NULL) ORDER BY name'
+  )).rows;
+  const addedTo = [];
+  const skipped = [];
+  for (const sp of spaces) {
+    const exists = (await q(
+      'SELECT id FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
+      [sp.id, b.name]
+    )).rows[0];
+    if (exists) { skipped.push(sp.name); continue; }
+    await q(
+      `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position,show_in)
+       VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`,
+      [uid(), sp.id, b.name, b.field_type, opts, b.is_required || false, b.position || 0, showIn]
+    );
+    addedTo.push(sp.name);
+  }
+  res.json({ ok: true, added: addedTo.length, totalSpaces: spaces.length, addedTo, skipped });
+}));
+
 app.put('/api/custom-fields/:id', wrap(async (req, res) => {
   const body = { ...req.body };
   // Fix options jsonb binding same as POST

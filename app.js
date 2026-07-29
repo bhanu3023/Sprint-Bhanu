@@ -6091,6 +6091,10 @@ function openCustomFieldModal(field) {
     $('customFieldRequired').checked = false;
     $('customFieldOptions').value = '';
   }
+  // "Add to all boards" only makes sense when creating a brand-new field
+  var applyAllGroup = $('customFieldApplyAllGroup');
+  if (applyAllGroup) applyAllGroup.hidden = !!field;
+  if ($('customFieldApplyAll')) $('customFieldApplyAll').checked = false;
   toggleCustomFieldOptions();
   openModal('modal-custom-field');
 }
@@ -6214,6 +6218,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
   var name = $('customFieldName').value.trim();
   var type = $('customFieldType').value;
   var required = $('customFieldRequired').checked;
+  var applyAll = $('customFieldApplyAll') && $('customFieldApplyAll').checked;
   var optionsRaw = $('customFieldOptions').value.trim();
   var options = (type === 'select' || type === 'multi_select') && optionsRaw
     ? optionsRaw.split(',').map(function (o) { return o.trim(); }).filter(Boolean)
@@ -6221,19 +6226,36 @@ $('customFieldForm').addEventListener('submit', async function (e) {
 
   if (!name) { toast('Field name is required', 'error'); return; }
 
-  var payload = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options };
   try {
     if (id) {
+      var payload = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options };
       await api('/api/custom-fields/' + id, 'PUT', payload);
+      await refreshData();
+      closeModal('modal-custom-field');
+      if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
+        renderSettingsCustomFields(getSpace(S.currentSpace));
+      }
+      toast('Custom field updated');
+    } else if (applyAll) {
+      var result = await api('/api/custom-fields/create-for-all', 'POST', { name: name, field_type: type, is_required: required, options: options });
+      await refreshData();
+      closeModal('modal-custom-field');
+      if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
+        renderSettingsCustomFields(getSpace(S.currentSpace));
+      }
+      toast(result.added > 0
+        ? 'Added "' + name + '" to: ' + result.addedTo.join(', ')
+        : 'Every board already has a field named "' + name + '"', result.added > 0 ? 'success' : 'warning');
     } else {
-      await api('/api/custom-fields', 'POST', payload);
+      var payload2 = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options };
+      await api('/api/custom-fields', 'POST', payload2);
+      await refreshData();
+      closeModal('modal-custom-field');
+      if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
+        renderSettingsCustomFields(getSpace(S.currentSpace));
+      }
+      toast('Custom field created');
     }
-    await refreshData();
-    closeModal('modal-custom-field');
-    if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
-      renderSettingsCustomFields(getSpace(S.currentSpace));
-    }
-    toast(id ? 'Custom field updated' : 'Custom field created');
   } catch (e) { /* error shown by api() */ }
 });
 
