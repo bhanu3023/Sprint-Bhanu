@@ -832,6 +832,29 @@ app.put('/api/custom-fields/:id', wrap(async (req, res) => {
   res.json(r.rows[0]);
 }));
 
+// Copy a custom field's definition (name/type/options/required) onto every
+// other non-archived space that doesn't already have a field with that name.
+app.post('/api/custom-fields/:id/apply-to-all', requireAuth, wrap(async (req, res) => {
+  const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
+  if (!field) return res.status(404).json({ error: 'Field not found' });
+  const spaces = (await q('SELECT id FROM spaces WHERE is_archived=false AND id != $1', [field.space_id])).rows;
+  let added = 0;
+  for (const sp of spaces) {
+    const exists = (await q(
+      'SELECT id FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
+      [sp.id, field.name]
+    )).rows[0];
+    if (exists) continue;
+    await q(
+      `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position)
+       VALUES($1,$2,$3,$4,$5::jsonb,$6,$7)`,
+      [uid(), sp.id, field.name, field.field_type, JSON.stringify(field.options || []), field.is_required, field.position || 0]
+    );
+    added++;
+  }
+  res.json({ ok: true, added, totalSpaces: spaces.length });
+}));
+
 // Upsert a single custom field value for an issue
 app.put('/api/issues/:id/field-values/:fieldId', requireAuth, wrap(async (req, res) => {
   const { id: issueId, fieldId } = req.params;

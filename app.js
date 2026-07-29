@@ -5839,6 +5839,7 @@ function renderSettingsCustomFields(space) {
       '<td class="text-muted text-sm">' + esc(options) + '</td>' +
       '<td>' +
         '<button class="btn btn-outline btn-sm cf-edit-btn" data-field-id="' + f.id + '">Edit</button> ' +
+        '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ' +
         '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '">Delete</button>' +
       '</td>' +
       '</tr>';
@@ -5849,7 +5850,7 @@ function renderSettingsCustomFields(space) {
     '<button class="btn btn-primary btn-sm" id="addCustomFieldBtnSettings">+ Add Field</button>' +
     '</div>' +
     '<div class="table-container"><table class="data-table" style="width:100%"><thead><tr>' +
-    '<th>Name</th><th>Type</th><th>Required</th><th>Options</th><th style="width:140px">Actions</th>' +
+    '<th>Name</th><th>Type</th><th>Required</th><th>Options</th><th style="width:280px">Actions</th>' +
     '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:24px">No custom fields yet</td></tr>') + '</tbody></table></div>';
 
   $('settingsTabContent').innerHTML = html;
@@ -5879,6 +5880,31 @@ function renderSettingsCustomFields(space) {
         renderSettingsCustomFields(getSpace(S.currentSpace));
         toast('Custom field deleted');
       } catch (e) { /* error shown by api() */ }
+    });
+  });
+
+  // Apply-to-all-boards buttons
+  qsa('.cf-apply-all-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      var fieldId = btn.dataset.fieldId;
+      var fieldName = btn.dataset.fieldName;
+      var ok = await confirmDialog('Add "' + fieldName + '" to every other board that doesn\'t already have a field with this name?');
+      if (!ok) return;
+      btn.disabled = true;
+      var origText = btn.textContent;
+      btn.textContent = 'Applying…';
+      try {
+        var result = await api('/api/custom-fields/' + fieldId + '/apply-to-all', 'POST');
+        await refreshData();
+        toast(result.added > 0
+          ? 'Added "' + fieldName + '" to ' + result.added + ' other board' + (result.added === 1 ? '' : 's')
+          : 'Every other board already has a field named "' + fieldName + '"');
+      } catch (e) {
+        /* error shown by api() */
+      } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+      }
     });
   });
 }
