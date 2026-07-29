@@ -5896,9 +5896,13 @@ function renderSettingsCustomFields(space) {
       try {
         var result = await api('/api/custom-fields/' + fieldId + '/apply-to-all', 'POST');
         await refreshData();
-        toast(result.added > 0
-          ? 'Added "' + fieldName + '" to ' + result.added + ' other board' + (result.added === 1 ? '' : 's')
-          : 'Every other board already has a field named "' + fieldName + '"');
+        if (result.added > 0) {
+          toast('Added "' + fieldName + '" to: ' + result.addedTo.join(', '));
+        } else if (result.totalSpaces === 0) {
+          toast('No other boards exist to add "' + fieldName + '" to', 'warning');
+        } else {
+          toast('Every other board already has a field named "' + fieldName + '" (' + result.skipped.join(', ') + ')', 'warning');
+        }
       } catch (e) {
         /* error shown by api() */
       } finally {

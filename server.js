@@ -832,27 +832,35 @@ app.put('/api/custom-fields/:id', wrap(async (req, res) => {
   res.json(r.rows[0]);
 }));
 
-// Copy a custom field's definition (name/type/options/required) onto every
-// other non-archived space that doesn't already have a field with that name.
+// Copy a custom field's definition (name/type/options/required/show_in) onto
+// every other non-archived space that doesn't already have a field with that
+// name. Returns which boards it was actually added to and which were
+// skipped (and why) so the UI can show something more useful than a count.
 app.post('/api/custom-fields/:id/apply-to-all', requireAuth, wrap(async (req, res) => {
   const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
   if (!field) return res.status(404).json({ error: 'Field not found' });
-  const spaces = (await q('SELECT id FROM spaces WHERE is_archived=false AND id != $1', [field.space_id])).rows;
-  let added = 0;
+  // is_archived defaults to false, but treat NULL the same way defensively
+  // in case any space row predates that default being applied.
+  const spaces = (await q(
+    'SELECT id, name FROM spaces WHERE (is_archived = false OR is_archived IS NULL) AND id != $1 ORDER BY name',
+    [field.space_id]
+  )).rows;
+  const addedTo = [];
+  const skipped = [];
   for (const sp of spaces) {
     const exists = (await q(
       'SELECT id FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
       [sp.id, field.name]
     )).rows[0];
-    if (exists) continue;
+    if (exists) { skipped.push(sp.name); continue; }
     await q(
-      `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position)
-       VALUES($1,$2,$3,$4,$5::jsonb,$6,$7)`,
-      [uid(), sp.id, field.name, field.field_type, JSON.stringify(field.options || []), field.is_required, field.position || 0]
+      `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position,show_in)
+       VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`,
+      [uid(), sp.id, field.name, field.field_type, JSON.stringify(field.options || []), field.is_required, field.position || 0, field.show_in || ['drawer']]
     );
-    added++;
+    addedTo.push(sp.name);
   }
-  res.json({ ok: true, added, totalSpaces: spaces.length });
+  res.json({ ok: true, added: addedTo.length, totalSpaces: spaces.length, addedTo, skipped });
 }));
 
 // Upsert a single custom field value for an issue
