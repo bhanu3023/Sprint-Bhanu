@@ -7751,6 +7751,16 @@ window.deleteAttachment = async function(id) {
   } catch(e) {}
 };
 
+// Close any open custom-field select dropdown when clicking outside it.
+// Bound once at script load (not inside renderDrawerCustomFields, which can
+// re-run many times per drawer session via live-sync) — previously this was
+// added fresh on every render, stacking a new document-level listener each
+// time and leaking a growing pile of stale closures over a session.
+document.addEventListener('click', function(e) {
+  if (e.target.closest('.cf-select-wrap')) return;
+  qsa('.cf-select-dropdown').forEach(function(d) { d.style.display = 'none'; });
+});
+
 async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   var c = $('drawerCustomFields');
   if (!c) return;
@@ -7813,7 +7823,10 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
           '<div class="cf-sel-list">' +
           mopts.map(function(o) {
             var sel = selected.indexOf(o) >= 0;
-            return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + esc(o) + '">' + esc(o) + '</div>';
+            var checkboxHtml = isMultiSel
+              ? '<input type="checkbox" class="cf-sel-opt-checkbox" style="pointer-events:none;margin-right:8px" tabindex="-1"' + (sel ? ' checked' : '') + '>'
+              : '';
+            return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + esc(o) + '">' + checkboxHtml + esc(o) + '</div>';
           }).join('') +
           '</div>' +
         '</div>' +
@@ -7859,10 +7872,6 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
           var c = document.createElement('span');
           c.className = 'cf-sel-clear'; c.title = 'Clear'; c.textContent = '×';
           trigger.insertBefore(c, trigger.querySelector('.cf-sel-arrow'));
-          c.addEventListener('click', function(ev) {
-            ev.stopPropagation();
-            selArr = []; refreshTrigger(); refreshOpts(''); saveValue('');
-          });
         } else if (!selArr.length && clearBtn) {
           clearBtn.remove();
         }
@@ -7871,16 +7880,29 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
       function refreshOpts(filter) {
         el.querySelectorAll('.cf-sel-opt').forEach(function(opt) {
           var v = opt.dataset.val;
-          opt.classList.toggle('cf-sel-opt-active', selArr.indexOf(v) >= 0);
+          var active = selArr.indexOf(v) >= 0;
+          opt.classList.toggle('cf-sel-opt-active', active);
+          var cb = opt.querySelector('.cf-sel-opt-checkbox');
+          if (cb) cb.checked = active;
           opt.style.display = filter && v.toLowerCase().indexOf(filter.toLowerCase()) < 0 ? 'none' : '';
         });
       }
 
-      // Open/close dropdown
+      // Single delegated handler on the trigger for both the "×" clear button
+      // and opening/closing the dropdown. Delegated (checked by ev.target)
+      // instead of binding the clear button its own listener at creation time
+      // — the clear button can also come from the initial static markup (a
+      // field that already had a saved value when the drawer opened), and
+      // that one was never getting a listener attached at all, so clearing a
+      // field that already had a value silently did nothing the first time.
       trigger.addEventListener('click', function(ev) {
         ev.stopPropagation();
+        if (ev.target.classList.contains('cf-sel-clear')) {
+          selArr = []; refreshTrigger(); refreshOpts(''); saveValue('');
+          return;
+        }
         var isOpen = dropdown.style.display !== 'none';
-        document.querySelectorAll('.cf-select-dropdown').forEach(function(d){ d.style.display = 'none'; });
+        qsa('.cf-select-dropdown').forEach(function(d){ d.style.display = 'none'; });
         if (!isOpen) {
           dropdown.style.display = 'block';
           if (filterInput) { filterInput.value = ''; refreshOpts(''); filterInput.focus(); }
@@ -7893,7 +7915,7 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
         filterInput.addEventListener('click', function(ev) { ev.stopPropagation(); });
       }
 
-      // Option click
+      // Option click — toggles for multi-select, replaces for single-select
       el.querySelectorAll('.cf-sel-opt').forEach(function(opt) {
         opt.addEventListener('click', function(ev) {
           ev.stopPropagation();
@@ -7909,9 +7931,6 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
           saveValue(selArr.join(','));
         });
       });
-
-      // Close on outside click
-      document.addEventListener('click', function() { dropdown.style.display = 'none'; });
 
     } else if (el.type === 'checkbox') {
       el.addEventListener('change', function() { saveValue(el.checked ? 'true' : 'false'); });
