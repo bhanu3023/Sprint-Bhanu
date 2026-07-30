@@ -1885,6 +1885,32 @@ app.post('/api/admin/sync-db', async (req, res) => {
       await pool.query(`ALTER TABLE issues ADD CONSTRAINT issues_status_check CHECK (status IN ('To Do','In Progress','In Review','Done','Blocked'))`);
     } catch(e) { console.error('Migration warning (issues status):', e.message); }
 
+    // Migration: ensure the "Combination" custom field exists on the
+    // Product_Team board. This creates it automatically on startup instead
+    // of requiring someone to click through Settings > Custom Fields —
+    // safe to run on every restart since it checks for an existing field
+    // with this name first.
+    try {
+      const combSpaces = await q(
+        "SELECT id FROM spaces WHERE name=$1 AND (is_archived=false OR is_archived IS NULL)",
+        ['Product_Team']
+      );
+      for (const sp of combSpaces.rows) {
+        const combExists = await q(
+          'SELECT id FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
+          [sp.id, 'Combination']
+        );
+        if (!combExists.rows.length) {
+          await q(
+            `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position,show_in)
+             VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`,
+            [uid(), sp.id, 'Combination', 'select', JSON.stringify(['Content', 'Message', 'Content + Message']), false, 0, ['drawer']]
+          );
+          console.log('✅ Created "Combination" custom field on Product_Team (space ' + sp.id + ')');
+        }
+      }
+    } catch(e) { console.error('Migration warning (Combination field):', e.message); }
+
     // Migration: create issue_history table
     try {
       await pool.query(`CREATE TABLE IF NOT EXISTS issue_history (
