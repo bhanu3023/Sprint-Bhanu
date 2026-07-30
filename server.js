@@ -1886,12 +1886,13 @@ app.post('/api/admin/sync-db', async (req, res) => {
     } catch(e) { console.error('Migration warning (issues status):', e.message); }
 
     // Migration: ensure the "Combination" custom field exists on the
-    // Product_Team board with the real source->destination options. This
-    // creates it automatically on startup instead of requiring someone to
-    // click through Settings > Custom Fields — safe to run on every restart.
-    // If the field already has the earlier placeholder guess
-    // (Content/Message/Content + Message), it's corrected to the real list
-    // once; any other existing options (e.g. a manual edit) are left alone.
+    // Product_Team board as a multi-select with the real source->destination
+    // options. Creates it automatically on startup instead of requiring
+    // someone to click through Settings > Custom Fields — safe to run on
+    // every restart. Self-corrects two earlier mistakes exactly once each:
+    // the original placeholder options, and field_type being a single
+    // 'select' instead of 'multi_select'. Any other existing options (e.g.
+    // a manual edit) are left alone.
     try {
       const COMBINATION_OPTIONS = [
         'My Drive to MyDrive', 'DropBox to MyDrive', 'Egnte to MyDrive', 'OneDrive to MyDrive', 'Box to MyDrive', 'ShareFile to MyDrive',
@@ -1906,19 +1907,27 @@ app.post('/api/admin/sync-db', async (req, res) => {
       );
       for (const sp of combSpaces.rows) {
         const combField = (await q(
-          'SELECT id, options FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
+          'SELECT id, options, field_type FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
           [sp.id, 'Combination']
         )).rows[0];
         if (!combField) {
           await q(
             `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position,show_in)
              VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`,
-            [uid(), sp.id, 'Combination', 'select', JSON.stringify(COMBINATION_OPTIONS), false, 0, ['drawer']]
+            [uid(), sp.id, 'Combination', 'multi_select', JSON.stringify(COMBINATION_OPTIONS), false, 0, ['drawer']]
           );
-          console.log('✅ Created "Combination" custom field on Product_Team (space ' + sp.id + ')');
-        } else if (JSON.stringify(combField.options) === OLD_PLACEHOLDER_OPTIONS) {
-          await q('UPDATE custom_fields SET options=$2::jsonb WHERE id=$1', [combField.id, JSON.stringify(COMBINATION_OPTIONS)]);
-          console.log('✅ Corrected "Combination" field options on Product_Team (space ' + sp.id + ') to the real source→destination list');
+          console.log('✅ Created "Combination" multi-select custom field on Product_Team (space ' + sp.id + ')');
+        } else {
+          const newOptions = JSON.stringify(combField.options) === OLD_PLACEHOLDER_OPTIONS ? COMBINATION_OPTIONS : combField.options;
+          const newType = combField.field_type === 'select' ? 'multi_select' : combField.field_type;
+          const optionsChanged = newOptions !== combField.options;
+          const typeChanged = newType !== combField.field_type;
+          if (optionsChanged || typeChanged) {
+            await q('UPDATE custom_fields SET options=$2::jsonb, field_type=$3 WHERE id=$1',
+              [combField.id, JSON.stringify(newOptions), newType]);
+            console.log('✅ Updated "Combination" field on Product_Team (space ' + sp.id + '):' +
+              (optionsChanged ? ' options corrected' : '') + (typeChanged ? ' converted to multi_select' : ''));
+          }
         }
       }
     } catch(e) { console.error('Migration warning (Combination field):', e.message); }
