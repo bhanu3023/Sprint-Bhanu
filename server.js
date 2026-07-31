@@ -1042,18 +1042,45 @@ app.get('/api/reports/burndown/:sprintId', requireAuth, wrap(async (req, res) =>
       )).rows
     : [];
 
+  // Project the x-axis across the FULL sprint (start → end date), not just
+  // days elapsed so far — otherwise the ideal line's slope gets divided
+  // across only the elapsed days instead of the real sprint length, making
+  // it plunge to zero within the first few days of a still-active sprint.
+  // Days beyond "today" have no actual data yet, so remaining/remainingPts
+  // stay null for them — the chart draws the actual line only up to today
+  // and leaves the ideal line spanning the whole range.
+  // All arithmetic here uses UTC getters/setters (not local-time
+  // getDate/setHours) so the "is this day in the future" check can't drift
+  // by a day relative to the toISOString() UTC date label depending on the
+  // server's timezone.
   const start = new Date(sprint.start_date);
-  const end = new Date(Math.min(new Date(sprint.end_date), Date.now()));
+  const end = sprint.end_date ? new Date(sprint.end_date) : new Date(Math.min(new Date(sprint.end_date), Date.now()));
+  const now = new Date();
+  const todayDateMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const series = [];
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dayEnd = new Date(d); dayEnd.setHours(23,59,59,999);
-    const doneRows = hist.filter(h => new Date(h.done_at) <= dayEnd);
-    const doneCnt = doneRows.length;
-    const donePts = doneRows.reduce((s, h) => {
-      const iss = issues.find(i => i.id === h.issue_id);
-      return s + (iss ? (iss.points || 0) : 0);
-    }, 0);
-    series.push({ date: d.toISOString().slice(0,10), remaining: total - doneCnt, remainingPts: totalPts - donePts });
+  for (
+    let d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+    d <= end;
+    d = new Date(d.getTime() + 86400000)
+  ) {
+    const dayDateMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    const dayEndMs = dayDateMs + 86399999; // 23:59:59.999 that day, for done_at comparisons below
+    // Compare calendar dates, not "day-end timestamp vs right now" — today's
+    // 23:59:59 hasn't happened yet either, so that comparison would wrongly
+    // mark today itself as a future day with no data.
+    const isFuture = dayDateMs > todayDateMs;
+    let remaining = null, remainingPts = null;
+    if (!isFuture) {
+      const doneRows = hist.filter(h => new Date(h.done_at).getTime() <= dayEndMs);
+      const doneCnt = doneRows.length;
+      const donePts = doneRows.reduce((s, h) => {
+        const iss = issues.find(i => i.id === h.issue_id);
+        return s + (iss ? (iss.points || 0) : 0);
+      }, 0);
+      remaining = total - doneCnt;
+      remainingPts = totalPts - donePts;
+    }
+    series.push({ date: d.toISOString().slice(0,10), remaining, remainingPts, future: isFuture });
   }
   res.json({ sprint, total, totalPts, series });
 }));

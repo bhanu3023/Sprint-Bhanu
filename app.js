@@ -4031,27 +4031,39 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
       xLabels += '<text x="' + x2.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="var(--text3)">' + dlbl + '</text>';
     }
 
-    // Polylines
+    // Polylines — a line's fn() may return null/undefined for days that
+    // don't have actual data yet (future days in an active sprint); those
+    // points are skipped so the actual-progress line stops at today while
+    // the x-axis/ideal line still spans the whole sprint.
     var polylines = lines.map(function(line) {
-      var pts = series.map(function(s, i3) {
-        return xp(i3).toFixed(1) + ',' + yp(line.fn(s, i3)).toFixed(1);
-      }).join(' ');
+      var pts = [];
+      for (var i3 = 0; i3 < n; i3++) {
+        var v3 = line.fn(series[i3], i3);
+        if (v3 === null || v3 === undefined) continue;
+        pts.push(xp(i3).toFixed(1) + ',' + yp(v3).toFixed(1));
+      }
+      if (pts.length < 2) return '';
       var dashAttr = line.dash ? ' stroke-dasharray="' + line.dash + '"' : '';
-      return '<polyline points="' + pts + '" fill="none" stroke="' + line.color + '" stroke-width="' + (line.width || 2.5) + '"' + dashAttr + ' stroke-linejoin="round" stroke-linecap="round"/>';
+      return '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + line.color + '" stroke-width="' + (line.width || 2.5) + '"' + dashAttr + ' stroke-linejoin="round" stroke-linecap="round"/>';
     }).join('');
 
     // Dots on actual lines — each shows its value permanently (not just on
     // hover), plus a native tooltip with date/label for extra context.
+    // Skipped for days with no actual value yet (see polylines note above).
     var dots = lines.filter(function(l) { return !l.dash; }).map(function(line) {
-      return series.map(function(s, i4) {
+      var out = '';
+      for (var i4 = 0; i4 < n; i4++) {
+        var s = series[i4];
         var val = line.fn(s, i4);
+        if (val === null || val === undefined) continue;
         var cx = xp(i4).toFixed(1), cy = yp(val).toFixed(1);
         var labelY = (parseFloat(cy) - 10).toFixed(1);
         var tip = esc(line.label) + ' — ' + esc(s.date || '') + ': ' + val + ' ' + esc(yLabel);
-        return '<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="transparent" style="cursor:pointer"><title>' + tip + '</title></circle>' +
+        out += '<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="transparent" style="cursor:pointer"><title>' + tip + '</title></circle>' +
           '<circle cx="' + cx + '" cy="' + cy + '" r="3" fill="' + line.color + '" stroke="var(--bg2)" stroke-width="1.5" style="pointer-events:none"/>' +
           '<text x="' + cx + '" y="' + labelY + '" text-anchor="middle" font-size="10" font-weight="700" fill="' + line.color + '" stroke="var(--bg2)" stroke-width="3" paint-order="stroke" style="pointer-events:none">' + val + '</text>';
-      }).join('');
+      }
+      return out;
     }).join('');
 
     return '<div style="overflow-x:auto"><svg width="' + W + '" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:100%">' +
@@ -4074,9 +4086,14 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   }
 
   // ── KPI tiles ────────────────────────────────────────────────
-  var ptsDone = series.length ? totalPts - (series[series.length - 1].remainingPts || 0) : 0;
-  var ptsLeft = series.length ? (series[series.length - 1].remainingPts || 0) : totalPts;
-  var issuesDone = series.length ? total - (series[series.length - 1].remaining || 0) : 0;
+  // series now spans the whole sprint, so the last entry may be a future
+  // day with no actual data yet — use the last entry that has data instead
+  // of the literal last array element.
+  var actualSeries = series.filter(function(s) { return !s.future; });
+  var lastActual = actualSeries.length ? actualSeries[actualSeries.length - 1] : null;
+  var ptsDone = lastActual ? totalPts - (lastActual.remainingPts || 0) : 0;
+  var ptsLeft = lastActual ? (lastActual.remainingPts || 0) : totalPts;
+  var issuesDone = lastActual ? total - (lastActual.remaining || 0) : 0;
   var pct = total ? Math.round((issuesDone / total) * 100) : 0;
   var startStr = sprint.start_date ? fmtDateShort(sprint.start_date) : '—';
   var endStr = sprint.end_date ? fmtDateShort(sprint.end_date) : '—';
@@ -4124,22 +4141,27 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   var burndownChart = lineChart([
     { label: 'Ideal', color: '#94a3b8', dash: '6,4', width: 2,
       fn: function(s, i) { return Math.max(0, totalPts - idealStepPts * i); } },
+    // remainingPts is null for days beyond today (no actual data yet) —
+    // must NOT fall back to 0 here, or the line would falsely plunge to
+    // zero on day 1 of an active sprint instead of just stopping.
     { label: 'Actual Remaining', color: '#dc2626', width: 2.5,
-      fn: function(s) { return s.remainingPts || 0; } }
+      fn: function(s) { return s.remainingPts == null ? null : s.remainingPts; } }
   ], totalPts || 1, 'Burndown', 'Story Points');
 
   var burnupChart = lineChart([
     { label: 'Scope', color: '#94a3b8', dash: '6,4', width: 2,
       fn: function() { return totalPts; } },
     { label: 'Completed', color: '#10b981', width: 2.5,
-      fn: function(s) { return totalPts - (s.remainingPts || 0); } }
+      fn: function(s) { return s.remainingPts == null ? null : totalPts - s.remainingPts; } }
   ], totalPts || 1, 'Burnup', 'Story Points');
 
   // Days elapsed vs total sprint length, for "how many days have we worked" at a glance
   var totalSprintDays = (sprint.start_date && sprint.end_date)
     ? Math.round((new Date(sprint.end_date) - new Date(sprint.start_date)) / 86400000) + 1
     : null;
-  var daysElapsed = series.length;
+  // series now spans the whole sprint (including future days with no
+  // actual data yet), so "elapsed" must count only days that have data.
+  var daysElapsed = series.filter(function(s) { return !s.future; }).length;
   var daysProgressHtml = totalSprintDays
     ? '<div style="font-size:11px;color:#93c5fd">🗓️ Day ' + daysElapsed + ' of ' + totalSprintDays + '</div>'
     : '';
