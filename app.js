@@ -4762,6 +4762,60 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
   var PCOLORS = {highest:'#dc2626',high:'#ef4444',medium:'#f59e0b',low:'#3b82f6',lowest:'#6b7280'};
   var SCOLORS = {'To Do':'#42526e','In Progress':'#0052cc','In Review':'#ff991f','Blocked':'#dc2626'};
 
+  // Donut SVG helper (same pattern as Sprint Summary's Story Status donut)
+  function donutSvg(segments, cx, cy, r, label, sublabel) {
+    var circ = 2 * Math.PI * r;
+    var offset = circ * 0.25;
+    var arcs = '';
+    var cur = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var len = seg.pct / 100 * circ;
+      if (len > 0) {
+        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + seg.color + '" stroke-width="14"' +
+          ' stroke-dasharray="' + len.toFixed(2) + ' ' + (circ - len).toFixed(2) + '"' +
+          ' stroke-dashoffset="' + (offset - cur).toFixed(2) + '" stroke-linecap="butt"/>';
+        cur += len;
+      }
+    }
+    return '<svg width="' + (cx*2) + '" height="' + (cy*2) + '" viewBox="0 0 ' + (cx*2) + ' ' + (cy*2) + '">' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--bg3)" stroke-width="14"/>' +
+      arcs +
+      '<text x="' + cx + '" y="' + (cy-6) + '" text-anchor="middle" font-size="20" font-weight="800" fill="var(--text)">' + label + '</text>' +
+      '<text x="' + cx + '" y="' + (cy+14) + '" text-anchor="middle" font-size="10" fill="var(--text3)">' + sublabel + '</text>' +
+      '</svg>';
+  }
+
+  // ── Spillover by Status donut ──
+  var statusOrder = ['To Do', 'In Progress', 'In Review', 'Blocked'];
+  var statusCounts = statusOrder.map(function(s) {
+    return { status: s, n: issues.filter(function(i){ return i.status === s; }).length };
+  }).filter(function(sc){ return sc.n > 0; });
+  var statusDonutHtml = '';
+  if (count > 0 && statusCounts.length) {
+    var donutSegs = statusCounts.map(function(sc) {
+      return { pct: Math.round(sc.n / count * 100), color: SCOLORS[sc.status] || '#6b7280' };
+    });
+    var donut = donutSvg(donutSegs, 70, 70, 54, count, 'Spilled');
+    var legend = statusCounts.map(function(sc) {
+      var safeKey = sc.status.replace(/[^a-zA-Z0-9_-]/g, '_');
+      window._reportDrillData['sp_status_' + safeKey] = { label: sc.status + ' — Spillover', issues: issues.filter(function(i){ return i.status === sc.status; }) };
+      var pct = Math.round(sc.n / count * 100);
+      return '<div onclick="window._showReportIssues(\'sp_status_' + safeKey + '\')" title="Click to view issues" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer">' +
+        '<span style="width:10px;height:10px;border-radius:2px;background:' + (SCOLORS[sc.status] || '#6b7280') + ';flex-shrink:0"></span>' +
+        '<span style="font-size:12px;color:var(--text2);flex:1">' + esc(sc.status) + '</span>' +
+        '<span style="font-size:12px;font-weight:700;color:var(--text)">' + sc.n + '</span>' +
+        '<span style="font-size:11px;color:var(--text3);width:34px;text-align:right">' + pct + '%</span>' +
+        '</div>';
+    }).join('');
+    statusDonutHtml = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;flex:1;min-width:260px">' +
+      '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:14px">Spillover by Status</div>' +
+      '<div style="display:flex;align-items:center;gap:20px">' +
+      '<div style="flex-shrink:0">' + donut + '</div>' +
+      '<div style="flex:1;min-width:0">' + legend + '</div>' +
+      '</div></div>';
+  }
+
   var thStyle = 'padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)';
   var tableRows = issues.map(function(i) {
     var sc = SCOLORS[i.status] || '#42526e';
@@ -4798,7 +4852,7 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
   }).sort(function(a, b) { return b.count - a.count; });
   var maxDevCount = Math.max.apply(null, devRows.map(function(d) { return d.count; })) || 1;
   var devChartHtml = devRows.length
-    ? '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:20px">' +
+    ? '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;flex:1;min-width:260px">' +
       '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:14px">Spillover by Developer</div>' +
       devRows.map(function(d) {
         var w = Math.round((d.count / maxDevCount) * 100);
@@ -4825,7 +4879,9 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
     kpi('Stories', stories, '#0052cc', 'User stories spilled', 'sp_stories') +
     kpi('Tasks / Bugs', tasks + bugs, '#7c3aed', 'Tasks & bugs spilled', 'sp_tasksbugs') +
     '</div>' +
-    devChartHtml +
+    (statusDonutHtml || devChartHtml
+      ? '<div style="display:flex;gap:20px;margin-bottom:20px;flex-wrap:wrap">' + statusDonutHtml + devChartHtml + '</div>'
+      : '') +
     (issues.length
       ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
         '<thead><tr>' +

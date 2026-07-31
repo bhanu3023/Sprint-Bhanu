@@ -317,10 +317,18 @@ app.post('/api/sprints/:id/complete', wrap(async (req, res) => {
     "SELECT id FROM issues WHERE sprint_id=$1 AND status!='Done' AND deleted_at IS NULL", [sid]
   )).rows;
   await q("UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1 AND status!='Done'", [sid]);
-  // Record sprint_id change in history so spillover report can query it
+  // Record this as a distinct 'spillover' history entry (not 'sprint_id') so
+  // it can't be confused with a manual mid-sprint removal — PUT /api/issues/:id
+  // already logs field_name='sprint_id' for ANY sprint change (drag to
+  // backlog, editing the Sprint dropdown, etc.), and both the Spillover and
+  // Scope Change reports read issue_history by field_name. Without a
+  // separate marker, a sprint's genuine end-of-sprint spillover and any
+  // manual backlog move made earlier in that same sprint were
+  // indistinguishable, so manually-removed tickets were showing up as
+  // "spillover" instead of under Scope Change's "Removed".
   for (const issue of spilloverIssues) {
     q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-       VALUES($1,$2,$3,'sprint_id',$4,NULL)`,
+       VALUES($1,$2,$3,'spillover',$4,NULL)`,
       [uid(), issue.id, req.user ? req.user.id : null, sid]).catch(() => {});
   }
   const r = await q('SELECT * FROM sprints WHERE id=$1', [sid]);
@@ -1147,14 +1155,18 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
 
   let spillover = [];
   if (sprint.status === 'completed') {
-    // Approach 1: issues explicitly recorded in history as moved out (old_value=sprint → NULL)
+    // Approach 1: issues explicitly recorded in history as spilled out by
+    // Complete Sprint (field_name='spillover', distinct from the generic
+    // 'sprint_id' entries that PUT /api/issues/:id writes for manual moves
+    // to backlog — this keeps genuine end-of-sprint spillover from being
+    // confused with tickets a user dragged to backlog mid-sprint).
     // This works for sprints completed after the fix was deployed.
     const fromHistory = (await q(`
       SELECT DISTINCT ON (i.id) i.id, i.key, i.title, i.status, i.priority, i.type,
         i.story_points, i.assignee_id, ih.created_at AS spilled_at
       FROM issue_history ih
       JOIN issues i ON i.id = ih.issue_id
-      WHERE ih.field_name = 'sprint_id'
+      WHERE ih.field_name = 'spillover'
         AND ih.old_value = $1
         AND (ih.new_value IS NULL OR ih.new_value = '' OR ih.new_value = 'null')
         AND i.deleted_at IS NULL
