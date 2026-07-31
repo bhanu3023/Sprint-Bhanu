@@ -1042,6 +1042,25 @@ app.get('/api/reports/burndown/:sprintId', requireAuth, wrap(async (req, res) =>
       )).rows
     : [];
 
+  // When was each currently-in-sprint issue actually added to THIS sprint?
+  // Used to build a "Total Scope" line that steps up on the day points were
+  // genuinely added, instead of silently back-applying today's total to
+  // every past day with no visible indication a scope change happened.
+  // Issues with no such history entry have been in the sprint since before
+  // tracking began (e.g. present at sprint creation) — treat them as joined
+  // on day one.
+  const joinRows = issues.length
+    ? (await q(
+        `SELECT DISTINCT ON (issue_id) issue_id, created_at AS joined_at
+         FROM issue_history
+         WHERE field_name='sprint_id' AND new_value=$1 AND issue_id = ANY($2)
+         ORDER BY issue_id, created_at DESC`,
+        [sprint.id, issues.map(i => i.id)]
+      )).rows
+    : [];
+  const joinedAtMs = {};
+  joinRows.forEach(r => { joinedAtMs[r.issue_id] = new Date(r.joined_at).getTime(); });
+
   // Project the x-axis across the FULL sprint (start → end date), not just
   // days elapsed so far — otherwise the ideal line's slope gets divided
   // across only the elapsed days instead of the real sprint length, making
@@ -1069,6 +1088,14 @@ app.get('/api/reports/burndown/:sprintId', requireAuth, wrap(async (req, res) =>
     // 23:59:59 hasn't happened yet either, so that comparison would wrongly
     // mark today itself as a future day with no data.
     const isFuture = dayDateMs > todayDateMs;
+    // Points contributed by issues that had actually joined the sprint by
+    // this day — steps up on the day a ticket/point was really added,
+    // instead of counting it from day one.
+    const scopePts = issues.reduce((s, iss) => {
+      const joinedAt = joinedAtMs[iss.id];
+      if (joinedAt != null && joinedAt > dayEndMs) return s;
+      return s + (iss.points || 0);
+    }, 0);
     let remaining = null, remainingPts = null;
     if (!isFuture) {
       const doneRows = hist.filter(h => new Date(h.done_at).getTime() <= dayEndMs);
@@ -1080,7 +1107,7 @@ app.get('/api/reports/burndown/:sprintId', requireAuth, wrap(async (req, res) =>
       remaining = total - doneCnt;
       remainingPts = totalPts - donePts;
     }
-    series.push({ date: d.toISOString().slice(0,10), remaining, remainingPts, future: isFuture });
+    series.push({ date: d.toISOString().slice(0,10), remaining, remainingPts, scopePts, future: isFuture });
   }
   res.json({ sprint, total, totalPts, series });
 }));
