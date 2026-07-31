@@ -8211,11 +8211,17 @@ async function handleIssueSubmit(e) {
     var created = await api('/api/issues', 'POST', payload);
     // Save custom field values
     if (created && created.id) {
-      // Save dynamic custom fields
+      // Save dynamic custom fields. A native <select multiple> element's
+      // own .value only ever returns the FIRST selected option — reading
+      // selectedOptions is required to capture every value chosen, matching
+      // the comma-joined format the rest of the app already stores/parses.
       var cfFields = document.querySelectorAll('#issueCustomFieldsContainer .cf-field');
       cfFields.forEach(function(f) {
-        if (f.value && f.dataset.cfId) {
-          api('/api/issues/' + created.id + '/field-values/' + f.dataset.cfId, 'PUT', { value: f.value }).catch(function(){});
+        var v = (f.tagName === 'SELECT' && f.multiple)
+          ? Array.from(f.selectedOptions).map(function(o) { return o.value; }).join(',')
+          : f.value;
+        if (v && f.dataset.cfId) {
+          api('/api/issues/' + created.id + '/field-values/' + f.dataset.cfId, 'PUT', { value: v }).catch(function(){});
         }
       });
       // team and product_type are saved directly via payload
@@ -8581,7 +8587,7 @@ document.addEventListener('DOMContentLoaded', function () {
             '<option value="">— Select —</option>' +
             opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
             '</select></div>';
-        } else if (f.field_type === 'multiselect') {
+        } else if (f.field_type === 'multi_select') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
             '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" data-multi="1" multiple style="min-height:80px">' +
