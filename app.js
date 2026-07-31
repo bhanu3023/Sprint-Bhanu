@@ -4138,27 +4138,24 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
   var idealStepPts = series.length > 1 ? totalPts / (series.length - 1) : 0;
   var idealStepIss = series.length > 1 ? total / (series.length - 1) : 0;
 
-  // Whether scope actually changed mid-sprint — scopePts steps up/down on the
-  // day tickets/points were really added/removed, instead of a flat total.
-  var scopeChanged = series.some(function(s) { return s.scopePts != null && s.scopePts !== totalPts; });
-
+  // totalPts is read fresh from the API on every load, so editing any
+  // ticket's story points — at any point in the sprint — is reflected the
+  // next time this report is opened. Both reference lines below start at
+  // totalPts on day 1 and hold there, so the chart always starts from the
+  // current total rather than a stale snapshot from when the sprint began.
   var burndownChart = lineChart([
     { label: 'Ideal', color: '#94a3b8', dash: '6,4', width: 2,
-      fn: function(s, i) { return Math.max(0, totalPts - idealStepPts * i); } }
-  ].concat(scopeChanged ? [
-    { label: 'Total Scope', color: '#7c3aed', dash: '2,3', width: 2,
-      fn: function(s) { return s.scopePts; } }
-  ] : []).concat([
+      fn: function(s, i) { return Math.max(0, totalPts - idealStepPts * i); } },
     // remainingPts is null for days beyond today (no actual data yet) —
     // must NOT fall back to 0 here, or the line would falsely plunge to
     // zero on day 1 of an active sprint instead of just stopping.
     { label: 'Actual Remaining', color: '#dc2626', width: 2.5,
       fn: function(s) { return s.remainingPts == null ? null : s.remainingPts; } }
-  ]), totalPts || 1, 'Burndown', 'Story Points');
+  ], totalPts || 1, 'Burndown', 'Story Points');
 
   var burnupChart = lineChart([
     { label: 'Scope', color: '#94a3b8', dash: '6,4', width: 2,
-      fn: function(s) { return s.scopePts == null ? totalPts : s.scopePts; } },
+      fn: function() { return totalPts; } },
     { label: 'Completed', color: '#10b981', width: 2.5,
       fn: function(s) { return s.remainingPts == null ? null : totalPts - s.remainingPts; } }
   ], totalPts || 1, 'Burnup', 'Story Points');
@@ -4199,14 +4196,12 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
     // Burndown chart
     chartCard(
       '📉 Burndown Chart',
-      'Tracks remaining story points each day. Ideal line shows the target pace — actual line should stay at or below it.' +
-        (scopeChanged ? ' Scope changed mid-sprint — see the Total Scope line.' : ''),
+      'Tracks remaining story points each day. Ideal line shows the target pace — actual line should stay at or below it.',
       burndownChart,
       legend([
-        { label: 'Ideal (target pace)', color: '#94a3b8', dash: true }
-      ].concat(scopeChanged ? [{ label: 'Total Scope', color: '#7c3aed', dash: true }] : []).concat([
+        { label: 'Ideal (target pace)', color: '#94a3b8', dash: true },
         { label: 'Actual Remaining', color: '#dc2626' }
-      ]))
+      ])
     ) +
 
     // Burnup chart
