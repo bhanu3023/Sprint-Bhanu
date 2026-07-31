@@ -3999,10 +3999,15 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
 
   // ── SVG line chart helper ────────────────────────────────────
   function lineChart(lines, maxY, title, yLabel) {
-    var W = 560, H = 220, pL = 48, pR = 20, pT = 24, pB = 44;
-    var plotW = W - pL - pR, plotH = H - pT - pB;
     var n = series.length;
     if (!n) return '<p style="padding:20px;color:var(--text3)">No daily data yet — data appears once the sprint progresses.</p>';
+    // Chart width scales with the number of days so every date gets its own
+    // label with room to breathe, instead of thinning labels down to ~8 on a
+    // fixed-width chart. The wrapping div is already overflow-x:auto, so a
+    // longer sprint just becomes horizontally scrollable.
+    var H = 220, pL = 48, pR = 20, pT = 24, pB = 44;
+    var W = Math.max(560, pL + pR + (n - 1) * 44);
+    var plotW = W - pL - pR, plotH = H - pT - pB;
     maxY = maxY || 1;
 
     function xp(i) { return pL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2); }
@@ -4018,10 +4023,9 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
       grid += '<text x="' + (pL - 5) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--text3)">' + gv + '</text>';
     }
 
-    // X labels (dates)
+    // X labels — every day's date, not thinned
     var xLabels = '';
-    var step = Math.max(1, Math.floor(n / 8));
-    for (var i2 = 0; i2 < n; i2 += step) {
+    for (var i2 = 0; i2 < n; i2++) {
       var x2 = xp(i2);
       var dlbl = series[i2].date ? series[i2].date.slice(5).replace('-', '/') : '';
       xLabels += '<text x="' + x2.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="var(--text3)">' + dlbl + '</text>';
@@ -4050,7 +4054,7 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
       }).join('');
     }).join('');
 
-    return '<div style="overflow-x:auto"><svg width="100%" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:320px">' +
+    return '<div style="overflow-x:auto"><svg width="' + W + '" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:100%">' +
       grid + xLabels +
       '<line x1="' + pL + '" y1="' + pT + '" x2="' + pL + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
       '<line x1="' + pL + '" y1="' + (pT + plotH) + '" x2="' + (W - pR) + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
@@ -4131,13 +4135,25 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
       fn: function(s) { return totalPts - (s.remainingPts || 0); } }
   ], totalPts || 1, 'Burnup', 'Story Points');
 
+  // Days elapsed vs total sprint length, for "how many days have we worked" at a glance
+  var totalSprintDays = (sprint.start_date && sprint.end_date)
+    ? Math.round((new Date(sprint.end_date) - new Date(sprint.start_date)) / 86400000) + 1
+    : null;
+  var daysElapsed = series.length;
+  var daysProgressHtml = totalSprintDays
+    ? '<div style="font-size:11px;color:#93c5fd">🗓️ Day ' + daysElapsed + ' of ' + totalSprintDays + '</div>'
+    : '';
+
   c.innerHTML = '<div style="display:flex;flex-direction:column;gap:16px">' +
     sprintSelectorHtml +
 
     // Header bar
     '<div style="background:#0f2d5e;border-radius:10px;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
     '<div style="color:#fff;font-size:15px;font-weight:700">📊 Burn Chart — ' + esc(sprint.name || 'Sprint') + '</div>' +
+    '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">' +
+    daysProgressHtml +
     '<div style="font-size:11px;color:#93c5fd">📅 ' + startStr + ' → ' + endStr + '</div>' +
+    '</div>' +
     '</div>' +
 
     // KPI row
