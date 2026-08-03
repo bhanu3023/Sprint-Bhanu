@@ -7884,8 +7884,13 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   bulkVals.forEach(function(v) { valueMap[v.field_id] = v.value; });
   (cfValues || []).forEach(function(v) { valueMap[v.field_id] = v.value; }); // live values override
 
-  // Fields that are already rendered as built-in drawer fields — skip to avoid duplicates
-  var _builtinFields = ['team', 'product type'];
+  // Fields that are already rendered as built-in drawer fields — skip to avoid duplicates.
+  // Also covers custom fields that collide with the built-in Story Points
+  // column: without this, editing such a field silently writes to
+  // issue_field_values instead of issues.story_points, which reports (Burn
+  // Chart, Sprint Summary, etc.) never read — the edit looks like it saved
+  // but the real story_points value never changes.
+  var _builtinFields = ['team', 'product type', 'story points', 'story_points', 'storypoints', 'points', 'sp'];
   var html = '';
   spaceFields.forEach(function(field) {
     if (_builtinFields.indexOf((field.name || '').toLowerCase().trim()) !== -1) return;

@@ -7,6 +7,20 @@ const { execSync } = require('child_process');
 const uid = () => crypto.randomUUID();
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(next);
 
+// Custom fields live in a separate issue_field_values table — a custom field
+// named e.g. "Story Points" would render right next to the real built-in
+// story_points field in the drawer, but editing it writes to a completely
+// different column that reports never read, silently diverging from what
+// the user thinks they're updating. Block creating/renaming a custom field
+// to reuse a built-in field's name (case/spacing-insensitive).
+const RESERVED_FIELD_NAMES = new Set([
+  'title', 'status', 'priority', 'assignee', 'assigneeid', 'reporter', 'reporterid',
+  'sprint', 'sprintid', 'labels', 'storypoints', 'points', 'sp', 'startdate', 'duedate',
+  'description', 'fixdescription', 'type', 'key', 'team', 'producttype'
+]);
+function normalizeFieldName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function isReservedFieldName(name) { return RESERVED_FIELD_NAMES.has(normalizeFieldName(name)); }
+
 // Install nodemailer if not present
 let nodemailer;
 try {
@@ -823,6 +837,9 @@ app.get('/api/custom-fields', wrap(async (req, res) => {
 
 app.post('/api/custom-fields', wrap(async (req, res) => {
   const b = req.body;
+  if (isReservedFieldName(b.name)) {
+    return res.status(400).json({ error: `"${b.name}" is a built-in field name — choose a different name for this custom field` });
+  }
   // options must be JSON-stringified for jsonb column (pg binds arrays as PG arrays otherwise)
   const opts = b.options != null ? JSON.stringify(Array.isArray(b.options) ? b.options : []) : '[]';
   const r = await q(`INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position)
@@ -838,6 +855,9 @@ app.post('/api/custom-fields', wrap(async (req, res) => {
 app.post('/api/custom-fields/create-for-all', requireAuth, wrap(async (req, res) => {
   const b = req.body;
   if (!b.name || !b.field_type) return res.status(400).json({ error: 'name and field_type are required' });
+  if (isReservedFieldName(b.name)) {
+    return res.status(400).json({ error: `"${b.name}" is a built-in field name — choose a different name for this custom field` });
+  }
   const opts = b.options != null ? JSON.stringify(Array.isArray(b.options) ? b.options : []) : '[]';
   const showIn = b.show_in && b.show_in.length ? b.show_in : ['drawer'];
   const spaces = (await q(
@@ -863,6 +883,9 @@ app.post('/api/custom-fields/create-for-all', requireAuth, wrap(async (req, res)
 
 app.put('/api/custom-fields/:id', wrap(async (req, res) => {
   const body = { ...req.body };
+  if (body.name !== undefined && isReservedFieldName(body.name)) {
+    return res.status(400).json({ error: `"${body.name}" is a built-in field name — choose a different name for this custom field` });
+  }
   // Fix options jsonb binding same as POST
   if (body.options !== undefined) {
     body.options = JSON.stringify(Array.isArray(body.options) ? body.options : []);
