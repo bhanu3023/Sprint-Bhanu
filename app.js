@@ -3645,9 +3645,13 @@ function renderMemberCheckboxList(containerId, spaceId, selectedIds) {
   (selectedIds || []).forEach(function (id) { selSet[id] = true; });
   el.innerHTML = members.length
     ? members.map(function (u) {
+        // The global input{width:100%} reset stretches a bare checkbox to
+        // fill the flex row, shoving the name off to the far right — same
+        // fix as the custom-field multi-select checkboxes: force it back to
+        // a normal checkbox size and stop it growing as a flex item.
         return '<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer;font-size:13px;color:var(--text)">' +
-          '<input type="checkbox" value="' + esc(u.id) + '"' + (selSet[u.id] ? ' checked' : '') + '>' +
-          esc(u.name) + '</label>';
+          '<input type="checkbox" class="cf-sel-opt-checkbox" value="' + esc(u.id) + '"' + (selSet[u.id] ? ' checked' : '') + '>' +
+          '<span>' + esc(u.name) + '</span></label>';
       }).join('')
     : '<div style="font-size:12px;color:var(--text3);padding:4px 2px">No members in this board yet</div>';
 }
