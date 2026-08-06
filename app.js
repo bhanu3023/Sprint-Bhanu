@@ -3635,6 +3635,80 @@ window._deleteSprint = async function (id) {
   toast('Sprint deleted');
 };
 
+// Renders a scrollable checkbox list of a space's members into `containerId`,
+// pre-checking any ids already in `selectedIds`.
+function renderMemberCheckboxList(containerId, spaceId, selectedIds) {
+  var el = $(containerId);
+  if (!el) return;
+  var members = getSpaceMembers(spaceId);
+  var selSet = {};
+  (selectedIds || []).forEach(function (id) { selSet[id] = true; });
+  el.innerHTML = members.length
+    ? members.map(function (u) {
+        return '<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer;font-size:13px;color:var(--text)">' +
+          '<input type="checkbox" value="' + esc(u.id) + '"' + (selSet[u.id] ? ' checked' : '') + '>' +
+          esc(u.name) + '</label>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--text3);padding:4px 2px">No members in this board yet</div>';
+}
+
+// Reads back the checked user ids from a checkbox list rendered above.
+function collectCheckedIds(containerId) {
+  var el = $(containerId);
+  if (!el) return [];
+  return Array.from(el.querySelectorAll('input[type="checkbox"]:checked')).map(function (cb) { return cb.value; });
+}
+
+// Preview calendar for the sprint's date range — days outside [start, end]
+// render disabled/greyed, days inside are highlighted. Purely a visual
+// preview; it doesn't collect any additional input of its own.
+function renderSprintPublicCalendarPreview() {
+  var el = $('sprintPublicCalendar');
+  if (!el) return;
+  var startVal = $('sprintStartDate').value;
+  var endVal = $('sprintEndDate').value;
+  if (!startVal || !endVal) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text3);border:1px dashed var(--border);border-radius:6px;padding:14px;text-align:center">Select a start and end date to preview the sprint calendar</div>';
+    return;
+  }
+  var start = new Date(startVal + 'T00:00:00');
+  var end = new Date(endVal + 'T00:00:00');
+  if (end < start) {
+    el.innerHTML = '<div style="font-size:12px;color:#dc2626;border:1px dashed #dc262666;border-radius:6px;padding:14px;text-align:center">End date is before start date</div>';
+    return;
+  }
+  var weekdays = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  var months = [];
+  var mCursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  var mEnd = new Date(end.getFullYear(), end.getMonth(), 1);
+  while (mCursor <= mEnd) {
+    months.push(new Date(mCursor));
+    mCursor.setMonth(mCursor.getMonth() + 1);
+  }
+  var html = months.map(function (m) {
+    var year = m.getFullYear(), month = m.getMonth();
+    var firstDay = new Date(year, month, 1).getDay();
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
+    var monthName = m.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    var grid = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:10px;color:var(--text3);margin-bottom:4px">' +
+      weekdays.map(function (w) { return '<div style="text-align:center;font-weight:700">' + w + '</div>'; }).join('') +
+      '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">';
+    for (var b = 0; b < firstDay; b++) grid += '<div></div>';
+    for (var d = 1; d <= daysInMonth; d++) {
+      var thisDay = new Date(year, month, d);
+      var inRange = thisDay >= start && thisDay <= end;
+      grid += '<div style="text-align:center;padding:4px 0;border-radius:4px;font-size:11px;' +
+        (inRange
+          ? 'background:var(--accent);color:#fff;font-weight:700'
+          : 'color:var(--text3);opacity:.4;pointer-events:none') +
+        '">' + d + '</div>';
+    }
+    grid += '</div>';
+    return '<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">' + monthName + '</div>' + grid + '</div>';
+  }).join('');
+  el.innerHTML = '<div style="border:1px solid var(--border);border-radius:8px;padding:12px">' + html + '</div>';
+}
+
 window._openSprintModal = function (id) {
   if (id) {
     var sp = (S.data.sprints || []).find(function (s) { return s.id == id; });
@@ -3646,6 +3720,8 @@ window._openSprintModal = function (id) {
     $('sprintStartDate').value = fmtDateISO(sp.start_date);
     $('sprintEndDate').value = fmtDateISO(sp.end_date);
     $('sprintModalTitle').textContent = 'Edit Sprint';
+    renderMemberCheckboxList('sprintDeveloperList', sp.space_id, sp.developer_ids);
+    renderMemberCheckboxList('sprintQaList', sp.space_id, sp.qa_ids);
   } else {
     $('sprintIdInput').value = '';
     $('sprintSpaceId').value = S.currentSpace;
@@ -3654,7 +3730,12 @@ window._openSprintModal = function (id) {
     $('sprintStartDate').value = '';
     $('sprintEndDate').value = '';
     $('sprintModalTitle').textContent = 'Create Sprint';
+    renderMemberCheckboxList('sprintDeveloperList', S.currentSpace, []);
+    renderMemberCheckboxList('sprintQaList', S.currentSpace, []);
   }
+  renderSprintPublicCalendarPreview();
+  $('sprintStartDate').onchange = renderSprintPublicCalendarPreview;
+  $('sprintEndDate').onchange = renderSprintPublicCalendarPreview;
   openModal('modal-sprint');
 };
 
@@ -8294,7 +8375,9 @@ async function handleSprintSubmit(e) {
     name: $('sprintNameInput').value,
     goal: $('sprintGoal').value,
     start_date: $('sprintStartDate').value || null,
-    end_date: $('sprintEndDate').value || null
+    end_date: $('sprintEndDate').value || null,
+    developer_ids: collectCheckedIds('sprintDeveloperList'),
+    qa_ids: collectCheckedIds('sprintQaList')
   };
 
   if (id) {
