@@ -3757,6 +3757,7 @@ window._openSprintModal = function (id) {
     renderMemberCheckboxList('sprintDeveloperList', sp.space_id, sp.developer_ids);
     renderMemberCheckboxList('sprintQaList', sp.space_id, sp.qa_ids);
     window._sprintHolidaySet = new Set(sp.public_holidays || []);
+    $('sprintLeaveDays').value = sp.leave_days || 0;
   } else {
     $('sprintIdInput').value = '';
     $('sprintSpaceId').value = S.currentSpace;
@@ -3768,6 +3769,7 @@ window._openSprintModal = function (id) {
     renderMemberCheckboxList('sprintDeveloperList', S.currentSpace, []);
     renderMemberCheckboxList('sprintQaList', S.currentSpace, []);
     window._sprintHolidaySet = new Set();
+    $('sprintLeaveDays').value = '';
   }
   renderSprintPublicHolidaysCalendar();
   $('sprintStartDate').onchange = renderSprintPublicHolidaysCalendar;
@@ -4340,9 +4342,61 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
 }
 
 // ── Sprint Summary ──────────────────────────────────────────
+// Team capacity (in story points) for a sprint, per the agreed formula:
+//   workingDaysPerDeveloper = workingDays - holidaysOnWorkingDays
+//   grossPersonDays         = developers * workingDaysPerDeveloper
+//   netPersonDays           = max(0, grossPersonDays - leaveDays)
+//   availableHours          = netPersonDays * 7 * 0.80
+//   capacitySP              = round(availableHours / 6.5)
+// workingDays excludes Saturday/Sunday; a public holiday only reduces
+// working days if it actually falls on one (a holiday on a weekend
+// wouldn't remove any capacity that wasn't already excluded).
+function computeSprintCapacity(sprint) {
+  if (!sprint || !sprint.start_date || !sprint.end_date) return null;
+  // Build local-midnight dates from the LOCAL calendar date the timestamp
+  // falls on (matching fmtDateShort's display) — NOT fmtDateISO, which
+  // reads the UTC calendar date and can land a day earlier than what's
+  // actually shown as the sprint's start/end date.
+  var startRaw = new Date(sprint.start_date);
+  var endRaw = new Date(sprint.end_date);
+  if (isNaN(startRaw) || isNaN(endRaw)) return null;
+  var start = new Date(startRaw.getFullYear(), startRaw.getMonth(), startRaw.getDate());
+  var end = new Date(endRaw.getFullYear(), endRaw.getMonth(), endRaw.getDate());
+  if (end < start) return null;
+
+  var workingDays = 0;
+  for (var d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    var dow = d.getDay();
+    if (dow !== 0 && dow !== 6) workingDays++;
+  }
+
+  var holidays = (sprint.public_holidays || []).filter(function (ds) {
+    var hd = new Date(ds + 'T00:00:00');
+    if (isNaN(hd) || hd < start || hd > end) return false;
+    var dow = hd.getDay();
+    return dow !== 0 && dow !== 6;
+  }).length;
+
+  var developers = (sprint.developer_ids || []).length;
+  var leaveDays = Number(sprint.leave_days) || 0;
+
+  var workingDaysPerDeveloper = Math.max(0, workingDays - holidays);
+  var grossPersonDays = developers * workingDaysPerDeveloper;
+  var netPersonDays = Math.max(0, grossPersonDays - leaveDays);
+  var availableHours = netPersonDays * 7 * 0.80;
+  var capacitySP = Math.round(availableHours / 6.5);
+
+  return {
+    workingDays: workingDays, holidays: holidays, developers: developers,
+    leaveDays: leaveDays, netPersonDays: netPersonDays,
+    availableHours: availableHours, capacitySP: capacitySP
+  };
+}
+
 function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
   var sprint = data.sprint || {};
+  var capacityInfo = computeSprintCapacity(sprint);
   var issues = getSpaceIssues(S.currentSpace).filter(function(i){ return i.sprint_id === sprint.id; });
   var total = Number(data.total) || 0;
   var done = Number(data.done) || 0;
@@ -4614,6 +4668,14 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     insightCard(SVG.trendUp, 'On Track', pct >= 50 ? 'On Track' : 'Behind', 'Progress is ' + (pct >= 50 ? 'as expected' : 'below target'), pct >= 50 ? '#10b981' : '#dc2626') +
     insightCard(SVG.star, 'Story Points', ptsPct + '%', 'Story points completion', '#0052cc') +
     (daysRem !== null ? insightCard(SVG.clock, 'Days Remaining', daysRem + ' Days', 'Remaining in sprint', daysRem <= 2 ? '#dc2626' : '#f59e0b') : '') +
+    (capacityInfo
+      ? insightCard(SVG.trendUp, 'Team Capacity', capacityInfo.capacitySP + ' pts',
+          capacityInfo.developers + ' dev' + (capacityInfo.developers !== 1 ? 's' : '') + ' × ' + capacityInfo.workingDays + ' working days' +
+          (capacityInfo.holidays ? ', −' + capacityInfo.holidays + ' holiday' + (capacityInfo.holidays !== 1 ? 's' : '') : '') +
+          (capacityInfo.leaveDays ? ', −' + capacityInfo.leaveDays + ' leave day' + (capacityInfo.leaveDays !== 1 ? 's' : '') : '') +
+          (totalPts ? ' · ' + totalPts + ' pts planned' : ''),
+          totalPts > capacityInfo.capacitySP ? '#dc2626' : '#10b981')
+      : '') +
     '</div>' +
 
     '</div></div>';
@@ -8414,7 +8476,8 @@ async function handleSprintSubmit(e) {
     end_date: $('sprintEndDate').value || null,
     developer_ids: collectCheckedIds('sprintDeveloperList'),
     qa_ids: collectCheckedIds('sprintQaList'),
-    public_holidays: Array.from(window._sprintHolidaySet || []).sort()
+    public_holidays: Array.from(window._sprintHolidaySet || []).sort(),
+    leave_days: parseInt($('sprintLeaveDays').value, 10) || 0
   };
 
   if (id) {
