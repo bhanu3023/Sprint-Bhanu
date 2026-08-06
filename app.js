@@ -4601,7 +4601,30 @@ function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml)
     return { name: name, user: user, devTotal: devTotal, openCount: g.open.length, closedCount: g.closed.length, safeKey: safeKey };
   }).sort(function(a, b) { return b.devTotal - a.devTotal; });
 
-  var maxDevTotal = Math.max.apply(null, devRows.map(function(d) { return d.devTotal; })) || 1;
+  // Donut SVG helper (same pattern used by Sprint Summary / Spillover)
+  function donutSvg(segments, cx, cy, r, label, sublabel) {
+    var circ = 2 * Math.PI * r;
+    var offset = circ * 0.25;
+    var arcs = '';
+    var cur = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var len = seg.pct / 100 * circ;
+      if (len > 0) {
+        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + seg.color + '" stroke-width="12"' +
+          ' stroke-dasharray="' + len.toFixed(2) + ' ' + (circ - len).toFixed(2) + '"' +
+          ' stroke-dashoffset="' + (offset - cur).toFixed(2) + '" stroke-linecap="butt"/>';
+        cur += len;
+      }
+    }
+    return '<svg width="' + (cx*2) + '" height="' + (cy*2) + '" viewBox="0 0 ' + (cx*2) + ' ' + (cy*2) + '">' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--bg3)" stroke-width="12"/>' +
+      arcs +
+      '<text x="' + cx + '" y="' + (cy-4) + '" text-anchor="middle" font-size="18" font-weight="800" fill="var(--text)">' + label + '</text>' +
+      '<text x="' + cx + '" y="' + (cy+13) + '" text-anchor="middle" font-size="9" fill="var(--text3)">' + sublabel + '</text>' +
+      '</svg>';
+  }
+
   var devChartHtml = devRows.length
     ? '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:20px">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
@@ -4610,20 +4633,27 @@ function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml)
       '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#dc2626;display:inline-block"></span>Open</span>' +
       '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#10b981;display:inline-block"></span>Closed</span>' +
       '</div></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:20px">' +
       devRows.map(function(d) {
-        var openW = Math.round((d.openCount / maxDevTotal) * 100);
-        var closedW = Math.round((d.closedCount / maxDevTotal) * 100);
-        var avatar = d.user ? avatarHtml(d.user, 26) : '<span class="avatar" style="width:26px;height:26px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#94a3b8;color:#fff;font-weight:700;flex-shrink:0">?</span>';
-        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
-          avatar +
-          '<span style="width:120px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(d.name) + '</span>' +
-          '<div style="flex:1;background:var(--bg3);border-radius:4px;height:18px;overflow:hidden;display:flex">' +
-          (d.openCount ? '<div onclick="window._showReportIssues(\'bs_dev_' + d.safeKey + '_open\')" title="' + esc(d.name) + ' — ' + d.openCount + ' open" style="cursor:pointer;width:' + Math.max(openW, 2) + '%;background:#dc2626"></div>' : '') +
-          (d.closedCount ? '<div onclick="window._showReportIssues(\'bs_dev_' + d.safeKey + '_closed\')" title="' + esc(d.name) + ' — ' + d.closedCount + ' closed" style="cursor:pointer;width:' + Math.max(closedW, 2) + '%;background:#10b981"></div>' : '') +
+        var openPct = d.devTotal ? Math.round((d.openCount / d.devTotal) * 100) : 0;
+        var closedPct = 100 - openPct;
+        var donut = donutSvg(
+          [{ pct: openPct, color: '#dc2626' }, { pct: closedPct, color: '#10b981' }],
+          52, 52, 40, d.devTotal, 'bugs'
+        );
+        var avatar = d.user ? avatarHtml(d.user, 24) : '<span class="avatar" style="width:24px;height:24px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#94a3b8;color:#fff;font-weight:700;flex-shrink:0">?</span>';
+        return '<div style="width:140px;text-align:center">' +
+          '<div style="display:flex;justify-content:center">' + donut + '</div>' +
+          '<div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px">' +
+          avatar + '<span style="font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px" title="' + esc(d.name) + '">' + esc(d.name) + '</span>' +
           '</div>' +
-          '<span style="width:110px;font-size:11px;color:var(--text3);text-align:right;flex-shrink:0">' + d.devTotal + ' total (' + d.openCount + ' open, ' + d.closedCount + ' closed)</span>' +
+          '<div style="display:flex;justify-content:center;gap:8px;margin-top:6px;font-size:11px">' +
+          (d.openCount ? '<span onclick="window._showReportIssues(\'bs_dev_' + d.safeKey + '_open\')" title="Click to view issues" style="cursor:pointer;color:#dc2626;font-weight:700">' + d.openCount + ' open</span>' : '<span style="color:var(--text3)">0 open</span>') +
+          (d.closedCount ? '<span onclick="window._showReportIssues(\'bs_dev_' + d.safeKey + '_closed\')" title="Click to view issues" style="cursor:pointer;color:#10b981;font-weight:700">' + d.closedCount + ' closed</span>' : '<span style="color:var(--text3)">0 closed</span>') +
+          '</div>' +
           '</div>';
       }).join('') +
+      '</div>' +
       '</div>'
     : '';
 
