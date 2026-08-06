@@ -91,12 +91,13 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
   const userRole = req.user.role;
   const isAdmin = userRole === 'admin' || userRole === 'owner';
 
-  const [org, users, allSpaces, allSm, sf] = await Promise.all([
+  const [org, users, allSpaces, allSm, sf, issueFavs] = await Promise.all([
     q('SELECT * FROM organizations LIMIT 1'),
     q('SELECT id,name,email,role,color,avatar_url,is_active,last_login,theme FROM users'),
     q('SELECT * FROM spaces WHERE is_archived=false'),
     q('SELECT * FROM space_members'),
-    q('SELECT * FROM space_favorites')
+    q('SELECT * FROM space_favorites'),
+    q('SELECT issue_id, created_at FROM issue_favorites WHERE user_id=$1 ORDER BY created_at DESC', [userId])
   ]);
 
   // Members only see spaces they are assigned to
@@ -129,7 +130,9 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
 
   res.json({
     org: org.rows[0] || null, users: users.rows, spaces: spaces,
-    space_members: space_members, space_favorites: sf.rows, sprints: filteredSprints,
+    space_members: space_members, space_favorites: sf.rows,
+    issue_favorites: issueFavs.rows,
+    sprints: filteredSprints,
     issues: filteredIssues, worklogs: [], comments: [],
     custom_fields: cf.rows, saved_filters: filters.rows, notifications: notifs.rows,
     issue_field_values: ifv ? ifv.rows : []
@@ -244,14 +247,30 @@ app.delete('/api/spaces/:id', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post('/api/spaces/:id/favorite', wrap(async (req, res) => {
-  const { user_id } = req.body, spid = req.params.id;
+app.post('/api/spaces/:id/favorite', requireAuth, wrap(async (req, res) => {
+  const user_id = req.user.user_id;
+  const spid = req.params.id;
   const ex = await q('SELECT 1 FROM space_favorites WHERE space_id=$1 AND user_id=$2', [spid, user_id]);
   if (ex.rows.length) {
     await q('DELETE FROM space_favorites WHERE space_id=$1 AND user_id=$2', [spid, user_id]);
     res.json({ favorited: false });
   } else {
     await q('INSERT INTO space_favorites(user_id,space_id) VALUES($1,$2)', [user_id, spid]);
+    res.json({ favorited: true });
+  }
+}));
+
+app.post('/api/issues/:id/favorite', requireAuth, wrap(async (req, res) => {
+  const userId = req.user.user_id;
+  const issueId = req.params.id;
+  const issue = (await q('SELECT id FROM issues WHERE id=$1 AND deleted_at IS NULL', [issueId])).rows[0];
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  const ex = await q('SELECT 1 FROM issue_favorites WHERE issue_id=$1 AND user_id=$2', [issueId, userId]);
+  if (ex.rows.length) {
+    await q('DELETE FROM issue_favorites WHERE issue_id=$1 AND user_id=$2', [issueId, userId]);
+    res.json({ favorited: false });
+  } else {
+    await q('INSERT INTO issue_favorites(user_id,issue_id) VALUES($1,$2)', [userId, issueId]);
     res.json({ favorited: true });
   }
 }));
@@ -312,11 +331,14 @@ app.post('/api/sprints/:id/start', wrap(async (req, res) => {
   // Multiple active sprints are allowed
   const r = await q("UPDATE sprints SET status='active' WHERE id=$1 RETURNING *", [req.params.id]);
   // Notify all space members
+  const spaceRow = (await q('SELECT key FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
+  const sprintLink = spaceRow ? '/space/' + encodeURIComponent(spaceRow.key) + '/board' : null;
   const members = await q('SELECT user_id FROM space_members WHERE space_id=$1', [sprint.space_id]);
   members.rows.forEach(function(m) {
     createNotif({ user_id: m.user_id, space_id: sprint.space_id, type: 'sprint_started',
       title: sprint.name + ' has started',
-      body: 'Sprint is now active. Time to get to work!' });
+      body: 'Sprint is now active. Time to get to work!',
+      link: sprintLink });
   });
   res.json(r.rows[0]);
 }));
@@ -348,11 +370,14 @@ app.post('/api/sprints/:id/complete', wrap(async (req, res) => {
   const r = await q('SELECT * FROM sprints WHERE id=$1', [sid]);
   // Notify all space members
   if (sprint) {
+    const spaceRow = (await q('SELECT key FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
+    const sprintLink = spaceRow ? '/space/' + encodeURIComponent(spaceRow.key) + '/board' : null;
     const members = await q('SELECT user_id FROM space_members WHERE space_id=$1', [sprint.space_id]);
     members.rows.forEach(function(m) {
       createNotif({ user_id: m.user_id, space_id: sprint.space_id, type: 'sprint_completed',
         title: sprint.name + ' has been completed',
-        body: 'Sprint completed with ' + done.rows[0].pts + ' story points.' });
+        body: 'Sprint completed with ' + done.rows[0].pts + ' story points.',
+        link: sprintLink });
     });
   }
   res.json(r.rows[0]);
@@ -388,36 +413,37 @@ app.get('/api/issues', wrap(async (req, res) => {
 }));
 
 app.get('/api/issues/:id', wrap(async (req, res) => {
-  const id = req.params.id;
+  const param = req.params.id;
   const issue = (await q(`SELECT i.*,
       a.name AS assignee_name, a.color AS assignee_color,
       rep.name AS reporter_name, rep.color AS reporter_color,
-      s.key AS project_key,
+      s.key AS project_key, s.name AS space_name,
       p.key AS parent_key, p.title AS parent_title, p.type AS parent_type
     FROM issues i
     LEFT JOIN users a ON a.id=i.assignee_id
     LEFT JOIN users rep ON rep.id=i.reporter_id
     LEFT JOIN spaces s ON s.id=i.space_id
     LEFT JOIN issues p ON p.id=i.parent_id
-    WHERE i.id=$1`, [id])).rows[0];
+    WHERE i.id=$1 OR UPPER(i.key)=UPPER($1)`, [param])).rows[0];
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  const issueId = issue.id;
   const [worklogs, comments, links, subtasks, cfv, history, attachments] = await Promise.all([
     q(`SELECT w.*, u.name AS user_name, u.color AS user_color FROM worklogs w
-      LEFT JOIN users u ON u.id=w.user_id WHERE w.issue_id=$1 ORDER BY w.created_at DESC`, [id]),
+      LEFT JOIN users u ON u.id=w.user_id WHERE w.issue_id=$1 ORDER BY w.created_at DESC`, [issueId]),
     q(`SELECT c.*, u.name AS user_name, u.avatar_url, u.color AS user_color
-      FROM comments c LEFT JOIN users u ON u.id=c.user_id WHERE c.issue_id=$1 ORDER BY c.created_at`, [id]),
+      FROM comments c LEFT JOIN users u ON u.id=c.user_id WHERE c.issue_id=$1 ORDER BY c.created_at`, [issueId]),
     q(`SELECT l.*, t.key AS target_key, t.title AS target_title, t.status AS target_status, t.type AS target_type
       FROM issue_links l
       LEFT JOIN issues t ON (t.id=CASE WHEN l.source_id=$1 THEN l.target_id ELSE l.source_id END)
-      WHERE l.source_id=$1 OR l.target_id=$1`, [id]),
+      WHERE l.source_id=$1 OR l.target_id=$1`, [issueId]),
     q(`SELECT id, key, title, status, type, priority, assignee_id, story_points
-      FROM issues WHERE parent_id=$1 ORDER BY position, created_at`, [id]),
+      FROM issues WHERE parent_id=$1 ORDER BY position, created_at`, [issueId]),
     q(`SELECT v.*, f.name AS field_name, f.field_type
-      FROM issue_field_values v JOIN custom_fields f ON f.id=v.field_id WHERE v.issue_id=$1`, [id]),
+      FROM issue_field_values v JOIN custom_fields f ON f.id=v.field_id WHERE v.issue_id=$1`, [issueId]),
     q(`SELECT h.*, u.name AS user_name, u.color AS user_color
-      FROM issue_history h LEFT JOIN users u ON u.id=h.user_id WHERE h.issue_id=$1 ORDER BY h.created_at DESC`, [id]),
+      FROM issue_history h LEFT JOIN users u ON u.id=h.user_id WHERE h.issue_id=$1 ORDER BY h.created_at DESC`, [issueId]),
     q(`SELECT a.*, u.name AS uploader_name FROM issue_attachments a
-      LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.issue_id=$1 ORDER BY a.created_at DESC`, [id])
+      LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.issue_id=$1 ORDER BY a.created_at DESC`, [issueId])
   ]);
   issue.worklogs = worklogs.rows;
   issue.comments = comments.rows;
@@ -436,8 +462,8 @@ app.post('/api/issues', wrap(async (req, res) => {
   if (!spaceKeyRow) return res.status(400).json({ error: 'Invalid space_id' });
   const spaceKey = spaceKeyRow.key;
   const maxRow = (await q(
-    "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1 AND key LIKE $2",
-    [b.space_id, spaceKey + '-%']
+    "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1 AND key ~ ($2 || '-[0-9]+$')",
+    [b.space_id, spaceKey]
   )).rows[0];
   const key = `${spaceKey}-${maxRow.mx + 1}`;
   const id = uid();
@@ -474,7 +500,7 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
     const actor = req.user.user_id;
     const issueKey = oldRow.key || req.params.id;
     const spaceId = oldRow.space_id;
-    const link = '/?' + issueKey;
+    const link = '/?issue=' + encodeURIComponent(issueKey);
     // Notify new assignee when assignee_id changes
     if (keys.includes('assignee_id') && req.body.assignee_id && req.body.assignee_id !== oldRow.assignee_id) {
       const newAssignee = req.body.assignee_id;
@@ -490,6 +516,15 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
       if (assignee && assignee !== actor) {
         createNotif({ user_id: assignee, space_id: spaceId, type: 'status_changed',
           title: issueKey + ' status changed to ' + req.body.status,
+          body: oldRow.title, link });
+      }
+    }
+    // Notify assignee when priority changes
+    if (keys.includes('priority') && req.body.priority !== oldRow.priority) {
+      const assignee = newRow.assignee_id;
+      if (assignee && assignee !== actor) {
+        createNotif({ user_id: assignee, space_id: spaceId, type: 'priority_changed',
+          title: issueKey + ' priority changed to ' + req.body.priority,
           body: oldRow.title, link });
       }
     }
@@ -526,14 +561,14 @@ app.post('/api/issues/bulk', wrap(async (req, res) => {
 
 // ── Comments ──────────────────────────────────────────────
 app.post('/api/comments', wrap(async (req, res) => {
-  const { issue_id, user_id, body } = req.body;
+  const { issue_id, user_id, body, mentioned_user_ids } = req.body;
   const r = await q('INSERT INTO comments(id,issue_id,user_id,body) VALUES($1,$2,$3,$4) RETURNING *',
     [uid(), issue_id, user_id, body]);
   // Notify assignee and reporter (skip commenter)
   const issue = (await q('SELECT * FROM issues WHERE id=$1', [issue_id])).rows[0];
   if (issue) {
     const commenter = user_id;
-    const link = '/?' + (issue.key || issue_id);
+    const link = '/?issue=' + encodeURIComponent(issue.key || issue_id);
     const preview = body.length > 80 ? body.slice(0, 80) + '…' : body;
     const notifyUsers = new Set([issue.assignee_id, issue.reporter_id].filter(Boolean));
     notifyUsers.forEach(function(uid_) {
@@ -543,6 +578,19 @@ app.post('/api/comments', wrap(async (req, res) => {
           body: preview, link });
       }
     });
+    // Notify @mentioned users (skip commenter; dedupe with comment recipients)
+    const mentionIds = Array.isArray(mentioned_user_ids) ? mentioned_user_ids : [];
+    if (mentionIds.length) {
+      const commenterRow = (await q('SELECT name FROM users WHERE id=$1', [commenter])).rows[0];
+      const commenterName = commenterRow?.name || 'Someone';
+      const mentioned = new Set(mentionIds.filter(Boolean));
+      mentioned.forEach(function(uid_) {
+        if (uid_ === commenter) return;
+        createNotif({ user_id: uid_, space_id: issue.space_id, type: 'mention',
+          title: commenterName + ' mentioned you on ' + (issue.key || issue_id),
+          body: preview, link });
+      });
+    }
   }
   res.status(201).json(r.rows[0]);
 }));
@@ -1278,7 +1326,7 @@ async function createNotif({ user_id, space_id, type, title, body, link }) {
       [uid(), user_id, space_id || null, type, title, body || null, link || null]);
   } catch(e) { /* non-fatal */ }
   // Send email for issue-related notifications
-  const emailTypes = ['issue_assigned', 'status_changed', 'comment_added'];
+  const emailTypes = ['issue_assigned', 'status_changed', 'comment_added', 'mention', 'priority_changed'];
   if (emailTypes.includes(type)) {
     try {
       const userRow = await q('SELECT email FROM users WHERE id=$1', [user_id]);
@@ -1362,6 +1410,7 @@ const MS_CLIENT_ID     = process.env.MICROSOFT_CLIENT_ID     || '';
 const MS_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || '';
 const MS_TENANT_ID     = process.env.MICROSOFT_TENANT_ID     || '';
 const MS_REDIRECT_URI  = process.env.MICROSOFT_REDIRECT_URI  || 'https://sprintboard.cftools.live/api/auth/callback/microsoft';
+const APP_BASE_URL     = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 // ── Microsoft OAuth2 helpers ──────────────────────────────
 function msTokenExchange(code) {
@@ -1426,36 +1475,37 @@ app.get('/auth/microsoft', (req, res) => {
 
 app.get('/api/auth/callback/microsoft', wrap(async (req, res) => {
   const { code, state, error } = req.query;
+  const loginErr = (code) => res.redirect(`${APP_BASE_URL}/login.html?error=${code}`);
 
   // Validate CSRF state
   if (!state || !oauthStates.has(state)) {
-    return res.redirect('/login.html?error=invalid_state');
+    return loginErr('invalid_state');
   }
   oauthStates.delete(state);
 
   if (error) {
-    return res.redirect('/login.html?error=' + encodeURIComponent(error));
+    return res.redirect(`${APP_BASE_URL}/login.html?error=${encodeURIComponent(error)}`);
   }
   if (!code) {
-    return res.redirect('/login.html?error=no_code');
+    return loginErr('no_code');
   }
 
   // Exchange code for access token
   const tokenData = await msTokenExchange(code);
   if (!tokenData || !tokenData.access_token) {
     console.error('[MS OAuth] Token exchange failed:', tokenData);
-    return res.redirect('/login.html?error=token_exchange_failed');
+    return loginErr('token_exchange_failed');
   }
 
   // Get user profile from Microsoft Graph
   const profile = await msGraphMe(tokenData.access_token);
   if (!profile) {
-    return res.redirect('/login.html?error=no_email');
+    return loginErr('no_email');
   }
 
   const email = (profile.mail || profile.userPrincipalName || '').toLowerCase().trim();
   if (!email) {
-    return res.redirect('/login.html?error=no_email');
+    return loginErr('no_email');
   }
 
   // Look up user in database — auto-create on first Microsoft login
@@ -1465,7 +1515,7 @@ app.get('/api/auth/callback/microsoft', wrap(async (req, res) => {
     const orgRow = await q('SELECT id FROM organizations LIMIT 1');
     if (!orgRow.rows.length) {
       console.error('[MS OAuth] No organization found in DB');
-      return res.redirect('/login.html?error=no_org');
+      return loginErr('no_org');
     }
     const orgId = orgRow.rows[0].id;
     const newUserId = `usr-${uid()}`;
@@ -1482,7 +1532,7 @@ app.get('/api/auth/callback/microsoft', wrap(async (req, res) => {
   const user = userRows.rows[0];
 
   if (user.is_active === false) {
-    return res.redirect('/login.html?error=account_deactivated');
+    return loginErr('account_deactivated');
   }
 
   // Create session
@@ -1492,8 +1542,8 @@ app.get('/api/auth/callback/microsoft', wrap(async (req, res) => {
     [`ses-${uid()}`, user.id, sessionToken, expires]);
   await q('UPDATE users SET last_login=NOW() WHERE id=$1', [user.id]);
 
-  // Redirect to app with token in URL param
-  res.redirect(`/?token=${sessionToken}`);
+  // Always redirect to APP_URL (avoids wrong port if Azure callback URI differs)
+  res.redirect(`${APP_BASE_URL}/?token=${sessionToken}`);
 }));
 
 // Public auth routes (no middleware)
@@ -1912,6 +1962,27 @@ app.post('/api/admin/sync-db', async (req, res) => {
   }
 });
 
+// SPA routes — refresh-safe deep links
+const SPA_HTML = path.join(__dirname, 'index.html');
+app.get([
+  '/',
+  '/spaces',
+  '/reports',
+  '/work-log',
+  '/roadmap',
+  '/settings',
+  '/my-work',
+  '/my-work/open',
+  '/my-work/assigned',
+  '/my-work/reported',
+  '/my-work/recent'
+], (req, res) => {
+  res.sendFile(SPA_HTML);
+});
+app.get('/space/:key/:tab?', (req, res) => {
+  res.sendFile(SPA_HTML);
+});
+
 // ── Startup ───────────────────────────────────────────────
 (async () => {
   try {
@@ -1956,13 +2027,10 @@ app.post('/api/admin/sync-db', async (req, res) => {
     // 'select' instead of 'multi_select'. Any other existing options (e.g.
     // a manual edit) are left alone.
     try {
-      const COMBINATION_OPTIONS = [
-        'My Drive to MyDrive', 'DropBox to MyDrive', 'Egnte to MyDrive', 'OneDrive to MyDrive', 'Box to MyDrive', 'ShareFile to MyDrive',
-        'ShareDrive to ShareDrive', 'DropBox to ShareDrive', 'Egnte to ShareDrive', 'SharePoint to ShareDrive', 'Box to ShareDrive', 'ShareFile to ShareDrive',
-        'Box to OneDrive', 'DropBox to OneDrive', 'ShareDrive to OneDrive', 'MyDrive to OneDrive', 'Egnte to OneDrive', 'OneDrive to OneDrive', 'ShareFile to OneDrive',
-        'Box to SharePoint', 'DropBox to SharePoint', 'ShareDrive to SharePoint', 'Egnte to SharePoint', 'SharePoint to SharePoint', 'ShareFile to SharePoint'
-      ];
-      const OLD_PLACEHOLDER_OPTIONS = JSON.stringify(['Content', 'Message', 'Content + Message']);
+      const comboModule = require('./combination-options');
+      const comboPayload = comboModule.buildCombinationOptionsPayload
+        ? comboModule.buildCombinationOptionsPayload()
+        : { v: 2, groups: comboModule.COMBINATION_GROUPS, flat: comboModule };
       const combSpaces = await q(
         "SELECT id FROM spaces WHERE name=$1 AND (is_archived=false OR is_archived IS NULL)",
         ['Product_Team']
@@ -1972,27 +2040,40 @@ app.post('/api/admin/sync-db', async (req, res) => {
           'SELECT id, options, field_type FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
           [sp.id, 'Combination']
         )).rows[0];
+        const payloadJson = JSON.stringify(comboPayload);
         if (!combField) {
           await q(
             `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position,show_in)
              VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`,
-            [uid(), sp.id, 'Combination', 'multi_select', JSON.stringify(COMBINATION_OPTIONS), false, 0, ['drawer']]
+            [uid(), sp.id, 'Combination', 'select', payloadJson, false, 0, ['drawer', 'create']]
           );
-          console.log('✅ Created "Combination" multi-select custom field on Product_Team (space ' + sp.id + ')');
+          console.log('✅ Created "Combination" field on Product_Team (grouped by product type)');
         } else {
-          const newOptions = JSON.stringify(combField.options) === OLD_PLACEHOLDER_OPTIONS ? COMBINATION_OPTIONS : combField.options;
-          const newType = combField.field_type === 'select' ? 'multi_select' : combField.field_type;
-          const optionsChanged = newOptions !== combField.options;
-          const typeChanged = newType !== combField.field_type;
-          if (optionsChanged || typeChanged) {
-            await q('UPDATE custom_fields SET options=$2::jsonb, field_type=$3 WHERE id=$1',
-              [combField.id, JSON.stringify(newOptions), newType]);
-            console.log('✅ Updated "Combination" field on Product_Team (space ' + sp.id + '):' +
-              (optionsChanged ? ' options corrected' : '') + (typeChanged ? ' converted to multi_select' : ''));
+          let existing = combField.options;
+          if (typeof existing === 'string') {
+            try { existing = JSON.parse(existing); } catch (_) { existing = null; }
+          }
+          const needsUpgrade = !existing || existing.v !== 2 || !existing.groups;
+          if (needsUpgrade) {
+            await q(
+              'UPDATE custom_fields SET options=$2::jsonb, field_type=$3, show_in=$4::text[] WHERE id=$1',
+              [combField.id, payloadJson, 'select', ['drawer', 'create']]
+            );
+            console.log('✅ Upgraded Combination field to product-type groups on Product_Team');
           }
         }
       }
     } catch(e) { console.error('Migration warning (Combination field):', e.message); }
+
+    // Migration: issue_favorites (starred tickets per user)
+    try {
+      await pool.query(`CREATE TABLE IF NOT EXISTS issue_favorites (
+        user_id VARCHAR REFERENCES users(id) ON DELETE CASCADE,
+        issue_id VARCHAR REFERENCES issues(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (user_id, issue_id)
+      )`);
+    } catch(e) { console.error('Migration warning (issue_favorites):', e.message); }
 
     // Migration: create issue_history table
     try {
@@ -2116,6 +2197,16 @@ app.post('/api/admin/sync-db', async (req, res) => {
         created_at TIMESTAMP DEFAULT NOW()
       )`);
     } catch(e) { console.error('Migration warning (notifications):', e.message); }
+
+    // Migration: normalize legacy notification links (/spaces/KEY/issues/ISSUE-1 → /?issue=ISSUE-1)
+    try {
+      await pool.query(`
+        UPDATE notifications
+        SET link = '/?issue=' || UPPER(substring(link from '([A-Za-z][A-Za-z0-9_]*-[0-9]+)$'))
+        WHERE link ~ '/issues/[A-Za-z][A-Za-z0-9_]*-[0-9]+$'
+          AND link NOT LIKE '/?issue=%'
+      `);
+    } catch(e) { console.error('Migration warning (notification links):', e.message); }
 
     // Migration: create file_storage table for DB-backed image uploads
     try {

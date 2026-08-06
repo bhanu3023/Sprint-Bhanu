@@ -20,6 +20,8 @@ const S = {
   allWorkPage: 1,
   allWorkSelected: new Set(),
   yourWorkTab: 'assigned',
+  ywFilters: { type: [], status: [], priority: [], space: [] },
+  ywExcludeDone: false,
   awFilters: {
     type: [], status: [], priority: [], assignee: [], sprint: [],
     createdFrom: '', createdTo: '',
@@ -149,6 +151,248 @@ async function api(url, method, body) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// RECENTLY VIEWED ISSUES (per user, localStorage)
+// ═══════════════════════════════════════════════════════════
+var RECENT_VIEWED_KEY = 'sb-recent-viewed';
+var RECENT_VIEWED_24H_MS = 24 * 60 * 60 * 1000;
+var RECENT_VIEWED_RETAIN_MS = 90 * 24 * 60 * 60 * 1000;
+
+function getRecentViewedRawList() {
+  try { return JSON.parse(localStorage.getItem(RECENT_VIEWED_KEY) || '[]'); } catch (_) { return []; }
+}
+
+function trackRecentIssueView(issue) {
+  if (!issue || !issue.id) return;
+  var list = getRecentViewedRawList();
+  list = list.filter(function (x) { return x.id !== issue.id; });
+  var space = issue.space_id ? getSpace(issue.space_id) : null;
+  var snap = {
+    id: issue.id,
+    key: issue.key,
+    title: issue.title,
+    type: issue.type,
+    status: issue.status,
+    priority: issue.priority,
+    space_id: issue.space_id,
+    space_name: issue.space_name || (space && space.name) || '',
+    project_key: issue.project_key || (space && space.key) || '',
+    assignee_id: issue.assignee_id,
+    updated_at: issue.updated_at,
+    viewedAt: new Date().toISOString()
+  };
+  list.unshift(snap);
+  var cutoff = Date.now() - RECENT_VIEWED_RETAIN_MS;
+  list = list.filter(function (x) {
+    return x.viewedAt && new Date(x.viewedAt).getTime() >= cutoff;
+  });
+  localStorage.setItem(RECENT_VIEWED_KEY, JSON.stringify(list));
+  if (S.data && S.data.issues) {
+    var idx = S.data.issues.findIndex(function (i) { return i.id === issue.id; });
+    if (idx >= 0) {
+      S.data.issues[idx] = Object.assign({}, S.data.issues[idx], {
+        title: issue.title,
+        status: issue.status,
+        priority: issue.priority,
+        type: issue.type,
+        updated_at: issue.updated_at
+      });
+    }
+  }
+  refreshRecentViewedUI();
+}
+
+function mergeRecentViewedEntry(entry) {
+  var cached = (S.data && S.data.issues || []).find(function (i) { return i.id === entry.id; });
+  if (cached) {
+    return Object.assign({}, entry, cached, {
+      viewedAt: entry.viewedAt,
+      space_name: entry.space_name || cached.space_name || (getSpace(cached.space_id) || {}).name || '',
+      project_key: entry.project_key || cached.project_key || (getSpace(cached.space_id) || {}).key || ''
+    });
+  }
+  return entry;
+}
+
+function getRecentlyViewedIssues(withinMs) {
+  var list = getRecentViewedRawList();
+  if (withinMs) {
+    var since = Date.now() - withinMs;
+    list = list.filter(function (x) {
+      return x.viewedAt && new Date(x.viewedAt).getTime() >= since;
+    });
+  }
+  list.sort(function (a, b) {
+    return new Date(b.viewedAt || 0) - new Date(a.viewedAt || 0);
+  });
+  return list.map(mergeRecentViewedEntry);
+}
+
+async function enrichRecentlyViewedIssues() {
+  var list = getRecentViewedRawList();
+  if (!list.length) return [];
+  var changed = false;
+  var enriched = [];
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i];
+    var cached = (S.data && S.data.issues || []).find(function (iss) { return iss.id === entry.id; });
+    if (cached) {
+      enriched.push(mergeRecentViewedEntry(entry));
+      continue;
+    }
+    try {
+      var issue = await api('/api/issues/' + entry.id);
+      var merged = Object.assign({}, issue, { viewedAt: entry.viewedAt });
+      entry.title = issue.title;
+      entry.status = issue.status;
+      entry.priority = issue.priority;
+      entry.type = issue.type;
+      entry.key = issue.key;
+      entry.space_id = issue.space_id;
+      entry.space_name = issue.space_name || entry.space_name || '';
+      entry.project_key = issue.project_key || entry.project_key || '';
+      entry.updated_at = issue.updated_at;
+      list[i] = entry;
+      changed = true;
+      enriched.push(merged);
+    } catch (_) {
+      list[i] = null;
+      changed = true;
+    }
+  }
+  if (changed) {
+    localStorage.setItem(RECENT_VIEWED_KEY, JSON.stringify(list.filter(Boolean)));
+  }
+  enriched.sort(function (a, b) {
+    return new Date(b.viewedAt || 0) - new Date(a.viewedAt || 0);
+  });
+  return enriched;
+}
+
+function getRecentlyViewedCount24h() {
+  return getRecentlyViewedIssues(RECENT_VIEWED_24H_MS).length;
+}
+
+function refreshRecentViewedUI() {
+  if (S.currentView === 'yourwork' && S.yourWorkTab === 'recent') {
+    renderRecentlyViewedContent();
+  }
+  if (S.currentView === 'home') {
+    renderHomeRecentSection();
+  }
+}
+
+function clearYourWorkFilters() {
+  S.ywExcludeDone = false;
+  S.ywFilters = { type: [], status: [], priority: [], space: [] };
+  var srch = $('ywSearch');
+  if (srch) srch.value = '';
+}
+
+function applyYourWorkOpenFilter() {
+  S.ywExcludeDone = true;
+  S.ywFilters = { type: [], status: [], priority: [], space: [] };
+  var srch = $('ywSearch');
+  if (srch) srch.value = '';
+}
+
+function patchIssueInCache(issueId, updates) {
+  if (!updates) return;
+  (S.data.issues || []).forEach(function (i) {
+    if (i.id == issueId) Object.assign(i, updates);
+  });
+  if (!_ywCache) return;
+  ['assigned', 'reported'].forEach(function (key) {
+    (_ywCache[key] || []).forEach(function (i) {
+      if (i.id == issueId) Object.assign(i, updates);
+    });
+  });
+}
+
+function refreshHomeMyIssuesPanel() {
+  if (S.currentView !== 'home') return;
+  var myIssues = (S.data.issues || []).filter(function (i) {
+    return i.assignee_id == S.currentUser && i.status !== 'Done';
+  });
+  var badge = $('myIssuesBadge');
+  if (badge) {
+    badge.textContent = myIssues.length;
+    badge.className = 'db-panel-badge' + (myIssues.length ? ' show' : '');
+  }
+  var panel = $('myIssues');
+  if (!panel) return;
+  if (!myIssues.length) {
+    panel.innerHTML = '<div class="db-issue-empty">' +
+      '<svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm5 5a5 5 0 0 0-10 0h10z"/></svg>' +
+      'No issues assigned to you</div>';
+    return;
+  }
+  var html = '';
+  myIssues.slice(0, 8).forEach(function (issue) {
+    html += '<div class="db-issue-row" onclick="openIssuePage(\'' + issue.id + '\')">' +
+      '<span class="db-issue-row-key">' + esc(issueKeyStr(issue)) + '</span>' +
+      '<span class="db-issue-row-title">' + esc(issue.title) + '</span>' +
+      statusBadge(issue.status) + priorityBadge(issue.priority) + '</div>';
+  });
+  panel.innerHTML = html;
+}
+
+function refreshDashboardIssueStats() {
+  api('/api/my-issues').then(function (data) {
+    _ywCache = data;
+    var totalEl = $('dbMyIssuesStat');
+    if (totalEl) totalEl.textContent = countAssignedPlusReported(data);
+    var openEl = $('dbOpenIssuesStat');
+    if (openEl) openEl.textContent = countOpenAssignedIssues(data);
+    _updateYourWorkTabBadges(data);
+  }).catch(function () {});
+}
+
+function refreshYourWorkViews() {
+  if (S.currentView === 'yourwork') {
+    if (S.yourWorkTab === 'recent') renderRecentlyViewedContent();
+    else renderYourWorkContent(_ywCache);
+  }
+}
+
+function afterIssueFieldUpdate(issueId, updates) {
+  patchIssueInCache(issueId, updates);
+  refreshYourWorkViews();
+  if (S.currentView === 'space' && S.currentTab === 'allwork') {
+    refreshData().then(renderAllWork);
+  }
+  if (S.drawerIssueId == issueId && updates.status && $('drawerStatus')) {
+    $('drawerStatus').value = updates.status;
+    var lbl = $('drawerStatusLabel');
+    if (lbl) lbl.textContent = updates.status;
+  }
+  if (S.drawerIssueId == issueId && updates.priority && $('drawerPriority')) {
+    $('drawerPriority').value = updates.priority;
+  }
+  refreshDashboardIssueStats();
+  refreshHomeMyIssuesPanel();
+}
+
+function navigateToYourWork(tab, opts) {
+  opts = opts || {};
+  tab = tab || 'assigned';
+  if (['assigned', 'reported', 'recent'].indexOf(tab) === -1) tab = 'assigned';
+  if (!opts.preserveOpenFilter) clearYourWorkFilters();
+  S.yourWorkTab = tab;
+  navigateTo('yourwork');
+}
+function navigateToYourWorkRecent() {
+  navigateToYourWork('recent');
+}
+function navigateToYourWorkOpen() {
+  applyYourWorkOpenFilter();
+  S.yourWorkTab = 'assigned';
+  navigateTo('yourwork');
+}
+window.navigateToYourWork = navigateToYourWork;
+window.navigateToYourWorkRecent = navigateToYourWorkRecent;
+window.navigateToYourWorkOpen = navigateToYourWorkOpen;
+
+// ═══════════════════════════════════════════════════════════
 // TOAST NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════
 function toast(msg, type) {
@@ -220,19 +464,28 @@ function stopDrawerLiveSync() {
 }
 
 function closeDrawer() {
-  document.body.classList.remove('issue-page');
-  window.history.replaceState({}, "", "/");
   stopDrawerLiveSync();
-  $('issueDrawer').setAttribute('hidden', '');
-  S.drawerIssueId = null;
   window._drawerPending = {};
+  if (window.history.length > 1 && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
+    window.history.back();
+    return;
+  }
+  _closeIssueDrawer();
+  var returnUrl = S._issueReturnUrl || appPathForView(S._prevView || 'home');
+  window.history.replaceState({}, '', returnUrl);
   if (S._prevTab && S._prevSpace) {
     S.currentSpace = S._prevSpace;
-    navigateToSpace(S._prevSpace, S._prevTab);
+    navigateToSpace(S._prevSpace, S._prevTab, { skipUrlUpdate: true, replaceUrl: true });
   } else if (S._prevView) {
-    navigateTo(S._prevView);
+    if (S._prevView === 'yourwork') {
+      if (S._prevYourWorkTab) S.yourWorkTab = S._prevYourWorkTab;
+      if (S._prevYwOpen) applyYourWorkOpenFilter();
+      else clearYourWorkFilters();
+    }
+    navigateTo(S._prevView, { skipUrlUpdate: true, replaceUrl: true });
   }
-  S._prevView = null; S._prevTab = null; S._prevSpace = null;
+  S._prevView = null; S._prevTab = null; S._prevSpace = null; S._prevYourWorkTab = null; S._prevYwOpen = false;
+  refreshRecentViewedUI();
 }
 window.closeDrawer = closeDrawer;
 
@@ -240,17 +493,26 @@ function goBackToSavedPage() {
   window.history.replaceState({}, "", "/");
   stopDrawerLiveSync();
   $('issueDrawer').setAttribute('hidden', '');
+  document.body.classList.remove('issue-page');
   S.drawerIssueId = null;
   window._drawerPending = {};
   var pTab   = S._prevTab;
   var pSpace = S._prevSpace;
   var pView  = S._prevView;
-  S._prevView = null; S._prevTab = null; S._prevSpace = null;
+  var pYourWorkTab = S._prevYourWorkTab;
+  S._prevView = null; S._prevTab = null; S._prevSpace = null; S._prevYourWorkTab = null;
   if (pTab && pSpace) {
     S.currentSpace = pSpace;
     navigateToSpace(pSpace, pTab);
+    refreshRecentViewedUI();
   } else if (pView && pView !== 'home') {
-    navigateTo(pView);
+    if (pView === 'yourwork') {
+      if (pYourWorkTab) S.yourWorkTab = pYourWorkTab;
+      if (S._prevYwOpen) applyYourWorkOpenFilter();
+      else clearYourWorkFilters();
+    }
+    navigateTo(pView, { replaceUrl: true });
+    refreshRecentViewedUI();
   } else if (window.history.length > 1) {
     window.history.back();
   } else if (S.currentSpace) {
@@ -264,15 +526,24 @@ function goBackToSavedPage() {
 window.goBackToSavedPage = goBackToSavedPage;
 
 // Opens an issue in a new browser tab
-function openIssuePage(issueId) {
-  S._prevView = S.currentView;
-  S._prevTab = S.currentTab;
-  S._prevSpace = S.currentSpace;
-  S._prevScrollY = window.scrollY;
+function openIssuePage(issueId, opts) {
+  opts = opts || {};
+  collapseSpaceSubnav();
+  if (!opts.skipHistory) {
+    S._prevView = S.currentView;
+    S._prevTab = S.currentTab;
+    S._prevSpace = S.currentSpace;
+    S._prevYourWorkTab = S.yourWorkTab;
+    S._prevYwOpen = S.ywExcludeDone && S.yourWorkTab === 'assigned';
+    S._prevScrollY = window.scrollY;
+    S._issueReturnUrl = window.location.pathname + window.location.search;
+  }
   var issueObj = (S.data.issues || []).find(function(i){ return i.id == issueId; });
   var issueKey = issueObj ? issueObj.key : issueId;
-  window.history.pushState({ issueId: issueId }, "", "?issue=" + issueKey);
-  document.body.classList.add("issue-page");
+  if (!opts.skipHistory) {
+    window.history.pushState({ issueId: issueId, returnUrl: S._issueReturnUrl }, '', '/?issue=' + encodeURIComponent(issueKey));
+  }
+  document.body.classList.add('issue-page');
   openDrawer(issueId);
 }
 window.openIssuePage = openIssuePage;
@@ -402,6 +673,46 @@ function getSpaceIssues(spaceId) {
 function getSpaceSprints(spaceId) {
   return (S.data.sprints || []).filter(function (sp) { return sp.space_id == spaceId; });
 }
+
+function isIssueStarred(issueId) {
+  return (S.data.issue_favorites || []).some(function (f) {
+    return f.issue_id == issueId;
+  });
+}
+
+function updateDrawerStarBtn(issueId) {
+  var btn = $('drawerStarBtn');
+  if (!btn) return;
+  var starred = isIssueStarred(issueId);
+  btn.textContent = starred ? '\u2605' : '\u2606';
+  btn.classList.toggle('starred', starred);
+  btn.title = starred ? 'Remove star' : 'Star issue';
+}
+
+async function toggleIssueFavorite(issueId) {
+  if (!issueId) return;
+  try {
+    var res = await api('/api/issues/' + issueId + '/favorite', 'POST', {});
+    if (!S.data.issue_favorites) S.data.issue_favorites = [];
+    S.data.issue_favorites = S.data.issue_favorites.filter(function (f) { return f.issue_id != issueId; });
+    if (res && res.favorited) {
+      S.data.issue_favorites.unshift({ issue_id: issueId, created_at: new Date().toISOString() });
+      if (!(S.data.issues || []).some(function (i) { return i.id == issueId; })) {
+        try {
+          var iss = await api('/api/issues/' + issueId);
+          S.data.issues = S.data.issues || [];
+          S.data.issues.push(iss);
+        } catch (_) {}
+      }
+    }
+    updateDrawerStarBtn(issueId);
+    renderSidebar();
+    toast(res && res.favorited ? 'Issue starred' : 'Star removed');
+  } catch (_) {
+    toast('Could not update star', 'error');
+  }
+}
+window.toggleIssueFavorite = toggleIssueFavorite;
 
 function isFavorited(spaceId) {
   return (S.data.space_favorites || []).some(function (f) { return f.user_id == S.currentUser && f.space_id == spaceId; });
@@ -581,29 +892,27 @@ async function init() {
     }
     var issueParam = new URLSearchParams(window.location.search).get('issue');
     if (!issueParam) {
-      // Restore whichever view/space/tab was open before the last refresh,
-      // instead of always resetting to Home.
-      var restoredNav = false;
-      try {
-        var savedNav = JSON.parse(localStorage.getItem('sb-last-nav') || 'null');
-        if (savedNav) {
-          if (savedNav.view === 'space' && savedNav.spaceId && getSpace(savedNav.spaceId)) {
-            var wantTab = savedNav.tab || 'summary';
-            if ((wantTab === 'reports' || wantTab === 'space-settings') && !isSpaceOwner(savedNav.spaceId)) {
-              wantTab = 'summary';
+      var restoredNav = applyRouteFromUrl({ replaceUrl: true });
+      if (!restoredNav) {
+        try {
+          var savedNav = JSON.parse(localStorage.getItem('sb-last-nav') || 'null');
+          if (savedNav) {
+            if (savedNav.yourWorkTab) S.yourWorkTab = savedNav.yourWorkTab;
+            if (savedNav.view === 'space' && savedNav.spaceId && getSpace(savedNav.spaceId)) {
+              var wantTab = savedNav.tab || 'summary';
+              if ((wantTab === 'reports' || wantTab === 'space-settings') && !isSpaceOwner(savedNav.spaceId)) {
+                wantTab = 'summary';
+              }
+              navigateToSpace(savedNav.spaceId, wantTab, { replaceUrl: true });
+              restoredNav = true;
+            } else if (['home','yourwork','spaces','worklog-report','product-roadmap','user-management','settings','global-reports'].indexOf(savedNav.view) !== -1) {
+              navigateTo(savedNav.view, { replaceUrl: true });
+              restoredNav = true;
             }
-            navigateToSpace(savedNav.spaceId, wantTab);
-            restoredNav = true;
-          } else if (['home','yourwork','spaces','worklog-report','product-roadmap','user-management','settings'].indexOf(savedNav.view) !== -1) {
-            navigateTo(savedNav.view);
-            restoredNav = true;
-          } else if (savedNav.view === 'global-reports' && isSpaceOwner(null)) {
-            navigateTo('global-reports');
-            restoredNav = true;
           }
-        }
-      } catch (_) {}
-      if (!restoredNav) navigateTo('home');
+        } catch (_) {}
+      }
+      if (!restoredNav) navigateTo('home', { replaceUrl: true });
     }
     if (issueParam) {
       // Resolve key to UUID (e.g. BRT-76 -> UUID)
@@ -659,7 +968,7 @@ async function init() {
         openDrawer(issueParam);
         setTimeout(function() {
           var key = $('drawerKey') && $('drawerKey').textContent;
-          var title = $('drawerTitle') && $('drawerTitle').textContent;
+          var title = getDrawerTitleValue();
           if (key || title) document.title = (key ? key + ' · ' : '') + (title || 'Issue') + ' — SprintBoard';
         }, 400);
       }, 100);
@@ -852,30 +1161,195 @@ window.doLogout = doLogout;
 // ═══════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════
-function _exitIssuePage() {
+function _closeIssueDrawer() {
   document.body.classList.remove('issue-page');
   var drawer = $('issueDrawer');
   if (drawer) drawer.setAttribute('hidden', '');
-  window.history.replaceState({}, "", "/");
   S.drawerIssueId = null;
   window._currentIssueKey = null;
 }
 
-// Remember which view/space/tab the user is on so a page refresh reopens
-// the same place instead of always resetting to Home.
+function _exitIssuePage() {
+  _closeIssueDrawer();
+}
+
+var YOUR_WORK_TAB_LABELS = {
+  assigned: 'Assigned to Me',
+  reported: 'Reported by Me',
+  recent: 'Recently Viewed'
+};
+
+var SPACE_TAB_TO_SLUG = {
+  summary: 'summary',
+  backlog: 'backlog',
+  sprint: 'sprint',
+  reports: 'reports',
+  allwork: 'all-work',
+  'space-settings': 'settings'
+};
+var SPACE_SLUG_TO_TAB = {
+  summary: 'summary',
+  backlog: 'backlog',
+  sprint: 'sprint',
+  reports: 'reports',
+  'all-work': 'allwork',
+  settings: 'space-settings'
+};
+
+var SPACE_SUBNAV_ITEMS = [
+  { t: 'summary', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>', l: 'Summary' },
+  { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog' },
+  { t: 'sprint', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', l: 'Active Sprint' },
+  { t: 'reports', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>', l: 'Reports' },
+  { t: 'allwork', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'All Work' },
+  { t: 'space-settings', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', l: 'Settings' }
+];
+
+function getSpaceByKey(key) {
+  if (!key || !S.data) return null;
+  var upper = String(key).toUpperCase();
+  return (S.data.spaces || []).find(function (s) {
+    return s.key === upper || s.id === key;
+  }) || null;
+}
+
+function spacePath(spaceId, tab) {
+  var sp = getSpace(spaceId) || getSpaceByKey(spaceId);
+  if (!sp || !sp.key) return '/';
+  tab = tab || 'summary';
+  var slug = SPACE_TAB_TO_SLUG[tab] || 'summary';
+  if (slug === 'summary') return '/space/' + encodeURIComponent(sp.key);
+  return '/space/' + encodeURIComponent(sp.key) + '/' + slug;
+}
+
+function yourWorkPath(tab, opts) {
+  opts = opts || {};
+  if (opts.open) return '/my-work/open';
+  tab = tab || 'assigned';
+  return tab === 'assigned' ? '/my-work' : '/my-work/' + tab;
+}
+
+function appPathForView(view, extras) {
+  extras = extras || {};
+  if (view === 'yourwork') return yourWorkPath(extras.yourWorkTab || S.yourWorkTab);
+  if (view === 'space' && extras.spaceId) return spacePath(extras.spaceId, extras.tab || S.currentTab);
+  if (view === 'spaces') return '/spaces';
+  if (view === 'global-reports') return '/reports';
+  if (view === 'worklog-report') return '/work-log';
+  if (view === 'product-roadmap') return '/roadmap';
+  if (view === 'settings') return '/settings';
+  return '/';
+}
+
+function collapseSpaceSubnav() {
+  qsa('.space-subnav').forEach(function (s) { s.remove(); });
+  qsa('.space-item').forEach(function (s) { s.classList.remove('active'); });
+}
+
+function buildSpaceSubnavHtml(spaceId, tab) {
+  return SPACE_SUBNAV_ITEMS.map(function (x) {
+    var href = spacePath(spaceId, x.t);
+    return '<a class="nav-item space-subitem' + (x.t === tab ? ' active' : '') + '" href="' + href + '" data-tab="' + x.t + '" data-space-id="' + spaceId + '"><span class="nav-icon">' + x.i + '</span> ' + x.l + '</a>';
+  }).join('');
+}
+
+function mountSpaceSubnav(spaceId, tab) {
+  collapseSpaceSubnav();
+  qsa('.space-item').forEach(function (el) {
+    var isSel = String(el.dataset.spaceId) === String(spaceId);
+    el.classList.toggle('active', isSel);
+    if (isSel) {
+      var sub = document.createElement('div');
+      sub.className = 'space-subnav';
+      sub.innerHTML = buildSpaceSubnavHtml(spaceId, tab);
+      el.parentNode.insertBefore(sub, el.nextSibling);
+    }
+  });
+}
+
+function parseAppRoute() {
+  var path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+  var issueKey = new URLSearchParams(window.location.search).get('issue');
+  if (issueKey) return { view: 'issue', issueKey: issueKey };
+  var spaceMatch = path.match(/^\/space\/([^/]+)(?:\/([^/]+))?$/i);
+  if (spaceMatch) {
+    return {
+      view: 'space',
+      spaceKey: decodeURIComponent(spaceMatch[1]),
+      tab: SPACE_SLUG_TO_TAB[spaceMatch[2]] || 'summary'
+    };
+  }
+  if (path === '/my-work/open') return { view: 'yourwork', yourWorkTab: 'assigned', openOnly: true };
+  if (path === '/my-work' || path === '/my-work/assigned') return { view: 'yourwork', yourWorkTab: 'assigned' };
+  if (path === '/my-work/reported') return { view: 'yourwork', yourWorkTab: 'reported' };
+  if (path === '/my-work/recent') return { view: 'yourwork', yourWorkTab: 'recent' };
+  if (path === '/spaces') return { view: 'spaces' };
+  if (path === '/reports') return { view: 'global-reports' };
+  if (path === '/work-log') return { view: 'worklog-report' };
+  if (path === '/roadmap') return { view: 'product-roadmap' };
+  if (path === '/settings') return { view: 'settings' };
+  return { view: 'home' };
+}
+
+function syncAppUrl(opts) {
+  opts = opts || {};
+  var path = '/';
+  if (S.currentView === 'yourwork') {
+    path = yourWorkPath(S.yourWorkTab, {
+      open: S.ywExcludeDone && S.yourWorkTab === 'assigned'
+    });
+  } else if (S.currentView === 'space' && S.currentSpace) path = spacePath(S.currentSpace, S.currentTab);
+  else path = appPathForView(S.currentView);
+  if (window.location.pathname === path && !window.location.search) return;
+  var fn = opts.replace ? 'replaceState' : 'pushState';
+  window.history[fn]({
+    view: S.currentView,
+    spaceId: S.currentSpace,
+    tab: S.currentTab,
+    yourWorkTab: S.yourWorkTab
+  }, '', path);
+}
+
+function applyRouteFromUrl(opts) {
+  opts = opts || {};
+  var route = parseAppRoute();
+  if (route.view === 'issue') return false;
+  if (route.view === 'yourwork') {
+    S.yourWorkTab = route.yourWorkTab || 'assigned';
+    if (route.openOnly) applyYourWorkOpenFilter();
+    else clearYourWorkFilters();
+    navigateTo('yourwork', { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+    return true;
+  }
+  if (route.view === 'space') {
+    var sp = getSpaceByKey(route.spaceKey);
+    if (sp) {
+      navigateToSpace(sp.id, route.tab || 'summary', { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+      return true;
+    }
+  }
+  if (route.view !== 'home') {
+    navigateTo(route.view, { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+    return true;
+  }
+  navigateTo('home', { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+  return true;
+}
+
 function saveNavState() {
   try {
     localStorage.setItem('sb-last-nav', JSON.stringify({
       view: S.currentView,
       spaceId: S.currentSpace,
-      tab: S.currentTab
+      tab: S.currentTab,
+      yourWorkTab: S.yourWorkTab
     }));
   } catch (_) {}
 }
 
-function navigateTo(view) {
+function navigateTo(view, opts) {
+  opts = opts || {};
   document.body.classList.remove('settings-active');
-  // Guard: global Reports is owner-only
   if (view === 'global-reports' && !isSpaceOwner(S.currentSpace)) {
     toast('Only owners can access Reports', 'error');
     return;
@@ -885,30 +1359,29 @@ function navigateTo(view) {
   S.currentSpace = null;
   S.currentTab = null;
   saveNavState();
+  collapseSpaceSubnav();
 
-  // Hide everything
   qsa('.view').forEach(function (v) { v.setAttribute('hidden', ''); });
   $('spaceHeader').setAttribute('hidden', '');
   $('spaceNav').setAttribute('hidden', '');
-  var navSection = document.querySelector('.nav-section');
-              // Removed: navSection hiding - keep visible
 
-  // Show target
   var target = $('view-' + view);
   if (target) target.removeAttribute('hidden');
 
-  // Breadcrumb
-  var label = view === 'yourwork' ? 'Assigned to me' : view === 'global-reports' ? 'Reports' : view === 'worklog-report' ? 'Work Log' : view === 'product-roadmap' ? 'Product Roadmap' : view === 'spaces' ? 'Spaces' : cap(view);
+  var label = view === 'yourwork'
+    ? 'Assigned to me / ' + (S.ywExcludeDone && S.yourWorkTab === 'assigned'
+      ? 'Open Issues'
+      : (YOUR_WORK_TAB_LABELS[S.yourWorkTab] || 'Assigned to Me'))
+    : view === 'global-reports' ? 'Reports' : view === 'worklog-report' ? 'Work Log' : view === 'product-roadmap' ? 'Product Roadmap' : view === 'spaces' ? 'Spaces' : cap(view);
   updateBreadcrumb([{ label: label }]);
 
-  // Active state
+  if (!opts.skipUrlUpdate) syncAppUrl({ replace: opts.replaceUrl });
+
   qsa('.nav-item[data-view]').forEach(function (el) {
     el.classList.toggle('active', el.dataset.view === view);
   });
   qsa('.nav-item[data-tab]').forEach(function (el) { el.classList.remove('active'); });
-  qsa('.space-item').forEach(function (el) { el.classList.remove('active'); });
 
-  // Render
   if (view === 'home') renderHome();
   else if (view === 'yourwork') renderYourWork();
   else if (view === 'spaces') renderSpacesView();
@@ -963,10 +1436,10 @@ function renderGlobalReports() {
   window._loadGlobalReport();
 }
 
-function navigateToSpace(spaceId, tab) {
+function navigateToSpace(spaceId, tab, opts) {
+  opts = opts || {};
   _exitIssuePage();
   tab = tab || 'summary';
-  // Reset All Work filters when switching spaces
   if (spaceId !== S.currentSpace) {
     S.awFilters = { type:[], status:[], priority:[], assignee:[], sprint:[],
       createdFrom:'', createdTo:'', updatedFrom:'', updatedTo:'',
@@ -981,7 +1454,6 @@ function navigateToSpace(spaceId, tab) {
 
   qsa('.view').forEach(function (v) { v.setAttribute('hidden', ''); });
   $('spaceHeader').removeAttribute('hidden');
-  // $('spaceNav').removeAttribute('hidden'); // Already have top nav
   renderSpaceHeader(space);
 
   updateBreadcrumb([
@@ -991,33 +1463,17 @@ function navigateToSpace(spaceId, tab) {
   ]);
 
   qsa('.nav-item[data-view]').forEach(function (el) { el.classList.remove('active'); });
-  qsa('.space-subnav').forEach(function(el){ el.remove(); });
-  qsa('.space-item').forEach(function(el){
-    var isSel = String(el.dataset.spaceId) === String(spaceId);
-    el.classList.toggle('active', isSel);
-    if(isSel){
-      var sub = document.createElement('div');
-      sub.className = 'space-subnav';
-      sub.innerHTML = [
-        {t:'summary',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>',l:'Summary'},
-        {t:'backlog',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',l:'Backlog'},
-        {t:'sprint',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',l:'Active Sprint'},
-        {t:'reports',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>',l:'Reports'},
-        {t:'allwork',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',l:'All Work'},
-        {t:'space-settings',i:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',l:'Settings'}
-      ].map(function(x){
-        return '<a class="nav-item space-subitem'+(x.t===tab?' active':'')+' " data-tab="'+x.t+'" data-space-id="'+spaceId+'"><span class="nav-icon">'+x.i+'</span> '+x.l+'</a>';
-      }).join('');
-      el.parentNode.insertBefore(sub, el.nextSibling);
-    }
-  });
+  mountSpaceSubnav(spaceId, tab);
+  saveNavState();
 
-  renderTab(tab);
+  if (!opts.skipUrlUpdate) syncAppUrl({ replace: opts.replaceUrl });
+
+  renderTab(tab, { skipUrlUpdate: true });
 }
 window.navigateToSpace = navigateToSpace;
 
-function renderTab(tab) {
-  // Guard: Reports and Settings are owner-only (global owner OR space owner)
+function renderTab(tab, opts) {
+  opts = opts || {};
   if (!isSpaceOwner(S.currentSpace) && (tab === 'reports' || tab === 'space-settings')) {
     toast('Only owners can access this section', 'error');
     return;
@@ -1027,6 +1483,9 @@ function renderTab(tab) {
   saveNavState();
   qsa('.view').forEach(function (v) { v.setAttribute('hidden', ''); });
   qsa('.nav-item[data-tab]').forEach(function (el) { el.classList.toggle('active', el.dataset.tab === tab); });
+  qsa('.space-subitem').forEach(function (el) {
+    el.classList.toggle('active', el.dataset.tab === tab && el.dataset.spaceId == S.currentSpace);
+  });
 
   var target = $('view-' + tab);
   if (target) target.removeAttribute('hidden');
@@ -1038,6 +1497,10 @@ function renderTab(tab) {
       { label: space.name, action: function () { navigateToSpace(S.currentSpace, 'summary'); } },
       { label: cap(tab) }
     ]);
+  }
+
+  if (!opts.skipUrlUpdate && S.currentView === 'space' && S.currentSpace) {
+    syncAppUrl({ replace: false });
   }
 
   switch (tab) {
@@ -1133,12 +1596,50 @@ function renderSidebar() {
   var memberHiddenItems = document.querySelectorAll('[data-view="worklog-report"], [data-view="product-roadmap"]');
   memberHiddenItems.forEach(function(el) { el.style.display = isOwnerOrAdmin ? '' : 'none'; });
 
-  // Favorites
-  var favRecs = (S.data.space_favorites || []).filter(function (f) { return f.user_id == S.currentUser; });
-  var favs = favRecs.map(function (f) { return getSpace(f.space_id); }).filter(Boolean);
-  $('favSpaces').innerHTML = favs.length
-    ? favs.map(spaceNavItem).join('')
-    : '<p class="text-muted sidebar-empty">No favorites yet</p>';
+  // Starred issues (tickets)
+  var favIssueIds = (S.data.issue_favorites || []).map(function (f) { return f.issue_id; });
+  var favIssues = favIssueIds.map(function (id) {
+    return (S.data.issues || []).find(function (i) { return i.id == id; });
+  }).filter(Boolean);
+  var favIssuesEl = $('favIssues');
+  if (favIssuesEl) {
+    favIssuesEl.innerHTML = favIssues.length
+      ? favIssues.map(function (iss) {
+          return '<a class="nav-item starred-issue-item" href="/?issue=' + encodeURIComponent(issueKeyStr(iss)) + '" data-issue-id="' + esc(iss.id) + '" title="' + esc(iss.title) + '">' +
+            '<span class="nav-icon" style="color:#fbbf24">\u2605</span>' +
+            '<span class="starred-issue-key">' + esc(issueKeyStr(iss)) + '</span>' +
+            '<span class="starred-issue-title">' + esc(iss.title) + '</span>' +
+          '</a>';
+        }).join('')
+      : '<p class="text-muted sidebar-empty">Star tickets from issue view</p>';
+    qsa('.starred-issue-item').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        openIssuePage(el.dataset.issueId);
+      });
+    });
+    // Fetch any starred issues missing from local cache
+    var missingFavIds = favIssueIds.filter(function (id) {
+      return !(S.data.issues || []).some(function (i) { return i.id == id; });
+    });
+    if (missingFavIds.length) {
+      Promise.all(missingFavIds.map(function (id) {
+        return api('/api/issues/' + id).catch(function () { return null; });
+      })).then(function (fetched) {
+        var added = false;
+        fetched.forEach(function (iss) {
+          if (iss && iss.id) {
+            S.data.issues = S.data.issues || [];
+            if (!S.data.issues.some(function (i) { return i.id == iss.id; })) {
+              S.data.issues.push(iss);
+              added = true;
+            }
+          }
+        });
+        if (added) renderSidebar();
+      });
+    }
+  }
 
   // All spaces — members only see spaces they are assigned to in DB
   var allSpaces = (S.data.spaces || []).filter(function (s) { return !s.is_archived; });
@@ -1151,26 +1652,15 @@ function renderSidebar() {
     ? spaces.map(spaceNavItem).join('')
     : '<p class="text-muted sidebar-empty">No spaces</p>';
 
-  // Bind space clicks — toggle collapse if already active
+  // Bind space clicks — open sub-nav for selected space only
   qsa('.space-item').forEach(function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
       var spaceId = el.dataset.spaceId;
       if (String(S.currentSpace) === String(spaceId) && S.currentView === 'space') {
-        // Already open — collapse: remove subnav and deactivate
-        qsa('.space-subnav').forEach(function(s){ s.remove(); });
-        qsa('.space-item').forEach(function(s){ s.classList.remove('active'); });
-        S.currentSpace = null;
-        S.currentView = 'home';
-        qsa('.view').forEach(function(v){ v.setAttribute('hidden',''); });
-        var homeView = $('view-home');
-        if (homeView) homeView.removeAttribute('hidden');
-        $('spaceHeader').setAttribute('hidden','');
-        qsa('.nav-item[data-view]').forEach(function(n){ n.classList.toggle('active', n.dataset.view === 'home'); });
-        updateBreadcrumb([{ label: 'Home' }]);
-        renderHome();
+        navigateTo('home');
       } else {
-        navigateToSpace(spaceId);
+        navigateToSpace(spaceId, 'summary');
       }
     });
   });
@@ -1193,17 +1683,10 @@ function spaceNavItem(sp) {
   var bgColor = sp.color || '#0129ac';
   var isActive = S.currentSpace != null && String(S.currentSpace) === String(sp.id);
   var subnav = isActive ? (
-    '<div class="space-subnav">' +
-'<a class="nav-item space-subitem' + (S.currentTab==='summary'?' active':'') + '" data-tab="summary" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg></span> Summary</a>' +
-    '<a class="nav-item space-subitem' + (S.currentTab==='backlog'?' active':'') + '" data-tab="backlog" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span> Backlog</a>' +
-    '<a class="nav-item space-subitem' + (S.currentTab==='sprint'?' active':'') + '" data-tab="sprint" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> Active Sprint</a>' +
-    '<a class="nav-item space-subitem' + (S.currentTab==='reports'?' active':'') + '" data-tab="reports" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg></span> Reports</a>' +
-    '<a class="nav-item space-subitem' + (S.currentTab==='allwork'?' active':'') + '" data-tab="allwork" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span> All Work</a>' +
-    '<a class="nav-item space-subitem' + (S.currentTab==='space-settings'?' active':'') + '" data-tab="space-settings" data-space-id="' + sp.id + '"><span class="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings</a>' +
-    '</div>'
+    '<div class="space-subnav">' + buildSpaceSubnavHtml(sp.id, S.currentTab || 'summary') + '</div>'
   ) : '';
   return '<div class="space-item-wrap">' +
-    '<a class="nav-item space-item' + active + '" data-space-id="' + sp.id + '">' +
+    '<a class="nav-item space-item' + active + '" href="' + spacePath(sp.id, 'summary') + '" data-space-id="' + sp.id + '">' +
     '<span class="space-dot" style="background:transparent;"></span>' +
     '<span class="space-jira-icon" style="background:' + bgColor + ';width:20px;height:20px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;margin-right:6px;">' + initLetter + '</span>' +
     '<span class="space-item-name">' + esc(sp.name) + '</span>' +
@@ -1228,17 +1711,34 @@ function renderSpaceHeader(space) {
   if (overflow > 0) membersHtml += '<span class="avatar-overflow" style="cursor:pointer" title="View all members" onclick="_settingsActiveTab=\'people\';navigateToSpace(S.currentSpace,\'space-settings\')">+' + overflow + '</span>';
   $('spaceMembers').innerHTML = membersHtml;
 
-  var starred = isFavorited(space.id);
-  $('starSpaceBtn').textContent = starred ? '\u2605' : '\u2606';
-  $('starSpaceBtn').classList.toggle('starred', starred);
-  $('starSpaceBtn').onclick = async function () {
-    await api('/api/spaces/' + space.id + '/favorite', 'POST', { user_id: S.currentUser });
-    await refreshData();
-    renderSidebar();
-    renderSpaceHeader(getSpace(space.id));
-  };
-
   $('spaceActionsBtn').onclick = function () { openSpaceModal(space); };
+}
+
+function countAssignedPlusReported(data) {
+  if (!data) return 0;
+  var ids = {};
+  (data.assigned || []).forEach(function (i) { ids[i.id] = true; });
+  (data.reported || []).forEach(function (i) { ids[i.id] = true; });
+  return Object.keys(ids).length;
+}
+
+function countOpenAssignedIssues(data) {
+  if (!data) return 0;
+  return (data.assigned || []).filter(function (i) { return i.status !== 'Done'; }).length;
+}
+
+function getOpenAssignedCountLocal() {
+  return (S.data.issues || []).filter(function (i) {
+    return i.assignee_id == S.currentUser && i.status !== 'Done';
+  }).length;
+}
+
+function getMyIssueCountFromLocalData() {
+  var ids = {};
+  (S.data.issues || []).forEach(function (i) {
+    if (i.assignee_id == S.currentUser || i.reporter_id == S.currentUser) ids[i.id] = true;
+  });
+  return Object.keys(ids).length;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1252,8 +1752,13 @@ function renderHome() {
     });
   });
   var allIssues = S.data.issues || [];
+  var myAssignedReportedCount = _ywCache ? countAssignedPlusReported(_ywCache) : getMyIssueCountFromLocalData();
+  var openIssuesCount = _ywCache ? countOpenAssignedIssues(_ywCache) : getOpenAssignedCountLocal();
   var myIssues = allIssues.filter(function (i) { return i.assignee_id == S.currentUser && i.status !== 'Done'; });
-  var recentIssues = allIssues.slice().sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); }).slice(0, 10);
+  var recentlyViewed24h = getRecentlyViewedIssues(RECENT_VIEWED_24H_MS);
+  var recentIssues = recentlyViewed24h.length
+    ? recentlyViewed24h
+    : allIssues.slice().sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); }).slice(0, 10);
 
   // Hero greeting
   var hour = new Date().getHours();
@@ -1274,26 +1779,27 @@ function renderHome() {
   }
 
   // Stat cards
-  function dbStat(label, value, color, rgb, svgPath, onclick) {
+  function dbStat(label, value, color, rgb, svgPath, onclick, valueId) {
     var click = onclick ? ' onclick="' + onclick + '" style="--db-stat-color:' + color + ';--db-stat-rgb:' + rgb + ';cursor:pointer"' : ' style="--db-stat-color:' + color + ';--db-stat-rgb:' + rgb + '"';
+    var valAttr = valueId ? ' id="' + valueId + '"' : '';
     return '<div class="db-stat"' + click + '>' +
       '<div class="db-stat-icon"><svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">' + svgPath + '</svg></div>' +
-      '<div class="db-stat-body"><div class="db-stat-value">' + value + '</div><div class="db-stat-label">' + label + '</div></div>' +
+      '<div class="db-stat-body"><div class="db-stat-value"' + valAttr + '>' + value + '</div><div class="db-stat-label">' + label + '</div></div>' +
       '</div>';
   }
   $('homeStats').innerHTML =
     dbStat('Spaces', spaces.length, '#0129ac', '23,79,150',
       '<path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3A1.5 1.5 0 0 1 15 10.5v3A1.5 1.5 0 0 1 13.5 15h-3A1.5 1.5 0 0 1 9 13.5v-3z"/>',
       'navigateTo(\'spaces\')') +
-    dbStat('Total Issues', allIssues.length, '#6366f1', '99,102,241',
+    dbStat('Total Tickets', myAssignedReportedCount, '#6366f1', '99,102,241',
       '<path d="M14.5 3a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h13zm-13-1A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13zM3 5.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5zM3 8a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9A.5.5 0 0 1 3 8zm0 2.5a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1h-6a.5.5 0 0 1-.5-.5z"/>',
-      null) +
-    dbStat('My Open Issues', myIssues.length, '#f59e0b', '245,158,11',
+      'navigateToYourWork(\'assigned\')', 'dbMyIssuesStat') +
+    dbStat('Open Issues', openIssuesCount, '#f59e0b', '245,158,11',
       '<path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm5 5a5 5 0 0 0-10 0h10z"/>',
-      'navigateTo(\'yourwork\')') +
-    dbStat('Recent Updates', recentIssues.length, '#10b981', '16,185,129',
+      'navigateToYourWorkOpen()', 'dbOpenIssuesStat') +
+    dbStat('Recently Viewed', recentlyViewed24h.length, '#10b981', '16,185,129',
       '<path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>',
-      'navigateTo(\'yourwork\');setTimeout(function(){var t=document.querySelector(\'.yw-tab[data-yourwork-tab=recent]\');if(t)t.click();},200)');
+      'navigateToYourWorkRecent()');
 
   // My Issues
   var badge = $('myIssuesBadge');
@@ -1317,7 +1823,20 @@ function renderHome() {
   }
   $('myIssues').innerHTML = myHtml;
 
-  // Recent Activity
+  renderHomeRecentSection(recentIssues);
+
+  api('/api/my-issues').then(function (data) {
+    _ywCache = data;
+    if (S.currentView !== 'home') return;
+    var el = $('dbMyIssuesStat');
+    if (el) el.textContent = countAssignedPlusReported(data);
+    var openEl = $('dbOpenIssuesStat');
+    if (openEl) openEl.textContent = countOpenAssignedIssues(data);
+  }).catch(function () {});
+}
+
+function renderHomeRecentSection(issuesOverride) {
+  var recentIssues = issuesOverride || getRecentlyViewedIssues(RECENT_VIEWED_24H_MS);
   var actHtml = '';
   for (var j = 0; j < recentIssues.length; j++) {
     var ri = recentIssues[j];
@@ -1326,11 +1845,13 @@ function renderHome() {
       avatarHtml(user, 30) +
       '<div class="db-act-body">' +
       '<div class="db-act-title"><span class="db-act-key">' + esc(issueKeyStr(ri)) + '</span> ' + esc(ri.title) + '</div>' +
-      '<div class="db-act-time">' + relativeTime(ri.updated_at) + '</div>' +
+      '<div class="db-act-time">' + (ri.viewedAt ? 'Viewed ' + relativeTime(ri.viewedAt) : relativeTime(ri.updated_at)) + '</div>' +
       '</div></div>';
   }
-  $('recentActivity').innerHTML = actHtml || '<div class="db-issue-empty">No recent activity</div>';
-
+  var el = $('recentActivity');
+  if (el) {
+    el.innerHTML = actHtml || '<div class="db-issue-empty">No tickets viewed in the last 24 hours — open any ticket to see it here</div>';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1406,26 +1927,212 @@ function _drawSpacesGrid(spaces) {
 // ═══════════════════════════════════════════════════════════
 var _ywCache = null; // { assigned, reported, recent }
 
+var YW_FILTER_DEFS = {
+  type: {
+    opts: [
+      { v: 'task', l: 'Task' }, { v: 'bug', l: 'Bug' }, { v: 'story', l: 'Story' },
+      { v: 'epic', l: 'Epic' }, { v: 'subtask', l: 'Subtask' }
+    ]
+  },
+  status: {
+    opts: [
+      { v: 'To Do', l: 'To Do' }, { v: 'In Progress', l: 'In Progress' },
+      { v: 'In Review', l: 'In Review' }, { v: 'Done', l: 'Done' }, { v: 'Blocked', l: 'Blocked' }
+    ]
+  },
+  priority: {
+    opts: [
+      { v: 'highest', l: 'Highest' }, { v: 'high', l: 'High' }, { v: 'medium', l: 'Medium' },
+      { v: 'low', l: 'Low' }, { v: 'lowest', l: 'Lowest' }
+    ]
+  }
+};
+
+function _ywGetSpaceOpts(issues) {
+  var seen = {};
+  var opts = [];
+  (issues || []).forEach(function (iss) {
+    var id = iss.space_id;
+    if (!id || seen[id]) return;
+    seen[id] = true;
+    opts.push({ v: id, l: iss.space_name || id });
+  });
+  opts.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return opts;
+}
+
+function _ywGetFilterOpts(key, issues) {
+  if (key === 'space') return _ywGetSpaceOpts(issues);
+  return (YW_FILTER_DEFS[key] && YW_FILTER_DEFS[key].opts) || [];
+}
+
+function _ywApplyFilters(issues) {
+  var f = S.ywFilters || {};
+  var search = ($('ywSearch') && $('ywSearch').value || '').toLowerCase().trim();
+  var out = (issues || []).slice();
+  if (search) {
+    out = out.filter(function (i) {
+      return (i.title || '').toLowerCase().indexOf(search) >= 0;
+    });
+  }
+  if (f.type && f.type.length) {
+    out = out.filter(function (i) { return f.type.indexOf(i.type) >= 0; });
+  }
+  if (f.status && f.status.length) {
+    out = out.filter(function (i) { return f.status.indexOf(i.status) >= 0; });
+  }
+  if (f.priority && f.priority.length) {
+    out = out.filter(function (i) { return f.priority.indexOf(i.priority) >= 0; });
+  }
+  if (f.space && f.space.length) {
+    out = out.filter(function (i) { return f.space.indexOf(i.space_id) >= 0; });
+  }
+  if (S.ywExcludeDone) {
+    out = out.filter(function (i) { return i.status !== 'Done'; });
+  }
+  return out;
+}
+
+function _ywAnyFilterActive() {
+  var f = S.ywFilters || {};
+  return !!(
+    S.ywExcludeDone ||
+    ($('ywSearch') && $('ywSearch').value.trim()) ||
+    (f.type && f.type.length) || (f.status && f.status.length) ||
+    (f.priority && f.priority.length) || (f.space && f.space.length)
+  );
+}
+
+function _ywBuildFilterTh(key, label, issues) {
+  var sel = (S.ywFilters[key] || []);
+  var active = sel.length > 0 || (key === 'status' && S.ywExcludeDone);
+  var opts = _ywGetFilterOpts(key, issues);
+  var panel = opts.map(function (o) {
+    var chk = sel.indexOf(o.v) >= 0 ? ' checked' : '';
+    return '<label class="yw-filter-opt"><input type="checkbox" value="' + esc(String(o.v)) + '"' + chk +
+      ' onchange="window._ywFilterCheck(\'' + key + '\',this)"> ' + esc(o.l) + '</label>';
+  }).join('');
+  if (!panel) panel = '<div class="yw-filter-opt" style="color:var(--text3);cursor:default">No options</div>';
+  return '<th class="yw-th-filter">' +
+    '<div class="yw-th-filter-wrap">' +
+      '<span>' + esc(label) + '</span>' +
+      '<button type="button" class="yw-filter-trigger' + (active ? ' active' : '') + '" onclick="window._ywToggleFilter(\'' + key + '\',event)" aria-label="Filter ' + esc(label) + '">' +
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>' +
+      '</button>' +
+      '<div class="yw-filter-panel" id="yw-filter-' + key + '" hidden onclick="event.stopPropagation()">' + panel + '</div>' +
+    '</div></th>';
+}
+
+window._ywToggleFilter = function (key, ev) {
+  if (ev) ev.stopPropagation();
+  var panel = $('yw-filter-' + key);
+  if (!panel) return;
+  var open = panel.hidden;
+  document.querySelectorAll('.yw-filter-panel').forEach(function (p) { p.hidden = true; });
+  panel.hidden = !open;
+};
+
+window._ywFilterCheck = function (key, cb) {
+  var arr = S.ywFilters[key] || (S.ywFilters[key] = []);
+  if (cb.checked) { if (arr.indexOf(cb.value) < 0) arr.push(cb.value); }
+  else { var idx = arr.indexOf(cb.value); if (idx >= 0) arr.splice(idx, 1); }
+  if (key === 'status') S.ywExcludeDone = false;
+  var btn = document.querySelector('#yw-filter-' + key)?.closest('.yw-th-filter-wrap')?.querySelector('.yw-filter-trigger');
+  if (btn) btn.classList.toggle('active', arr.length > 0 || (key === 'status' && S.ywExcludeDone));
+  if (S.yourWorkTab === 'recent') renderRecentlyViewedContent();
+  else renderYourWorkContent(_ywCache);
+  if (S.currentView === 'yourwork' && S.yourWorkTab === 'assigned') syncAppUrl({ replace: true });
+};
+
+function _renderYourWorkTable(issues, rawIssues, lastColLabel) {
+  lastColLabel = lastColLabel || 'Updated';
+  if (lastColLabel === 'Viewed') {
+    issues.sort(function (a, b) { return new Date(b.viewedAt || 0) - new Date(a.viewedAt || 0); });
+  } else {
+    issues.sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); });
+  }
+  var toolbarHtml = _ywAnyFilterActive()
+    ? '<div class="yw-table-toolbar">' +
+        '<button type="button" class="btn btn-outline btn-sm yw-clear-all-btn" onclick="window._ywClearFilters()">&#10005; Clear all</button>' +
+      '</div>'
+    : '';
+  var html = '<div class="yw-table-wrap">' + toolbarHtml +
+    '<table class="yw-table"><thead><tr>' +
+    '<th>Key</th><th>Title</th>' +
+    _ywBuildFilterTh('type', 'Type', rawIssues) +
+    _ywBuildFilterTh('status', 'Status', rawIssues) +
+    _ywBuildFilterTh('priority', 'Priority', rawIssues) +
+    _ywBuildFilterTh('space', 'Space', rawIssues) +
+    '<th>' + esc(lastColLabel) + '</th>' +
+    '</tr></thead><tbody>';
+  if (!issues.length) {
+    html += '<tr><td colspan="7" class="yw-empty-row">' +
+      'No issues match your filters. ' +
+      '<button type="button" class="btn btn-link btn-sm" onclick="window._ywClearFilters()">Clear filters</button>' +
+      '</td></tr>';
+  } else {
+    for (var i = 0; i < issues.length; i++) {
+      var iss = issues[i];
+      var iid = iss.id;
+      var timeVal = lastColLabel === 'Viewed' ? (iss.viewedAt || iss.updated_at) : iss.updated_at;
+      html += '<tr onclick="openIssuePage(\'' + iid + '\')">' +
+        '<td class="yw-key">' + esc(issueKeyStr(iss)) + '</td>' +
+        '<td class="yw-title-cell">' + esc(iss.title) + '</td>' +
+        '<td>' + typeIcon(iss.type) + ' <span style="font-size:12px;color:var(--text2)">' + cap(iss.type || '') + '</span></td>' +
+        '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\')" style="cursor:pointer">' + statusBadge(iss.status) + '</td>' +
+        '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\')" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>' +
+        '<td class="yw-space-cell">' + esc(iss.space_name || '') + '</td>' +
+        '<td class="yw-time-cell">' + relativeTime(timeVal) + '</td></tr>';
+    }
+  }
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function _updateYourWorkTabBadges(data) {
+  if (!data) return;
+  qsa('[data-yw-count]').forEach(function (el) {
+    var key = el.dataset.ywCount;
+    var n = key === 'assigned' ? (data.assigned || []).length
+      : key === 'reported' ? (data.reported || []).length
+      : 0;
+    if (n > 0) {
+      el.textContent = n;
+      el.hidden = false;
+    } else {
+      el.textContent = '';
+      el.hidden = true;
+    }
+  });
+}
+
 function renderYourWork() {
+  if (!S.yourWorkTab) S.yourWorkTab = 'assigned';
   var tabs = qsa('.yw-tab');
   tabs.forEach(function (t) {
-    t.classList.toggle('active', t.dataset.yourworkTab === S.yourWorkTab);
-    t.onclick = function () {
-      S.yourWorkTab = t.dataset.yourworkTab;
-      tabs.forEach(function (x) { x.classList.toggle('active', x.dataset.yourworkTab === S.yourWorkTab); });
-      renderYourWorkContent(_ywCache);
+    var tab = t.dataset.yourworkTab;
+    t.classList.toggle('active', tab === S.yourWorkTab);
+    if (t.tagName === 'A' && tab) t.setAttribute('href', yourWorkPath(tab));
+    t.onclick = function (e) {
+      e.preventDefault();
+      navigateToYourWork(t.dataset.yourworkTab);
     };
   });
+  var staleRecentBadge = document.querySelector('.yw-tab[data-yourwork-tab="recent"] .yw-tab-badge');
+  if (staleRecentBadge) staleRecentBadge.remove();
   $('yourWorkContent').innerHTML = '<div class="yw-empty"><p>Loading…</p></div>';
+  if (S.yourWorkTab === 'recent') {
+    if (_ywCache) _updateYourWorkTabBadges(_ywCache);
+    renderYourWorkContent(_ywCache);
+    return;
+  }
+  if (_ywCache) {
+    _updateYourWorkTabBadges(_ywCache);
+    renderYourWorkContent(_ywCache);
+  }
   api('/api/my-issues').then(function (data) {
     _ywCache = data;
-    // Update badge with assigned count
-    var badge = $('ywBadge');
-    if (badge) {
-      var n = (data.assigned || []).length;
-      badge.textContent = n;
-      badge.classList.toggle('visible', n > 0);
-    }
+    _updateYourWorkTabBadges(data);
     renderYourWorkContent(data);
   }).catch(function (e) {
     $('yourWorkContent').innerHTML = '<div class="yw-empty">' +
@@ -1435,17 +2142,21 @@ function renderYourWork() {
 }
 
 function renderYourWorkContent(data) {
+  if (S.yourWorkTab === 'recent') {
+    renderRecentlyViewedContent();
+    return;
+  }
   if (!data) {
     $('yourWorkContent').innerHTML = '<div class="yw-empty"><p>Loading…</p></div>';
     return;
   }
-  var issues;
-  if (S.yourWorkTab === 'assigned') issues = (data.assigned || []).slice();
-  else if (S.yourWorkTab === 'reported') issues = (data.reported || []).slice();
-  else issues = (data.recent || []).slice();
-  issues.sort(function(a, b) { return new Date(b.updated_at) - new Date(a.updated_at); });
+  var rawIssues;
+  if (S.yourWorkTab === 'assigned') rawIssues = (data.assigned || []).slice();
+  else if (S.yourWorkTab === 'reported') rawIssues = (data.reported || []).slice();
+  else rawIssues = [];
+  var issues = _ywApplyFilters(rawIssues);
 
-  if (!issues.length) {
+  if (!rawIssues.length) {
     var emptyMsg = S.yourWorkTab === 'assigned'
       ? ['No issues assigned to you', 'Issues assigned to you will appear here.']
       : S.yourWorkTab === 'reported'
@@ -1458,24 +2169,37 @@ function renderYourWorkContent(data) {
     return;
   }
 
-  var html = '<table class="yw-table"><thead><tr>' +
-    '<th>Key</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Space</th><th>Updated</th>' +
-    '</tr></thead><tbody>';
-  for (var i = 0; i < issues.length; i++) {
-    var iss = issues[i];
-    var iid = iss.id;
-    html += '<tr onclick="openIssuePage(\'' + iid + '\')">' +
-      '<td class="yw-key">' + esc(issueKeyStr(iss)) + '</td>' +
-      '<td class="yw-title-cell">' + esc(iss.title) + '</td>' +
-      '<td>' + typeIcon(iss.type) + ' <span style="font-size:12px;color:var(--text2)">' + cap(iss.type || '') + '</span></td>' +
-      '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\')" style="cursor:pointer">' + statusBadge(iss.status) + '</td>' +
-      '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\')" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>' +
-      '<td class="yw-space-cell">' + esc(iss.space_name || '') + '</td>' +
-      '<td class="yw-time-cell">' + relativeTime(iss.updated_at) + '</td></tr>';
+  if (!issues.length) {
+    $('yourWorkContent').innerHTML = _renderYourWorkTable([], rawIssues, 'Updated');
+    return;
   }
-  html += '</tbody></table>';
-  $('yourWorkContent').innerHTML = html;
+
+  $('yourWorkContent').innerHTML = _renderYourWorkTable(issues, rawIssues, 'Updated');
 }
+
+function renderRecentlyViewedContent() {
+  var container = $('yourWorkContent');
+  if (!container) return;
+  container.innerHTML = '<div class="yw-empty"><p>Loading…</p></div>';
+  enrichRecentlyViewedIssues().then(function (rawIssues) {
+    var issues = _ywApplyFilters(rawIssues);
+    if (!rawIssues.length) {
+      container.innerHTML =
+        '<div class="yw-empty">' +
+        '<svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/></svg>' +
+        '<h3>No recently viewed issues</h3><p>Open any ticket from a space you belong to — it will appear here.</p></div>';
+      return;
+    }
+    container.innerHTML = _renderYourWorkTable(issues, rawIssues, 'Viewed');
+  });
+}
+
+window._ywClearFilters = function () {
+  clearYourWorkFilters();
+  if (S.yourWorkTab === 'recent') renderRecentlyViewedContent();
+  else renderYourWorkContent(_ywCache);
+  if (S.currentView === 'yourwork' && S.yourWorkTab === 'assigned') syncAppUrl({ replace: true });
+};
 
 // ═══════════════════════════════════════════════════════════
 // WORK LOG REPORT
@@ -5942,12 +6666,20 @@ function renderSettingsCustomFields(space) {
   var rowsHtml = '';
   for (var i = 0; i < fields.length; i++) {
     var f = fields[i];
-    var options = f.options ? (Array.isArray(f.options) ? f.options.join(', ') : f.options) : '\u2014';
+    var optionsDisplay = '\u2014';
+    if (isCombinationField(f)) {
+      var pg = parseCombinationFieldOptions(f);
+      optionsDisplay = 'Message: ' + (pg.groups.Message || []).length +
+        ', Mail: ' + (pg.groups.Email || []).length +
+        ', Content: ' + (pg.groups.Content || []).length;
+    } else if (f.options) {
+      optionsDisplay = Array.isArray(f.options) ? f.options.join(', ') : String(f.options);
+    }
     rowsHtml += '<tr>' +
       '<td>' + esc(f.name) + '</td>' +
       '<td><span class="badge badge-muted">' + esc(f.field_type || f.type) + '</span></td>' +
       '<td>' + (f.is_required ? '\u2705 Yes' : 'No') + '</td>' +
-      '<td class="text-muted text-sm">' + esc(options) + '</td>' +
+      '<td class="text-muted text-sm">' + esc(optionsDisplay) + '</td>' +
       '<td>' +
         '<button class="btn btn-outline btn-sm cf-edit-btn" data-field-id="' + f.id + '">Edit</button> ' +
         '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ' +
@@ -6055,16 +6787,10 @@ function showSpaceContextMenu(anchorBtn, spaceId) {
   var existing = qs('.space-context-menu');
   if (existing) existing.remove();
 
-  var starred = isFavorited(spaceId);
-  var starLabel = starred ? '\u2B50 Remove from starred' : '\u2B50 Add to starred';
-
   var isAdminUser = S.currentUserObj && (S.currentUserObj.role === 'admin' || S.currentUserObj.role === 'owner');
   var menu = document.createElement('div');
   menu.className = 'space-context-menu';
-  var starSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="' + (starred ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
-  var starText = starred ? 'Remove from starred' : 'Add to starred';
   menu.innerHTML =
-    '<div class="space-context-menu-item" data-action="star">' + starSvg + ' ' + starText + '</div>' +
     (isAdminUser ? '<div class="space-context-menu-item" data-action="people"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Manage people</div>' : '') +
     (isAdminUser ? '<div class="space-context-menu-item" data-action="settings"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Space settings</div>' : '') +
     (isAdminUser ? '<div class="space-context-menu-item danger" data-action="delete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> Delete space</div>' : '');
@@ -6093,12 +6819,6 @@ function showSpaceContextMenu(anchorBtn, spaceId) {
     menu.remove();
 
     switch (action) {
-      case 'star':
-        await api('/api/spaces/' + spaceId + '/favorite', 'POST', { user_id: S.currentUser });
-        await refreshData();
-        renderSidebar();
-        toast('Updated starred spaces');
-        break;
       case 'people':
         _settingsActiveTab = 'people';
         navigateToSpace(spaceId, 'space-settings');
@@ -6187,14 +6907,23 @@ $('inviteMemberForm').addEventListener('submit', async function (e) {
 // (Custom Fields management is now inside renderSettingsCustomFields, within Space Settings)
 
 function openCustomFieldModal(field) {
+  var isCombo = field && isCombinationField(field);
   if (field) {
-    $('customFieldModalTitle').textContent = 'Edit Custom Field';
+    $('customFieldModalTitle').textContent = isCombo ? 'Edit Combination (by Product Type)' : 'Edit Custom Field';
     $('customFieldId').value = field.id;
     $('customFieldName').value = field.name || '';
     $('customFieldType').value = field.field_type || field.type || 'text';
     $('customFieldRequired').checked = !!(field.is_required || field.required);
-    var opts = field.options ? (Array.isArray(field.options) ? field.options.join(', ') : field.options) : '';
-    $('customFieldOptions').value = opts;
+    if (isCombo) {
+      var parsed = parseCombinationFieldOptions(field);
+      $('cfComboMessage').value = (parsed.groups.Message || []).join('\n');
+      $('cfComboEmail').value = (parsed.groups.Email || []).join('\n');
+      $('cfComboContent').value = (parsed.groups.Content || []).join('\n');
+      $('customFieldOptions').value = '';
+    } else {
+      var opts = field.options ? (Array.isArray(field.options) ? field.options.join(', ') : field.options) : '';
+      $('customFieldOptions').value = opts;
+    }
   } else {
     $('customFieldModalTitle').textContent = 'Add Custom Field';
     $('customFieldId').value = '';
@@ -6202,23 +6931,56 @@ function openCustomFieldModal(field) {
     $('customFieldType').value = 'text';
     $('customFieldRequired').checked = false;
     $('customFieldOptions').value = '';
+    $('cfComboMessage').value = '';
+    $('cfComboEmail').value = '';
+    $('cfComboContent').value = '';
   }
   // "Add to all boards" only makes sense when creating a brand-new field
   var applyAllGroup = $('customFieldApplyAllGroup');
   if (applyAllGroup) applyAllGroup.hidden = !!field;
   if ($('customFieldApplyAll')) $('customFieldApplyAll').checked = false;
-  toggleCustomFieldOptions();
+  if ($('customFieldName')) $('customFieldName').readOnly = !!isCombo;
+  toggleCustomFieldOptions(isCombo ? field : null);
   openModal('modal-custom-field');
 }
 window.openCustomFieldModal = openCustomFieldModal;
 
-function toggleCustomFieldOptions() {
+function toggleCustomFieldOptions(editingField) {
   var type = $('customFieldType').value;
-  var show = (type === 'select' || type === 'multi_select');
+  var isCombo = editingField && isCombinationField(editingField);
+  if (!isCombo && $('customFieldName') && ($('customFieldName').value || '').toLowerCase().trim() === 'combination') {
+    isCombo = true;
+  }
+  var show = (type === 'select' || type === 'multi_select') && !isCombo;
   $('customFieldOptionsGroup').hidden = !show;
+  if ($('customFieldCombinationGroups')) {
+    $('customFieldCombinationGroups').hidden = !isCombo;
+  }
 }
 
-$('customFieldType').addEventListener('change', toggleCustomFieldOptions);
+function parseCombinationLines(text) {
+  return String(text || '').split(/\r?\n|,/).map(function (s) {
+    return typeof normalizeCombinationLabel === 'function' ? normalizeCombinationLabel(s.trim()) : s.trim();
+  }).filter(Boolean);
+}
+
+function buildCombinationOptionsFromEditor() {
+  var groups = {
+    Message: parseCombinationLines($('cfComboMessage') && $('cfComboMessage').value),
+    Email: parseCombinationLines($('cfComboEmail') && $('cfComboEmail').value),
+    Content: parseCombinationLines($('cfComboContent') && $('cfComboContent').value)
+  };
+  return {
+    v: 2,
+    groups: groups,
+    flat: flattenCombinationGroups(groups)
+  };
+}
+
+$('customFieldType').addEventListener('change', function () { toggleCustomFieldOptions(); });
+if ($('customFieldName')) {
+  $('customFieldName').addEventListener('input', function () { toggleCustomFieldOptions(); });
+}
 
 // Selected files for Create Issue modal (allows individual removal)
 var _selectedFiles = [];
@@ -6332,9 +7094,16 @@ $('customFieldForm').addEventListener('submit', async function (e) {
   var required = $('customFieldRequired').checked;
   var applyAll = $('customFieldApplyAll') && $('customFieldApplyAll').checked;
   var optionsRaw = $('customFieldOptions').value.trim();
-  var options = (type === 'select' || type === 'multi_select') && optionsRaw
-    ? optionsRaw.split(',').map(function (o) { return o.trim(); }).filter(Boolean)
-    : [];
+  var isComboField = (name || '').toLowerCase().trim() === 'combination' || ($('customFieldCombinationGroups') && !$('customFieldCombinationGroups').hidden);
+  var options;
+  if (isComboField) {
+    options = buildCombinationOptionsFromEditor();
+    type = 'select';
+  } else {
+    options = (type === 'select' || type === 'multi_select') && optionsRaw
+      ? optionsRaw.split(',').map(function (o) { return o.trim(); }).filter(Boolean)
+      : [];
+  }
 
   if (!name) { toast('Field name is required', 'error'); return; }
 
@@ -6375,6 +7144,77 @@ $('customFieldForm').addEventListener('submit', async function (e) {
 // ═══════════════════════════════════════════════════════════
 // ISSUE DRAWER (open)
 // ═══════════════════════════════════════════════════════════
+function stripTitleNewlines(raw) {
+  return String(raw || '').replace(/[\r\n\u2028\u2029]+/g, ' ');
+}
+
+function finalizeIssueTitle(raw) {
+  return stripTitleNewlines(raw).replace(/\s+/g, ' ').trim();
+}
+
+function resizeDrawerTitleField() {
+  var el = $('drawerTitle');
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight, 28) + 'px';
+}
+
+function setDrawerTitleValue(title) {
+  var el = $('drawerTitle');
+  if (!el) return;
+  el.value = finalizeIssueTitle(title);
+  resizeDrawerTitleField();
+}
+
+function getDrawerTitleValue() {
+  var el = $('drawerTitle');
+  return el ? finalizeIssueTitle(el.value) : '';
+}
+
+function bindDrawerTitleField(autoSave) {
+  var el = $('drawerTitle');
+  if (!el || el._titleBound) return;
+  el._titleBound = true;
+
+  el.addEventListener('input', function () {
+    var noBreaks = stripTitleNewlines(el.value);
+    if (el.value !== noBreaks) {
+      var pos = el.selectionStart || 0;
+      el.value = noBreaks;
+      el.selectionStart = el.selectionEnd = Math.min(pos, noBreaks.length);
+    }
+    resizeDrawerTitleField();
+    if (noBreaks.trim()) autoSave('title', noBreaks);
+  });
+
+  el.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      el.blur();
+    }
+  });
+
+  el.addEventListener('paste', function (e) {
+    e.preventDefault();
+    var text = finalizeIssueTitle((e.clipboardData || window.clipboardData).getData('text/plain'));
+    if (!text) return;
+    var start = el.selectionStart || 0;
+    var end = el.selectionEnd || 0;
+    var val = el.value;
+    el.value = val.slice(0, start) + text + val.slice(end);
+    var caret = start + text.length;
+    el.selectionStart = el.selectionEnd = caret;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  el.addEventListener('blur', function () {
+    var clean = finalizeIssueTitle(el.value);
+    if (el.value !== clean) el.value = clean;
+    resizeDrawerTitleField();
+    if (clean) autoSave('title', clean);
+  });
+}
+
 async function openDrawer(issueId) {
   // Save current location for back button - detect allwork from URL/view
   var currentTab = S.currentTab;
@@ -6395,9 +7235,22 @@ async function openDrawer(issueId) {
   var issue;
   try {
     issue = await api('/api/issues/' + issueId);
-  } catch (e) { return; }
+  } catch (e) {
+    toast('Could not load issue', 'error');
+    return;
+  }
 
   if (!issue) { toast('Could not load issue', 'error'); return; }
+  trackRecentIssueView(issue);
+  updateDrawerStarBtn(issue.id);
+  var starBtn = $('drawerStarBtn');
+  if (starBtn && !starBtn._starBound) {
+    starBtn._starBound = true;
+    starBtn.onclick = function (e) {
+      e.stopPropagation();
+      toggleIssueFavorite(S.drawerIssueId);
+    };
+  }
   if (issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); window._currentIssueKey = issue.key; }
   document.body.classList.add('issue-page'); void document.body.offsetHeight; var dp = document.querySelector('.drawer-panel'); if(dp){ dp.style.position='fixed'; dp.style.inset='0'; dp.style.width='100vw'; dp.style.maxWidth='100vw'; dp.style.height='100vh'; dp.style.zIndex='99999'; dp.style.display='flex'; dp.style.flexDirection='column'; } $('issueDrawer').removeAttribute('hidden');
 
@@ -6420,7 +7273,7 @@ async function openDrawer(issueId) {
   $('drawerKey').textContent = issue.key || (issue.project_key ? issue.project_key + '-?' : '#' + issue.id);
   $('drawerType').textContent = typeLabel(issue.type);
   $('drawerType').className = 'badge badge-type badge-type-' + (issue.type || 'task');
-  $('drawerTitle').textContent = issue.title || '';
+  setDrawerTitleValue(issue.title || '');
   // Render description - convert plain text to HTML safely
   var descText = issue.description || '';
   var fixDescText = issue.fix_description || '';
@@ -6533,6 +7386,7 @@ async function openDrawer(issueId) {
   if (actBody) actBody.dataset.activeTab = 'comments';
   renderDrawerActivity(issue);
   await renderDrawerCustomFields(issue.custom_field_values || [], issue.id, issue.space_id || S.currentSpace);
+  await renderDrawerCombinationField(issue.id, issue.space_id || S.currentSpace, issue.custom_field_values || [], issue.product_type || '');
   renderDrawerAttachments(issue.attachments || []);
 
   $('drawerCreated').textContent = fmtDateTime(issue.created_at);
@@ -6585,7 +7439,7 @@ function startDrawerLiveSync(issueId) {
       if (activeId !== 'drawerDueDate')     $('drawerDueDate').value     = fresh.due_date    ? fresh.due_date.slice(0,10)   : '';
       if (activeId !== 'drawerTeam'        && $('drawerTeam'))        $('drawerTeam').value        = fresh.team         || '';
       if (activeId !== 'drawerProductType' && $('drawerProductType')) $('drawerProductType').value = fresh.product_type || '';
-      if (activeId !== 'drawerTitle')     $('drawerTitle').textContent = fresh.title    || '';
+      if (activeId !== 'drawerTitle') setDrawerTitleValue(fresh.title || '');
       // Update time tracking, attachments, activity
       var timeSpentEl = document.querySelector('.drawer-time-spent');
       if (timeSpentEl) timeSpentEl.textContent = fresh.time_spent || '—';
@@ -6594,7 +7448,11 @@ function startDrawerLiveSync(issueId) {
       // Refresh custom fields silently (only if no input is focused inside them)
       var cfSection = $('drawerCustomFields');
       var cfFocused = cfSection && cfSection.contains(document.activeElement);
-      if (!cfFocused) await renderDrawerCustomFields(fresh.custom_field_values || [], issueId, fresh.space_id || S.currentSpace);
+      var comboFocused = $('drawerCombinationField') && $('drawerCombinationField').contains(document.activeElement);
+      if (!cfFocused && !comboFocused) {
+        await renderDrawerCustomFields(fresh.custom_field_values || [], issueId, fresh.space_id || S.currentSpace);
+        await renderDrawerCombinationField(issueId, fresh.space_id || S.currentSpace, fresh.custom_field_values || [], fresh.product_type || '');
+      }
       // Refresh worklog tab if it is currently active
       var actBody = $('activitySectionBody');
       if (actBody && actBody.dataset.activeTab === 'worklog') _renderActivityTab('worklog', fresh);
@@ -6621,8 +7479,13 @@ function bindDrawerEdits(issue) {
         Object.keys(toSave).forEach(function(k) { delete pending[k]; });
         window._drawerPending = pending;
         var updated = await api('/api/issues/' + issueId);
-        if (updated) $('drawerUpdated').textContent = fmtDateTime(updated.updated_at);
-        refreshData(); // silent background refresh — no navigation
+        if (updated) {
+          $('drawerUpdated').textContent = fmtDateTime(updated.updated_at);
+          var patch = Object.assign({}, toSave);
+          if (updated.updated_at) patch.updated_at = updated.updated_at;
+          afterIssueFieldUpdate(issueId, patch);
+        }
+        refreshData();
         toast('Saved');
       } catch(e) { toast('Save failed', 'error'); }
     }, 800);
@@ -6691,7 +7554,13 @@ function bindDrawerEdits(issue) {
     autoSave('story_points', $('drawerPoints').value ? parseInt($('drawerPoints').value, 10) : null);
   };
   if ($('drawerTeam'))        $('drawerTeam').onchange        = function () { autoSave('team',         $('drawerTeam').value || null); };
-  if ($('drawerProductType')) $('drawerProductType').onchange = function () { autoSave('product_type', $('drawerProductType').value || null); };
+  if ($('drawerProductType')) {
+    $('drawerProductType').onchange = function () {
+      var dSpace = (_drawerIssueData && _drawerIssueData.space_id) || S.currentSpace;
+      if (getProductTeamSpaceId() && String(dSpace) === String(getProductTeamSpaceId())) return;
+      autoSave('product_type', $('drawerProductType').value || null);
+    };
+  }
   $('drawerStartDate').onchange = function () {
     var val = $('drawerStartDate').value;
     autoSave('start_date', val || null);
@@ -6716,10 +7585,7 @@ function bindDrawerEdits(issue) {
     autoSave('due_date', val || null);
   };
 
-  $('drawerTitle').oninput = function () {
-    var title = $('drawerTitle').textContent.trim();
-    if (title) autoSave('title', title);
-  };
+  bindDrawerTitleField(autoSave);
 
   var _drawerDescOriginal = '';
   $('drawerDesc').onfocus = function() {
@@ -7049,6 +7915,13 @@ function bindDrawerEdits(issue) {
     }
 
     if (commentBody) {
+      var mentionedUserIds = [];
+      if (_ci && _ci.querySelectorAll) {
+        _ci.querySelectorAll('.mention-chip[data-user-id]').forEach(function (chip) {
+          var uid = chip.getAttribute('data-user-id');
+          if (uid && mentionedUserIds.indexOf(uid) < 0) mentionedUserIds.push(uid);
+        });
+      }
       // Optimistic UI - show comment instantly before API response
       var me = S.currentUserObj || {};
       var tempComment = {
@@ -7067,7 +7940,12 @@ function bindDrawerEdits(issue) {
       var _ci2 = $('drawerCommentInput'); if (_ci2) { if (_ci2.value !== undefined) _ci2.value = ''; else _ci2.innerHTML = ''; }
       // Post the real comment — button stays disabled until this actually finishes,
       // so a fast repeat click can't slip through while the first request is in flight.
-      await api('/api/comments', 'POST', { issue_id: issueId, user_id: S.currentUser, body: commentBody });
+      await api('/api/comments', 'POST', {
+        issue_id: issueId,
+        user_id: S.currentUser,
+        body: commentBody,
+        mentioned_user_ids: mentionedUserIds
+      });
     } else {
       var _ci3 = $('drawerCommentInput'); if (_ci3) { if (_ci3.value !== undefined) _ci3.value = ''; else _ci3.innerHTML = ''; }
     }
@@ -7857,12 +8735,984 @@ window.deleteAttachment = async function(id) {
 // time and leaking a growing pile of stale closures over a session.
 document.addEventListener('click', function(e) {
   if (e.target.closest('.cf-select-wrap')) return;
-  qsa('.cf-select-dropdown').forEach(function(d) { d.style.display = 'none'; });
+  qsa('.cf-select-dropdown').forEach(function(d) {
+    d.style.display = 'none';
+    resetCFDropdownPosition(d);
+  });
+  if (!e.target.closest('.combo-box')) {
+    qsa('.combo-dropdown').forEach(function (d) {
+      d.hidden = true;
+      var box = d.closest('.combo-box');
+      if (box) box.classList.remove('combo-open');
+    });
+  }
 });
+window.addEventListener('resize', function () {
+  qsa('.cf-select-dropdown').forEach(function (d) {
+    if (d.style.display !== 'none') {
+      var wrap = d.closest('.cf-select-wrap');
+      if (wrap) positionCFDropdown(wrap);
+    }
+  });
+  qsa('.combo-box.combo-open').forEach(function (el) {
+    positionComboDropdown(el);
+  });
+});
+
+// ── Custom field select / multi-select (shared: drawer + create modal) ──
+function getProductTeamSpaceId() {
+  var sp = (S.data.spaces || []).find(function (s) {
+    return s.name === 'Product_Team' || s.key === 'PTM';
+  });
+  return sp ? sp.id : null;
+}
+
+function findCombinationFieldMeta(spaceId) {
+  if (!spaceId) return null;
+  return (S.data.custom_fields || []).find(function (f) {
+    return f.space_id === spaceId && isCombinationField(f);
+  }) || null;
+}
+
+async function ensureCombinationFieldMeta(spaceId) {
+  var meta = findCombinationFieldMeta(spaceId);
+  if (meta && meta.id) return meta;
+  if (spaceId !== getProductTeamSpaceId()) return null;
+  try {
+    var data = await api('/api/data?space_id=' + encodeURIComponent(spaceId));
+    if (data && data.custom_fields && data.custom_fields.length) {
+      S.data.custom_fields = (S.data.custom_fields || [])
+        .filter(function (f) { return f.space_id !== spaceId; })
+        .concat(data.custom_fields);
+      meta = findCombinationFieldMeta(spaceId);
+      if (meta && meta.id) return meta;
+    }
+    var cfs = await api('/api/custom-fields?space_id=' + encodeURIComponent(spaceId));
+    if (Array.isArray(cfs) && cfs.length) {
+      S.data.custom_fields = (S.data.custom_fields || [])
+        .filter(function (f) { return f.space_id !== spaceId; })
+        .concat(cfs);
+      return findCombinationFieldMeta(spaceId);
+    }
+  } catch (_) {}
+  return null;
+}
+
+function renderIssueProductTypeSets(spaceId) {
+  var group = $('issueCombinationGroup');
+  var container = $('issueCombinationField');
+  var productTypeGroup = $('issueProductType') && $('issueProductType').closest('.form-group');
+  var groupLabel = group && group.querySelector('.form-label');
+  if (!group || !container) return Promise.resolve();
+
+  var ptId = getProductTeamSpaceId();
+  if (!ptId) {
+    if (productTypeGroup) productTypeGroup.hidden = false;
+    container.innerHTML = '<p class="combo-type-hint">Product_Team space not found — run seed or ask admin to add it.</p>';
+    return Promise.resolve();
+  }
+
+  if (!spaceId || spaceId !== ptId) {
+    if (productTypeGroup) productTypeGroup.hidden = false;
+    if (groupLabel) {
+      groupLabel.innerHTML = 'Combination <span style="font-size:11px;color:var(--text3);font-weight:400">(Product_Team only)</span>';
+    }
+    group.hidden = true;
+    container.innerHTML = '';
+    _issuePtComboSel = null;
+    return Promise.resolve();
+  }
+
+  if (productTypeGroup) productTypeGroup.hidden = true;
+  group.hidden = false;
+  if (groupLabel) {
+    groupLabel.innerHTML = 'Product Type &amp; Combinations <span style="font-size:11px;color:var(--text3);font-weight:400">(Product_Team)</span>';
+  }
+
+  if (!_issuePtComboSel) {
+    _issuePtComboSel = emptyPtComboSelection();
+  }
+
+  return ensureCombinationFieldMeta(ptId).then(function (meta) {
+    if (!meta || !meta.id) {
+      container.innerHTML = '<p class="combo-type-hint">Combination field loading… restart server if this persists.</p>';
+      return;
+    }
+    container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta);
+    bindProductTypeComboPicker(container, meta, { stateKey: '_issuePtComboSel' });
+  });
+}
+
+function renderIssueCombinationField(spaceId) {
+  return renderIssueProductTypeSets(spaceId);
+}
+
+async function renderDrawerProductTypeSets(issueId, spaceId, cfValues, productType) {
+  var row = $('drawerCombinationRow');
+  var container = $('drawerCombinationField');
+  var ptRow = $('drawerProductTypeRow');
+  var comboLabel = row && row.querySelector('.dfl');
+  if (!row || !container) return;
+
+  var ptId = getProductTeamSpaceId();
+  if (!ptId || String(spaceId) !== String(ptId)) {
+    row.hidden = true;
+    container.innerHTML = '';
+    if (ptRow) ptRow.hidden = false;
+    return;
+  }
+
+  if (ptRow) ptRow.hidden = true;
+  row.hidden = false;
+  if (comboLabel) comboLabel.textContent = 'Product Type';
+
+  var meta = await ensureCombinationFieldMeta(ptId);
+  if (!meta || !meta.id) {
+    container.innerHTML = '<span class="text-muted" style="font-size:12px">Combination field unavailable</span>';
+    return;
+  }
+
+  var combinationVal = '';
+  (cfValues || []).forEach(function (v) {
+    if (v.field_id === meta.id) combinationVal = v.value;
+    else if ((v.field_name || '').toLowerCase() === 'combination') combinationVal = v.value;
+  });
+  if (!combinationVal) {
+    var bulk = (S.data.issue_field_values || []).find(function (v) {
+      return v.issue_id == issueId && v.field_id == meta.id;
+    });
+    if (bulk) combinationVal = bulk.value;
+  }
+
+  _drawerPtComboSel = parsePtComboSelection(productType, combinationVal);
+  container.innerHTML = buildProductTypeComboPickerHtml(_drawerPtComboSel, meta);
+  bindProductTypeComboPicker(container, meta, {
+    stateKey: '_drawerPtComboSel',
+    onChange: function (sel) {
+      if (issueId) saveDrawerPtComboSelection(issueId, sel, meta);
+    }
+  });
+}
+
+async function renderDrawerCombinationField(issueId, spaceId, cfValues, productType) {
+  return renderDrawerProductTypeSets(issueId, spaceId, cfValues, productType);
+}
+
+function buildCombinationComboboxHtml(fieldId, selectedVal) {
+  selectedVal = selectedVal || '';
+  return '<div class="combo-box" data-cf-id="' + esc(fieldId) + '" data-value="' + esc(selectedVal) + '">' +
+    '<div class="combo-input-wrap">' +
+      '<svg class="combo-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+      '<input type="text" class="combo-input" placeholder="Search source e.g. Box, SharePoint" value="' + esc(selectedVal) + '" autocomplete="off" spellcheck="false">' +
+      '<button type="button" class="combo-clear" title="Clear"' + (selectedVal ? '' : ' hidden') + '>×</button>' +
+      '<span class="combo-chevron" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></span>' +
+    '</div>' +
+    '<div class="combo-dropdown" hidden>' +
+      '<div class="combo-list"></div>' +
+      '<div class="combo-empty" hidden>No combinations match your search</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function bindCombinationCombobox(el, config) {
+  config = config || {};
+  if (!el || el._comboBound) return;
+  el._comboBound = true;
+  var fieldId = el.dataset.cfId;
+  var input = el.querySelector('.combo-input');
+  var dropdown = el.querySelector('.combo-dropdown');
+  var listEl = el.querySelector('.combo-list');
+  var emptyEl = el.querySelector('.combo-empty');
+  var clearBtn = el.querySelector('.combo-clear');
+  var chevron = el.querySelector('.combo-chevron');
+
+  function resolveOptions() {
+    if (typeof config.getOptions === 'function') return config.getOptions() || [];
+    if (config.options && config.options.length) return config.options.slice();
+    return getCombinationOptionsList();
+  }
+
+  var options = resolveOptions();
+  var selectedVal = el.dataset.value || '';
+  if (selectedVal && typeof normalizeCombinationLabel === 'function') {
+    selectedVal = normalizeCombinationLabel(selectedVal);
+    el.dataset.value = selectedVal;
+    input.value = selectedVal;
+  }
+  var highlightIdx = -1;
+
+  function notify() {
+    if (typeof config.onChange === 'function') config.onChange(selectedVal);
+  }
+
+  function setValue(val) {
+    selectedVal = val ? (typeof normalizeCombinationLabel === 'function' ? normalizeCombinationLabel(val) : val) : '';
+    el.dataset.value = selectedVal;
+    input.value = selectedVal;
+    if (clearBtn) clearBtn.hidden = !selectedVal;
+    closeDropdown();
+    notify();
+  }
+
+  function renderList(filter) {
+    options = resolveOptions();
+    var matches = options.filter(function (o) {
+      return matchCombinationSearch(o, filter);
+    });
+    highlightIdx = matches.length ? 0 : -1;
+    listEl.innerHTML = matches.map(function (o, i) {
+      var active = o === selectedVal;
+      var hi = i === highlightIdx;
+      return '<button type="button" class="combo-option' + (active ? ' is-selected' : '') + (hi ? ' is-highlighted' : '') + '" data-val="' + esc(o) + '">' + esc(o) + '</button>';
+    }).join('');
+    emptyEl.hidden = matches.length > 0;
+    listEl.hidden = matches.length === 0;
+  }
+
+  function openDropdown() {
+    qsa('.combo-dropdown').forEach(function (d) {
+      if (d !== dropdown) d.hidden = true;
+    });
+    dropdown.hidden = false;
+    el.classList.add('combo-open');
+    renderList(input.value);
+    positionComboDropdown(el);
+  }
+
+  function closeDropdown() {
+    dropdown.hidden = true;
+    el.classList.remove('combo-open');
+    highlightIdx = -1;
+    if (selectedVal) input.value = selectedVal;
+  }
+
+  function selectHighlighted() {
+    var hi = listEl.querySelector('.combo-option.is-highlighted');
+    if (hi) setValue(hi.dataset.val);
+  }
+
+  input.addEventListener('focus', function () { openDropdown(); });
+  input.addEventListener('input', function () {
+    openDropdown();
+    renderList(input.value);
+  });
+  input.addEventListener('keydown', function (ev) {
+    var opts = listEl.querySelectorAll('.combo-option');
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      if (dropdown.hidden) openDropdown();
+      highlightIdx = Math.min(highlightIdx + 1, opts.length - 1);
+      opts.forEach(function (o, i) { o.classList.toggle('is-highlighted', i === highlightIdx); });
+      if (opts[highlightIdx]) opts[highlightIdx].scrollIntoView({ block: 'nearest' });
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      highlightIdx = Math.max(highlightIdx - 1, 0);
+      opts.forEach(function (o, i) { o.classList.toggle('is-highlighted', i === highlightIdx); });
+      if (opts[highlightIdx]) opts[highlightIdx].scrollIntoView({ block: 'nearest' });
+    } else if (ev.key === 'Enter') {
+      ev.preventDefault();
+      selectHighlighted();
+    } else if (ev.key === 'Escape') {
+      closeDropdown();
+      input.blur();
+    }
+  });
+
+  listEl.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.combo-option');
+    if (btn) setValue(btn.dataset.val);
+  });
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      setValue('');
+      input.focus();
+      openDropdown();
+    });
+  }
+
+  if (chevron) {
+    chevron.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (dropdown.hidden) { input.focus(); openDropdown(); }
+      else closeDropdown();
+    });
+  }
+
+  el.addEventListener('click', function (ev) { ev.stopPropagation(); });
+}
+
+function positionComboDropdown(el) {
+  var dropdown = el.querySelector('.combo-dropdown');
+  var wrap = el.querySelector('.combo-input-wrap');
+  if (!dropdown || !wrap || dropdown.hidden) return;
+  var rect = wrap.getBoundingClientRect();
+  var maxH = Math.min(280, window.innerHeight - rect.bottom - 12);
+  if (maxH < 140 && rect.top > 160) {
+    dropdown.style.top = '';
+    dropdown.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    dropdown.style.maxHeight = Math.min(280, rect.top - 12) + 'px';
+  } else {
+    dropdown.style.bottom = '';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.maxHeight = maxH + 'px';
+  }
+  dropdown.style.position = 'fixed';
+  dropdown.style.left = Math.max(8, rect.left) + 'px';
+  dropdown.style.width = rect.width + 'px';
+  dropdown.style.zIndex = '10050';
+}
+
+function repositionOpenFloatingDropdowns() {
+  qsa('.combo-box.combo-open').forEach(positionComboDropdown);
+  qsa('.cf-select-dropdown').forEach(function (d) {
+    if (d.style.display !== 'none') {
+      var wrap = d.closest('.cf-select-wrap');
+      if (wrap) positionCFDropdown(wrap);
+    }
+  });
+}
+
+(function bindFloatingDropdownScrollReposition() {
+  if (window._floatDropScrollBound) return;
+  window._floatDropScrollBound = true;
+  document.addEventListener('DOMContentLoaded', function () {
+    var modalBody = document.querySelector('#modal-issue .modal-body');
+    if (modalBody) modalBody.addEventListener('scroll', repositionOpenFloatingDropdowns, { passive: true });
+    qsa('.drawer-sidebar').forEach(function (el) {
+      el.addEventListener('scroll', repositionOpenFloatingDropdowns, { passive: true });
+    });
+  });
+  document.addEventListener('scroll', repositionOpenFloatingDropdowns, { passive: true, capture: true });
+})();
+
+var _issuePtComboSel = null;
+var _drawerPtComboSel = null;
+
+var PRODUCT_TYPE_CHECKBOX_OPTIONS = [
+  { v: 'Message', l: 'Message Type' },
+  { v: 'Email', l: 'Mail Type' },
+  { v: 'Content', l: 'Content Type' },
+  { v: 'Manage', l: 'Manage' },
+  { v: 'Infra', l: 'Infra' }
+];
+
+function emptyPtComboSelection() {
+  return { productTypes: [], combinations: [] };
+}
+
+function parsePtComboSelection(productType, combinationValue) {
+  var sel = emptyPtComboSelection();
+  if (combinationValue && String(combinationValue).trim().charAt(0) === '{') {
+    try {
+      var parsed = JSON.parse(combinationValue);
+      if (parsed && parsed.v === 2) {
+        sel.productTypes = (parsed.productTypes || []).slice();
+        sel.combinations = (parsed.combinations || []).slice();
+        return sel;
+      }
+      if (parsed && parsed.v === 1 && Array.isArray(parsed.sets)) {
+        parsed.sets.forEach(function (s) {
+          if (s.productType && sel.productTypes.indexOf(s.productType) < 0) sel.productTypes.push(s.productType);
+          (s.combinations || []).forEach(function (c) {
+            if (sel.combinations.indexOf(c) < 0) sel.combinations.push(c);
+          });
+        });
+        return sel;
+      }
+    } catch (_) {}
+  }
+  var pt = (productType || '').trim();
+  if (pt.indexOf(',') >= 0) {
+    sel.productTypes = pt.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+  } else if (pt) {
+    sel.productTypes = [pt];
+  }
+  if (combinationValue && String(combinationValue).trim() && String(combinationValue).trim().charAt(0) !== '{') {
+    sel.combinations = String(combinationValue).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (sel.combinations.length === 1 && typeof normalizeCombinationLabel === 'function') {
+      sel.combinations[0] = normalizeCombinationLabel(sel.combinations[0]);
+    }
+    if (!sel.productTypes.length && sel.combinations.length && typeof classifyCombination === 'function') {
+      var inferred = classifyCombination(sel.combinations[0]);
+      if (inferred) sel.productTypes = [inferred];
+    }
+  }
+  return sel;
+}
+
+function serializePtComboSelection(sel) {
+  sel = sel || emptyPtComboSelection();
+  var types = (sel.productTypes || []).filter(Boolean);
+  var combos = (sel.combinations || []).filter(Boolean);
+  var combinationValue = null;
+  if (types.length > 1 || combos.length > 1) {
+    combinationValue = JSON.stringify({ v: 2, productTypes: types, combinations: combos });
+  } else if (combos.length === 1) {
+    combinationValue = combos[0];
+  } else if (types.length > 1) {
+    combinationValue = JSON.stringify({ v: 2, productTypes: types, combinations: [] });
+  }
+  return {
+    product_type: types.length ? types.join(',') : null,
+    combination: combinationValue
+  };
+}
+
+function getComboTypesFromSelection(types) {
+  return (types || []).filter(function (t) { return productTypeHasCombinations(t); });
+}
+
+function pruneCombinationsForTypes(sel, meta) {
+  var allowed = {};
+  getComboTypesFromSelection(sel.productTypes).forEach(function (t) {
+    getCombinationsForProductType(t, meta).forEach(function (c) { allowed[c] = true; });
+  });
+  sel.combinations = (sel.combinations || []).filter(function (c) { return allowed[c]; });
+}
+
+function buildProductTypeCheckboxListHtml(selectedTypes) {
+  return PRODUCT_TYPE_CHECKBOX_OPTIONS.map(function (t) {
+    var checked = selectedTypes.indexOf(t.v) >= 0;
+    return '<label class="pt-combo-check">' +
+      '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + esc(t.v) + '"' + (checked ? ' checked' : '') + '>' +
+      '<span class="pt-combo-check-label">' + esc(t.l) + '</span></label>';
+  }).join('');
+}
+
+function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, filter) {
+  filter = (filter || '').trim();
+  var comboTypes = getComboTypesFromSelection(selectedTypes);
+  if (!comboTypes.length) {
+    return '<p class="pt-combo-hint">Select Message, Mail, or Content type above to see combinations.</p>';
+  }
+  var html = '';
+  comboTypes.forEach(function (type) {
+    var combos = getCombinationsForProductType(type, meta).filter(function (c) {
+      return matchCombinationFilter(c, filter);
+    });
+    if (!combos.length) return;
+    html += '<div class="pt-combo-group" data-type="' + esc(type) + '">' +
+      '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
+    html += combos.map(function (c) {
+      var checked = selectedCombos.indexOf(c) >= 0;
+      return '<label class="pt-combo-check">' +
+        '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + esc(c) + '"' + (checked ? ' checked' : '') + '>' +
+        '<span class="pt-combo-check-label">' + esc(c) + '</span></label>';
+    }).join('');
+    html += '</div>';
+  });
+  if (!html) {
+    return '<p class="pt-combo-hint">' + (filter ? 'No combinations match “' + esc(filter) + '”.' : 'No combinations available.') + '</p>';
+  }
+  return html;
+}
+
+function buildProductTypeComboPickerHtml(sel, meta) {
+  var fieldId = meta && meta.id ? meta.id : '';
+  sel = sel || emptyPtComboSelection();
+  return '<div class="pt-combo-picker" data-field-id="' + esc(fieldId) + '">' +
+    '<div class="pt-combo-section">' +
+      '<div class="pt-combo-section-title">Product Type</div>' +
+      '<div class="pt-combo-panel pt-combo-panel-types">' +
+        '<div class="pt-combo-checklist pt-type-list">' + buildProductTypeCheckboxListHtml(sel.productTypes) + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="pt-combo-section">' +
+      '<div class="pt-combo-section-title">Combinations</div>' +
+      '<div class="pt-combo-panel">' +
+        '<div class="pt-combo-panel-toolbar">' +
+          '<div class="pt-combo-search-wrap">' +
+            '<svg class="pt-combo-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+            '<input type="text" class="pt-combo-search" placeholder="Search…" autocomplete="off" spellcheck="false">' +
+          '</div>' +
+        '</div>' +
+        '<div class="pt-combo-checklist pt-combo-list">' +
+          buildCombinationCheckboxListHtml(sel.productTypes, sel.combinations, meta, '') +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function bindProductTypeComboPicker(container, meta, config) {
+  config = config || {};
+  var stateKey = config.stateKey || '_issuePtComboSel';
+  var sel = window[stateKey] || emptyPtComboSelection();
+  window[stateKey] = sel;
+
+  function notify() {
+    if (typeof config.onChange === 'function') config.onChange(sel);
+  }
+
+  function readTypeCheckboxes() {
+    sel.productTypes = [];
+    container.querySelectorAll('.pt-type-cb:checked').forEach(function (cb) {
+      sel.productTypes.push(cb.value);
+    });
+    pruneCombinationsForTypes(sel, meta);
+    refreshComboList();
+    notify();
+  }
+
+  function readComboCheckboxes(ev) {
+    var target = ev && ev.target;
+    if (target && target.classList.contains('pt-combo-cb')) {
+      var val = target.value;
+      var idx = sel.combinations.indexOf(val);
+      if (target.checked && idx < 0) sel.combinations.push(val);
+      else if (!target.checked && idx >= 0) sel.combinations.splice(idx, 1);
+    } else {
+      var merged = sel.combinations.slice();
+      container.querySelectorAll('.pt-combo-cb:checked').forEach(function (cb) {
+        if (merged.indexOf(cb.value) < 0) merged.push(cb.value);
+      });
+      container.querySelectorAll('.pt-combo-cb:not(:checked)').forEach(function (cb) {
+        var i = merged.indexOf(cb.value);
+        if (i >= 0) merged.splice(i, 1);
+      });
+      sel.combinations = merged;
+    }
+    notify();
+  }
+
+  function refreshComboList() {
+    var list = container.querySelector('.pt-combo-list');
+    var search = container.querySelector('.pt-combo-search');
+    if (!list) return;
+    var filter = search ? search.value : '';
+    list.innerHTML = buildCombinationCheckboxListHtml(sel.productTypes, sel.combinations, meta, filter);
+    list.querySelectorAll('.pt-combo-cb').forEach(function (cb) {
+      cb.addEventListener('change', readComboCheckboxes);
+    });
+  }
+
+  container.querySelectorAll('.pt-type-cb').forEach(function (cb) {
+    cb.addEventListener('change', readTypeCheckboxes);
+  });
+
+  var search = container.querySelector('.pt-combo-search');
+  if (search) {
+    search.addEventListener('input', refreshComboList);
+    search.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') {
+        search.value = '';
+        refreshComboList();
+        search.blur();
+      }
+    });
+  }
+
+  container.querySelectorAll('.pt-combo-cb').forEach(function (cb) {
+    cb.addEventListener('change', readComboCheckboxes);
+  });
+}
+
+function readPtComboSelectionFromContainer(container) {
+  var sel = emptyPtComboSelection();
+  if (!container) return sel;
+  container.querySelectorAll('.pt-type-cb:checked').forEach(function (cb) {
+    sel.productTypes.push(cb.value);
+  });
+  container.querySelectorAll('.pt-combo-cb:checked').forEach(function (cb) {
+    sel.combinations.push(cb.value);
+  });
+  return sel;
+}
+
+function getProductTypeSetsFieldValue() {
+  var ptId = getProductTeamSpaceId();
+  var spaceId = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || '';
+  if (ptId && spaceId === ptId) {
+    var container = $('issueCombinationField');
+    var sel = _issuePtComboSel || readPtComboSelectionFromContainer(container);
+    if (!sel.productTypes.length && !sel.combinations.length && container) {
+      sel = readPtComboSelectionFromContainer(container);
+    }
+    var meta = findCombinationFieldMeta(ptId);
+    var serialized = serializePtComboSelection(sel);
+    return {
+      product_type: serialized.product_type,
+      combination: serialized.combination,
+      fieldId: meta ? meta.id : null
+    };
+  }
+  var pt = $('issueProductType') ? $('issueProductType').value : '';
+  return pt ? { product_type: pt, combination: null, fieldId: null } : null;
+}
+
+function saveDrawerPtComboSelection(issueId, sel, meta) {
+  if (!window._drawerPtComboSaveTimer) window._drawerPtComboSaveTimer = null;
+  clearTimeout(window._drawerPtComboSaveTimer);
+  window._drawerPtComboSaveTimer = setTimeout(function () {
+    var serialized = serializePtComboSelection(sel || emptyPtComboSelection());
+    api('/api/issues/' + issueId, 'PUT', { product_type: serialized.product_type }).catch(function () {
+      toast('Failed to save product type', 'error');
+    });
+    if (meta && meta.id) {
+      api('/api/issues/' + issueId + '/field-values/' + meta.id, 'PUT', { value: serialized.combination || '' })
+        .catch(function () { toast('Failed to save combinations', 'error'); });
+    }
+  }, 350);
+}
+
+function getCombinationFieldValue() {
+  var ptPayload = getProductTypeSetsFieldValue();
+  if (ptPayload && ptPayload.fieldId && ptPayload.combination) {
+    return { fieldId: ptPayload.fieldId, value: ptPayload.combination };
+  }
+  var container = $('issueCombinationField');
+  if (!container) return null;
+  var box = container.querySelector('.combo-box');
+  if (!box) {
+    return ptPayload && ptPayload.combination && ptPayload.fieldId
+      ? { fieldId: ptPayload.fieldId, value: ptPayload.combination }
+      : null;
+  }
+  var val = box.dataset.value || '';
+  var fieldId = box.dataset.cfId;
+  if (!fieldId || !val) return null;
+  return { fieldId: fieldId, value: val };
+}
+
+function normalizeCFOptions(opts) {
+  if (!opts) return [];
+  var arr = Array.isArray(opts) ? opts : (typeof opts === 'string' ? (function () { try { return JSON.parse(opts); } catch (_) { return []; } })() : []);
+  return arr.map(function (o) {
+    if (o && typeof o === 'object') return String(o.value != null ? o.value : (o.label != null ? o.label : o));
+    return String(o);
+  });
+}
+
+function isCombinationField(field) {
+  return field && (field.name || '').toLowerCase().trim() === 'combination';
+}
+
+function getProductTypeLabel(value) {
+  if (!value) return '';
+  var labels = (typeof PRODUCT_TYPE_LABELS !== 'undefined' ? PRODUCT_TYPE_LABELS : window.PRODUCT_TYPE_LABELS) || {};
+  return labels[value] || value;
+}
+
+function productTypeHasCombinations(productType) {
+  var withCombo = (typeof PRODUCT_TYPES_WITH_COMBINATIONS !== 'undefined'
+    ? PRODUCT_TYPES_WITH_COMBINATIONS
+    : window.PRODUCT_TYPES_WITH_COMBINATIONS) || ['Message', 'Email', 'Content'];
+  return withCombo.indexOf(productType) >= 0;
+}
+
+function flattenCombinationGroups(groups) {
+  var out = [];
+  var seen = {};
+  if (!groups) return out;
+  ['Message', 'Email', 'Content'].forEach(function (k) {
+    (groups[k] || []).forEach(function (o) {
+      var key = String(o).toLowerCase();
+      if (!seen[key]) { seen[key] = true; out.push(o); }
+    });
+  });
+  return out.sort(function (a, b) { return a.localeCompare(b); });
+}
+
+function parseCombinationFieldOptions(field) {
+  var raw = field && field.options !== undefined ? field.options : field;
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw); } catch (_) { raw = null; }
+  }
+  if (raw && raw.v === 2 && raw.groups) {
+    return {
+      groups: raw.groups,
+      flat: raw.flat || flattenCombinationGroups(raw.groups)
+    };
+  }
+  var flat = Array.isArray(raw) ? raw.slice() : getCombinationOptionsList();
+  var groups = { Message: [], Email: [], Content: [] };
+  var classify = typeof classifyCombination === 'function' ? classifyCombination : null;
+  flat.forEach(function (o) {
+    var cat = classify ? classify(o) : 'Content';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(o);
+  });
+  return { groups: groups, flat: flat };
+}
+
+function getCombinationsForProductType(productType, fieldMeta) {
+  if (!productTypeHasCombinations(productType)) return [];
+  var parsed = fieldMeta ? parseCombinationFieldOptions(fieldMeta) : null;
+  if (parsed && parsed.groups && parsed.groups[productType]) {
+    return parsed.groups[productType].slice();
+  }
+  var groups = (typeof COMBINATION_GROUPS !== 'undefined' ? COMBINATION_GROUPS : window.COMBINATION_GROUPS);
+  if (groups && groups[productType]) return groups[productType].slice();
+  return getCombinationOptionsList().filter(function (o) {
+    return typeof classifyCombination === 'function' && classifyCombination(o) === productType;
+  });
+}
+
+function getCombinationOptionsList(fieldMeta) {
+  if (fieldMeta) {
+    var parsed = parseCombinationFieldOptions(fieldMeta);
+    if (parsed.flat && parsed.flat.length) return parsed.flat.slice();
+  }
+  return (typeof COMBINATION_OPTIONS !== 'undefined' ? COMBINATION_OPTIONS : (window.COMBINATION_OPTIONS || [])).slice();
+}
+
+/** Source label = text before " - " (e.g. "Box" from "Box - SharePoint"). */
+function getCombinationSourceLabel(option) {
+  if (!option) return '';
+  var idx = String(option).indexOf(' - ');
+  return idx >= 0 ? String(option).slice(0, idx).trim() : String(option).trim();
+}
+
+/** Match query against source only, from the start — not destination/middle. */
+function matchCombinationSearch(option, query) {
+  if (!query || !String(query).trim()) return true;
+  var q = String(query).trim().toLowerCase();
+  return getCombinationSourceLabel(option).toLowerCase().startsWith(q);
+}
+
+/** Full-text filter for checkbox lists — matches source, destination, or anywhere in label. */
+function matchCombinationFilter(option, query) {
+  if (!query || !String(query).trim()) return true;
+  var q = String(query).trim().toLowerCase();
+  var full = String(option || '').toLowerCase();
+  if (full.indexOf(q) >= 0) return true;
+  var parts = String(option || '').split(' - ');
+  var src = (parts[0] || '').trim().toLowerCase();
+  var dst = (parts[1] || parts[0] || '').trim().toLowerCase();
+  if (src.indexOf(q) >= 0 || dst.indexOf(q) >= 0) return true;
+  return q.split(/\s+/).every(function (word) {
+    return word && full.indexOf(word) >= 0;
+  });
+}
+
+function getCustomFieldOptions(field) {
+  if (isCombinationField(field)) return getCombinationOptionsList(field);
+  return normalizeCFOptions(field.options);
+}
+
+function getCustomFieldRenderType(field) {
+  // Combination uses searchable single-select UI (matches production)
+  if (isCombinationField(field)) return 'select';
+  return field.field_type || 'text';
+}
+
+function buildCFSelectWrapInnerHtml(fid, ftype, opts, val, searchPlaceholder, isCombination) {
+  var isMultiSel = ftype === 'multi_select';
+  var selected = val ? String(val).split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+  var displayVal = selected.length ? esc(selected.join(', ')) : '';
+  var filterPh = searchPlaceholder || (isCombination ? 'Search source e.g. Box…' : 'Search…');
+  var comboClass = isCombination ? ' cf-combination-select' : '';
+  return '<div class="cf-select-wrap' + comboClass + '" data-cf-id="' + fid + '" data-multi="' + (isMultiSel ? '1' : '0') + '"' + (isCombination ? ' data-combination="1"' : '') + '">' +
+    '<div class="cf-select-trigger">' +
+      '<input class="cf-sel-search" type="text" value="' + displayVal + '" placeholder="' + (isMultiSel ? 'Select options…' : '— Select —') + '" readonly autocomplete="off">' +
+      (selected.length ? '<span class="cf-sel-clear" title="Clear">×</span>' : '') +
+      '<span class="cf-sel-arrow">⌄</span>' +
+    '</div>' +
+    '<div class="cf-select-dropdown" style="display:none">' +
+      '<div class="cf-sel-search-wrap">' +
+        '<svg class="cf-sel-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+        '<input class="cf-sel-filter" type="text" placeholder="' + esc(filterPh) + '" autocomplete="off">' +
+      '</div>' +
+      '<div class="cf-sel-list">' +
+      opts.map(function (o) {
+        var sel = selected.indexOf(o) >= 0;
+        var checkboxHtml = isMultiSel
+          ? '<input type="checkbox" class="cf-sel-opt-checkbox" style="pointer-events:none;margin-right:8px" tabindex="-1"' + (sel ? ' checked' : '') + '>'
+          : '';
+        return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + esc(o) + '">' + checkboxHtml + esc(o) + '</div>';
+      }).join('') +
+      '</div>' +
+      (isCombination ? '<div class="cf-sel-empty" style="display:none">No combinations match your search</div>' : '') +
+    '</div>' +
+  '</div>';
+}
+
+function positionCFDropdown(wrapEl) {
+  var dropdown = wrapEl.querySelector('.cf-select-dropdown');
+  var trigger = wrapEl.querySelector('.cf-select-trigger');
+  if (!dropdown || !trigger) return;
+  if (!wrapEl.closest('#modal-issue') && !wrapEl.dataset.combination) return;
+  var rect = trigger.getBoundingClientRect();
+  var maxH = Math.min(320, window.innerHeight - rect.bottom - 16);
+  if (maxH < 120) maxH = Math.min(320, rect.top - 16);
+  dropdown.style.position = 'fixed';
+  dropdown.style.left = Math.max(8, rect.left) + 'px';
+  dropdown.style.width = rect.width + 'px';
+  dropdown.style.right = 'auto';
+  dropdown.style.zIndex = '10050';
+  dropdown.style.maxHeight = maxH + 'px';
+  if (rect.bottom + maxH > window.innerHeight - 8 && rect.top > maxH + 8) {
+    dropdown.style.top = Math.max(8, rect.top - maxH - 4) + 'px';
+  } else {
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+  }
+}
+
+function resetCFDropdownPosition(dropdown) {
+  if (!dropdown) return;
+  dropdown.style.position = '';
+  dropdown.style.left = '';
+  dropdown.style.top = '';
+  dropdown.style.width = '';
+  dropdown.style.right = '';
+  dropdown.style.zIndex = '';
+  dropdown.style.maxHeight = '';
+}
+
+function bindCFSelectWrap(el, config) {
+  config = config || {};
+  var isMulti = el.dataset.multi === '1';
+  var isCombination = el.dataset.combination === '1';
+  var selArr = Array.from(el.querySelectorAll('.cf-sel-opt-active')).map(function (o) { return o.dataset.val; });
+  var trigger = el.querySelector('.cf-select-trigger');
+  var dropdown = el.querySelector('.cf-select-dropdown');
+  var searchInput = el.querySelector('.cf-sel-search');
+  var filterInput = el.querySelector('.cf-sel-filter');
+
+  function notify() {
+    if (typeof config.onChange === 'function') config.onChange(selArr.join(','), selArr);
+  }
+
+  function refreshTrigger() {
+    searchInput.value = selArr.length ? selArr.join(', ') : '';
+    searchInput.placeholder = isMulti ? 'Select options…' : '— Select —';
+    var clearBtn = trigger.querySelector('.cf-sel-clear');
+    if (selArr.length && !clearBtn) {
+      var c = document.createElement('span');
+      c.className = 'cf-sel-clear'; c.title = 'Clear'; c.textContent = '×';
+      trigger.insertBefore(c, trigger.querySelector('.cf-sel-arrow'));
+    } else if (!selArr.length && clearBtn) {
+      clearBtn.remove();
+    }
+  }
+
+  function refreshOpts(filter) {
+    var visible = 0;
+    el.querySelectorAll('.cf-sel-opt').forEach(function (opt) {
+      var v = opt.dataset.val;
+      var active = selArr.indexOf(v) >= 0;
+      opt.classList.toggle('cf-sel-opt-active', active);
+      var cb = opt.querySelector('.cf-sel-opt-checkbox');
+      if (cb) cb.checked = active;
+      var show = !filter || (isCombination
+        ? matchCombinationSearch(v, filter)
+        : v.toLowerCase().indexOf(filter.toLowerCase()) >= 0);
+      opt.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    var emptyEl = el.querySelector('.cf-sel-empty');
+    if (emptyEl) emptyEl.style.display = (filter && visible === 0) ? 'block' : 'none';
+  }
+
+  function openDropdown() {
+    qsa('.cf-select-dropdown').forEach(function (d) {
+      if (d !== dropdown) {
+        d.style.display = 'none';
+        resetCFDropdownPosition(d);
+      }
+    });
+    dropdown.style.display = 'block';
+    positionCFDropdown(el);
+    if (filterInput) {
+      filterInput.value = '';
+      refreshOpts('');
+      setTimeout(function () { filterInput.focus(); }, 0);
+    }
+  }
+
+  function closeDropdown() {
+    dropdown.style.display = 'none';
+    resetCFDropdownPosition(dropdown);
+    if (filterInput) filterInput.value = '';
+    refreshOpts('');
+  }
+
+  trigger.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    if (ev.target.classList.contains('cf-sel-clear')) {
+      selArr = []; refreshTrigger(); refreshOpts(''); notify();
+      return;
+    }
+    var isOpen = dropdown.style.display !== 'none';
+    if (isOpen) {
+      closeDropdown();
+    } else {
+      openDropdown();
+    }
+  });
+
+  if (filterInput) {
+    filterInput.addEventListener('input', function (ev) {
+      ev.stopPropagation();
+      refreshOpts(filterInput.value);
+    });
+    filterInput.addEventListener('click', function (ev) { ev.stopPropagation(); });
+    filterInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') { closeDropdown(); ev.preventDefault(); }
+      if (ev.key === 'Enter') {
+        var first = el.querySelector('.cf-sel-opt:not([style*="display: none"])') || el.querySelector('.cf-sel-opt');
+        var vis = Array.from(el.querySelectorAll('.cf-sel-opt')).filter(function (o) { return o.style.display !== 'none'; });
+        if (vis.length) {
+          vis[0].click();
+          ev.preventDefault();
+        }
+      }
+    });
+  }
+
+  el.querySelectorAll('.cf-sel-opt').forEach(function (opt) {
+    opt.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      var v = opt.dataset.val;
+      if (isMulti) {
+        var idx = selArr.indexOf(v);
+        if (idx >= 0) selArr.splice(idx, 1); else selArr.push(v);
+      } else {
+        selArr = [v];
+        closeDropdown();
+      }
+      refreshTrigger(); refreshOpts(filterInput ? filterInput.value : '');
+      notify();
+    });
+  });
+}
+
+function bindCreateModalCustomFields(container) {
+  if (!container) return;
+  container.querySelectorAll('.cf-select-wrap[data-cf-id]').forEach(function (el) {
+    bindCFSelectWrap(el);
+  });
+}
+
+function getCreateModalCustomFieldValues() {
+  var cfs = {};
+  var container = $('issueCustomFieldsContainer');
+  if (!container) return cfs;
+  container.querySelectorAll('[data-cf-id]').forEach(function (el) {
+    var id = el.dataset.cfId;
+    if (!id) return;
+    if (el.classList.contains('cf-select-wrap')) {
+      var sel = Array.from(el.querySelectorAll('.cf-sel-opt-active')).map(function (o) { return o.dataset.val; });
+      if (sel.length) cfs[id] = sel.join(',');
+    } else if (el.classList.contains('cf-field')) {
+      if (el.tagName === 'SELECT' && el.multiple) {
+        var mv = Array.from(el.selectedOptions).map(function (o) { return o.value; }).join(',');
+        if (mv) cfs[id] = mv;
+      } else if (el.value) cfs[id] = el.value;
+    }
+  });
+  return cfs;
+}
 
 async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   var c = $('drawerCustomFields');
   if (!c) return;
+
+  if (spaceId === getProductTeamSpaceId()) {
+    await ensureCombinationFieldMeta(spaceId);
+  }
 
   // Get ALL custom fields defined for this space
   var spaceFields = (S.data.custom_fields || []).filter(function(f) { return f.space_id == spaceId; });
@@ -7871,7 +9721,12 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   if (!spaceFields.length && spaceId) {
     try {
       var fetched = await api('/api/custom-fields?space_id=' + spaceId);
-      if (fetched && fetched.length) spaceFields = fetched;
+      if (fetched && fetched.length) {
+        spaceFields = fetched;
+        S.data.custom_fields = (S.data.custom_fields || [])
+          .filter(function (f) { return f.space_id != spaceId; })
+          .concat(fetched);
+      }
     } catch(e) {}
   }
 
@@ -7894,6 +9749,7 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   var html = '';
   spaceFields.forEach(function(field) {
     if (_builtinFields.indexOf((field.name || '').toLowerCase().trim()) !== -1) return;
+    if (isCombinationField(field)) return;
     var fid = field.id;
     var fname = esc(field.name);
     var ftype = field.field_type || 'text';
@@ -7912,29 +9768,14 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
     } else if (ftype === 'checkbox') {
       inputHtml = '<input type="checkbox" data-cf-id="' + fid + '" ' + (val === 'true' ? 'checked' : '') + '>';
     } else if (ftype === 'select' || ftype === 'multi_select') {
-      var mopts = (Array.isArray(field.options) ? field.options : (typeof field.options === 'string' ? JSON.parse(field.options || '[]') : (field.options || [])));
-      var selected = val ? val.split(',').map(function(s){return s.trim();}).filter(Boolean) : [];
-      var isMultiSel = ftype === 'multi_select';
-      var displayVal = selected.length ? esc(selected.join(', ')) : '';
-      inputHtml = '<div class="cf-select-wrap" data-cf-id="' + fid + '" data-multi="' + (isMultiSel ? '1' : '0') + '">' +
-        '<div class="cf-select-trigger">' +
-          '<input class="cf-sel-search" type="text" value="' + displayVal + '" placeholder="' + (isMultiSel ? 'Select options…' : 'Select an option…') + '" readonly>' +
-          (selected.length ? '<span class="cf-sel-clear" title="Clear">×</span>' : '') +
-          '<span class="cf-sel-arrow">⌄</span>' +
-        '</div>' +
-        '<div class="cf-select-dropdown" style="display:none">' +
-          '<div class="cf-sel-search-wrap"><input class="cf-sel-filter" type="text" placeholder="Search…"></div>' +
-          '<div class="cf-sel-list">' +
-          mopts.map(function(o) {
-            var sel = selected.indexOf(o) >= 0;
-            var checkboxHtml = isMultiSel
-              ? '<input type="checkbox" class="cf-sel-opt-checkbox" style="pointer-events:none;margin-right:8px" tabindex="-1"' + (sel ? ' checked' : '') + '>'
-              : '';
-            return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + esc(o) + '">' + checkboxHtml + esc(o) + '</div>';
-          }).join('') +
-          '</div>' +
-        '</div>' +
-      '</div>';
+      if (isCombinationField(field)) {
+        var comboVal = val && typeof normalizeCombinationLabel === 'function' ? normalizeCombinationLabel(val) : val;
+        inputHtml = buildCombinationComboboxHtml(fid, comboVal);
+      } else {
+        var mopts = getCustomFieldOptions(field);
+        var renderType = getCustomFieldRenderType(field);
+        inputHtml = buildCFSelectWrapInnerHtml(fid, renderType, mopts, val, 'Search…', false);
+      }
     } else if (ftype === 'user') {
       var uopts = (S.data.users || [])
         .map(function(u) { return '<option value="' + u.id + '"' + (u.id == val ? ' selected' : '') + '>' + esc(u.name) + '</option>'; }).join('');
@@ -7961,81 +9802,13 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
     }
 
     if (isSelectWrap) {
-      var isMulti = el.dataset.multi === '1';
-      var selArr = Array.from(el.querySelectorAll('.cf-sel-opt-active')).map(function(o){ return o.dataset.val; });
-      var trigger  = el.querySelector('.cf-select-trigger');
-      var dropdown = el.querySelector('.cf-select-dropdown');
-      var searchInput = el.querySelector('.cf-sel-search');
-      var filterInput = el.querySelector('.cf-sel-filter');
-
-      function refreshTrigger() {
-        searchInput.value = selArr.length ? selArr.join(', ') : '';
-        searchInput.placeholder = isMulti ? 'Select options…' : 'Select an option…';
-        var clearBtn = trigger.querySelector('.cf-sel-clear');
-        if (selArr.length && !clearBtn) {
-          var c = document.createElement('span');
-          c.className = 'cf-sel-clear'; c.title = 'Clear'; c.textContent = '×';
-          trigger.insertBefore(c, trigger.querySelector('.cf-sel-arrow'));
-        } else if (!selArr.length && clearBtn) {
-          clearBtn.remove();
-        }
-      }
-
-      function refreshOpts(filter) {
-        el.querySelectorAll('.cf-sel-opt').forEach(function(opt) {
-          var v = opt.dataset.val;
-          var active = selArr.indexOf(v) >= 0;
-          opt.classList.toggle('cf-sel-opt-active', active);
-          var cb = opt.querySelector('.cf-sel-opt-checkbox');
-          if (cb) cb.checked = active;
-          opt.style.display = filter && v.toLowerCase().indexOf(filter.toLowerCase()) < 0 ? 'none' : '';
-        });
-      }
-
-      // Single delegated handler on the trigger for both the "×" clear button
-      // and opening/closing the dropdown. Delegated (checked by ev.target)
-      // instead of binding the clear button its own listener at creation time
-      // — the clear button can also come from the initial static markup (a
-      // field that already had a saved value when the drawer opened), and
-      // that one was never getting a listener attached at all, so clearing a
-      // field that already had a value silently did nothing the first time.
-      trigger.addEventListener('click', function(ev) {
-        ev.stopPropagation();
-        if (ev.target.classList.contains('cf-sel-clear')) {
-          selArr = []; refreshTrigger(); refreshOpts(''); saveValue('');
-          return;
-        }
-        var isOpen = dropdown.style.display !== 'none';
-        qsa('.cf-select-dropdown').forEach(function(d){ d.style.display = 'none'; });
-        if (!isOpen) {
-          dropdown.style.display = 'block';
-          if (filterInput) { filterInput.value = ''; refreshOpts(''); filterInput.focus(); }
-        }
+      bindCFSelectWrap(el, {
+        onChange: function (value) { saveValue(value); }
       });
-
-      // Filter input
-      if (filterInput) {
-        filterInput.addEventListener('input', function(ev) { ev.stopPropagation(); refreshOpts(filterInput.value); });
-        filterInput.addEventListener('click', function(ev) { ev.stopPropagation(); });
-      }
-
-      // Option click — toggles for multi-select, replaces for single-select
-      el.querySelectorAll('.cf-sel-opt').forEach(function(opt) {
-        opt.addEventListener('click', function(ev) {
-          ev.stopPropagation();
-          var v = opt.dataset.val;
-          if (isMulti) {
-            var idx = selArr.indexOf(v);
-            if (idx >= 0) selArr.splice(idx, 1); else selArr.push(v);
-          } else {
-            selArr = [v];
-            dropdown.style.display = 'none';
-          }
-          refreshTrigger(); refreshOpts(filterInput ? filterInput.value : '');
-          saveValue(selArr.join(','));
-        });
+    } else if (el.classList.contains('combo-box')) {
+      bindCombinationCombobox(el, {
+        onChange: function (value) { saveValue(value); }
       });
-
     } else if (el.type === 'checkbox') {
       el.addEventListener('change', function() { saveValue(el.checked ? 'true' : 'false'); });
     } else {
@@ -8192,6 +9965,7 @@ function resetIssueForm() {
   if ($('issueLabels')) $('issueLabels').value = '';
   if ($('issueTeam')) $('issueTeam').value = '';
   if ($('issueProductType')) $('issueProductType').value = '';
+  _issuePtComboSel = null;
   $('issueStartDate').value = fmtDateISO(new Date()); // default to today
   $('issueDueDate').value = '';
   var descEl = document.getElementById('issueDescContent'); if (descEl) descEl.innerHTML = '';
@@ -8207,6 +9981,10 @@ function resetIssueForm() {
   if (fi) fi.value = '';
   var fnLabel = $('attachmentFileNames');
   if (fnLabel) fnLabel.textContent = 'No files chosen';
+  var cfContainer = $('issueCustomFieldsContainer');
+  if (cfContainer) cfContainer.innerHTML = '';
+  var comboContainer = $('issueCombinationField');
+  if (comboContainer) comboContainer.innerHTML = '';
 }
 
 function populateIssueFormSelects() {
@@ -8259,6 +10037,7 @@ async function handleIssueSubmit(e) {
   var parentId = $('issueParentId').value || null;
   // Ensure space_id is set
   var resolvedSpace = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || (S.data && S.data.spaces && S.data.spaces[0] && S.data.spaces[0].id);
+  var ptPayload = getProductTypeSetsFieldValue();
   var payload = {
     space_id: resolvedSpace,
     title: $('issueTitleInput').value,
@@ -8269,19 +10048,14 @@ async function handleIssueSubmit(e) {
     sprint_id: $('issueSprint').value || null,
     story_points: $('issuePoints').value ? parseInt($('issuePoints').value, 10) : null,
     team: $('issueTeam') ? ($('issueTeam').value || null) : null,
-    product_type: $('issueProductType') ? ($('issueProductType').value || null) : null,
+    product_type: ptPayload ? ptPayload.product_type : ($('issueProductType') ? ($('issueProductType').value || null) : null),
     labels: $('issueLabels') ? $('issueLabels').value : '',
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
     description: (function() { var el = document.getElementById('issueDescContent'); if (!el) return ''; var h = el.innerHTML.trim(); return (h === '' || h === '<br>') ? '' : h; })(),
     original_estimate: $('issueEstimate') ? parseEstimate($('issueEstimate').value) : 0,
     status: 'To Do',
-    _customFields: (function() {
-      var cfs = {};
-      var fields = document.querySelectorAll('#issueCustomFieldsContainer .cf-field');
-      fields.forEach(function(f) { if (f.value) cfs[f.dataset.cfId] = f.value; });
-      return cfs;
-    })()
+    _customFields: getCreateModalCustomFieldValues()
   };
   if (parentId) payload.parent_id = parentId;
 
@@ -8304,12 +10078,23 @@ async function handleIssueSubmit(e) {
       // selectedOptions is required to capture every value chosen, matching
       // the comma-joined format the rest of the app already stores/parses.
       var cfFields = document.querySelectorAll('#issueCustomFieldsContainer .cf-field');
-      cfFields.forEach(function(f) {
+      var cfValues = getCreateModalCustomFieldValues();
+      Object.keys(cfValues).forEach(function (cfId) {
+        api('/api/issues/' + created.id + '/field-values/' + cfId, 'PUT', { value: cfValues[cfId] }).catch(function () {});
+      });
+      var comboVal = getCombinationFieldValue();
+      if (comboVal && comboVal.fieldId) {
+        api('/api/issues/' + created.id + '/field-values/' + comboVal.fieldId, 'PUT', { value: comboVal.value || '' }).catch(function () {});
+      } else if (ptPayload && ptPayload.fieldId) {
+        api('/api/issues/' + created.id + '/field-values/' + ptPayload.fieldId, 'PUT', { value: ptPayload.combination || '' }).catch(function () {});
+      }
+      cfFields.forEach(function (f) {
+        if (cfValues[f.dataset.cfId]) return;
         var v = (f.tagName === 'SELECT' && f.multiple)
-          ? Array.from(f.selectedOptions).map(function(o) { return o.value; }).join(',')
+          ? Array.from(f.selectedOptions).map(function (o) { return o.value; }).join(',')
           : f.value;
         if (v && f.dataset.cfId) {
-          api('/api/issues/' + created.id + '/field-values/' + f.dataset.cfId, 'PUT', { value: v }).catch(function(){});
+          api('/api/issues/' + created.id + '/field-values/' + f.dataset.cfId, 'PUT', { value: v }).catch(function () {});
         }
       });
       // team and product_type are saved directly via payload
@@ -8453,10 +10238,11 @@ async function loadNotifications() {
 var _notifTypeMap = {
   'issue_assigned': 'issue_assigned',
   'status_changed': 'status_changed',
+  'priority_changed': 'priority_changed',
   'comment_added':  'comment_added',
   'sprint_started': 'sprint_started',
-  'sprint_completed': 'sprint_started', // same toggle as sprint_started
-  'mention': 'comment_added'            // mentions follow comment pref
+  'sprint_completed': 'sprint_started',
+  'mention': 'mention'
 };
 
 function _filterNotifsByPrefs(notifs) {
@@ -8485,11 +10271,113 @@ function renderNotifBadge() {
 var _notifTypeIcon = {
   'issue_assigned': '👤',
   'status_changed': '🔄',
+  'priority_changed': '⚡',
   'comment_added':  '💬',
   'sprint_started': '🚀',
   'sprint_completed': '✅',
   'mention': '@'
 };
+
+function parseNotifIssueLink(link) {
+  if (!link) return null;
+  var raw = String(link).trim();
+  // Modern: /?issue=KEY or ?issue=KEY
+  var paramMatch = raw.match(/(?:\?|&)issue=([^&]+)/i);
+  if (paramMatch) {
+    try { return decodeURIComponent(paramMatch[1]).trim(); } catch (_) { return paramMatch[1].trim(); }
+  }
+  // Legacy: /spaces/ENG/issues/ENG-8
+  var legacyMatch = raw.match(/\/issues\/([A-Za-z][A-Za-z0-9_]*-\d+)/i);
+  if (legacyMatch) return legacyMatch[1].toUpperCase();
+  // Trailing issue key in path
+  var tailMatch = raw.match(/([A-Za-z][A-Za-z0-9_]*-\d+)\/?$/);
+  if (tailMatch) return tailMatch[1].toUpperCase();
+  return null;
+}
+
+function extractIssueKeyFromNotifTitle(title) {
+  if (!title) return null;
+  var m = String(title).match(/\b([A-Za-z][A-Za-z0-9_]*-\d+)\b/);
+  return m ? m[1].toUpperCase() : null;
+}
+
+function findCachedIssueByKey(issueKey) {
+  if (!issueKey) return null;
+  var upper = String(issueKey).toUpperCase();
+  return (S.data && S.data.issues || []).find(function (i) {
+    return (i.key && i.key.toUpperCase() === upper) || String(i.id) === String(issueKey);
+  }) || null;
+}
+
+async function fetchAndCacheIssue(issueKey) {
+  try {
+    var token = getAuthToken();
+    var headers = {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    var res = await fetch('/api/issues/' + encodeURIComponent(issueKey), { headers: headers });
+    if (!res.ok) return null;
+    var fetched = await res.json();
+    if (fetched && fetched.id) {
+      S.data.issues = S.data.issues || [];
+      var idx = S.data.issues.findIndex(function (i) { return i.id === fetched.id; });
+      if (idx >= 0) S.data.issues[idx] = Object.assign(S.data.issues[idx], fetched);
+      else S.data.issues.push(fetched);
+      return fetched;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function openIssueFromNotifLink(link, title) {
+  var issueKey = parseNotifIssueLink(link) || extractIssueKeyFromNotifTitle(title);
+  if (!issueKey) return false;
+  var issue = findCachedIssueByKey(issueKey);
+  if (issue) {
+    openIssuePage(issue.id);
+    return true;
+  }
+  var fetched = await fetchAndCacheIssue(issueKey);
+  if (fetched) {
+    openIssuePage(fetched.id);
+    return true;
+  }
+  toast('Could not open linked issue', 'error');
+  return false;
+}
+
+async function openNotifTarget(notif) {
+  notif = notif || {};
+  var link = notif.link || '';
+  var type = notif.type || '';
+  var spaceId = notif.space_id || '';
+
+  if (parseNotifIssueLink(link) || extractIssueKeyFromNotifTitle(notif.title)) {
+    return openIssueFromNotifLink(link, notif.title);
+  }
+
+  // Space board route: /space/ENG/board
+  var spaceBoardMatch = link.match(/^\/space\/([^/]+)\/board\/?$/i);
+  if (spaceBoardMatch) {
+    var sp = getSpaceByKey(decodeURIComponent(spaceBoardMatch[1]));
+    if (sp) {
+      navigateToSpace(sp.id, 'board');
+      return true;
+    }
+  }
+
+  if ((type === 'sprint_started' || type === 'sprint_completed') && spaceId) {
+    navigateToSpace(spaceId, 'board');
+    return true;
+  }
+
+  if (spaceId) {
+    navigateToSpace(spaceId, 'summary');
+    return true;
+  }
+
+  toast('This notification has no linked destination', 'warning');
+  return false;
+}
 
 function renderNotifPanel() {
   var notifs = _filterNotifsByPrefs(S.data.notifications || []);
@@ -8503,8 +10391,8 @@ function renderNotifPanel() {
     return;
   }
   var sorted = notifs.slice().sort(function(a,b){ return new Date(b.created_at)-new Date(a.created_at); });
-  var tIcons = { comment_added:'&#128172;', issue_assigned:'&#128100;', status_changed:'&#128260;', sprint_started:'&#128640;', sprint_completed:'&#9989;', issue_created:'&#128203;', mention:'@' };
-  var tColors = { comment_added:'#0129AC', issue_assigned:'#7c3aed', status_changed:'#059669', sprint_started:'#d97706', sprint_completed:'#059669', issue_created:'#0129AC', mention:'#dc2626' };
+  var tIcons = { comment_added:'&#128172;', issue_assigned:'&#128100;', status_changed:'&#128260;', priority_changed:'&#9889;', sprint_started:'&#128640;', sprint_completed:'&#9989;', issue_created:'&#128203;', mention:'@' };
+  var tColors = { comment_added:'#0129AC', issue_assigned:'#7c3aed', status_changed:'#059669', priority_changed:'#f59e0b', sprint_started:'#d97706', sprint_completed:'#059669', issue_created:'#0129AC', mention:'#dc2626' };
   var html = '';
   var limit = Math.min(sorted.length, 50);
   for (var i = 0; i < limit; i++) {
@@ -8512,8 +10400,7 @@ function renderNotifPanel() {
     var icon = tIcons[n.type] || '&#128276;';
     var color = tColors[n.type] || '#0129AC';
     var isU = !n.is_read;
-    var encodedLink = encodeURIComponent(n.link || '');
-    html += '<div class="notif-item' + (isU ? ' unread' : '') + '" onclick="window._markNotifRead(\'' + n.id + '\',\'' + encodedLink + '\')">' +
+    html += '<div class="notif-item' + (isU ? ' unread' : '') + '" data-notif-id="' + esc(n.id) + '" data-notif-link="' + esc(n.link || '') + '" data-notif-type="' + esc(n.type || '') + '" data-notif-space-id="' + esc(n.space_id || '') + '" data-notif-title="' + esc(n.title || '') + '">' +
       '<div class="notif-item-icon" style="background:' + color + '22">' + icon + '</div>' +
       '<div class="notif-item-body">' +
       '<div class="notif-item-title' + (isU ? ' bold' : '') + '">' + esc(n.title || 'Notification') + '</div>' +
@@ -8526,35 +10413,32 @@ function renderNotifPanel() {
   listEl.innerHTML = html;
 }
 
-window._markNotifRead = async function (id, encodedLink) {
-  await api('/api/notifications/' + id + '/read', 'PUT');
-  // Close panel
+window._markNotifRead = async function (id, link, type, spaceId, title) {
+  try {
+    if (id) await api('/api/notifications/' + id + '/read', 'PUT');
+  } catch (_) {}
+  if (S.data && S.data.notifications) {
+    S.data.notifications.forEach(function (n) {
+      if (n.id === id) n.is_read = true;
+    });
+  }
+  renderNotifBadge();
+  renderNotifPanel();
   var panel = $('notifPanel');
   if (panel) panel.setAttribute('hidden', '');
-  // Navigate to the linked issue
-  if (encodedLink) {
-    var link = decodeURIComponent(encodedLink); // e.g. "/?ENG-41"
-    var issueKey = link.replace(/^\/?\??/, ''); // → "ENG-41"
-    if (issueKey) {
-      // Try to find the issue in local data first
-      var issue = (S.data && S.data.issues || []).find(function(i) { return i.key === issueKey; });
-      if (issue) {
-        openIssuePage(issue.id, issue.key);
-      } else {
-        // Fetch across spaces then open
-        api('/api/issues/' + encodeURIComponent(issueKey)).then(function(data) {
-          if (data && data.id) openIssuePage(data.id, data.key);
-        }).catch(function() {});
-      }
-    }
+  try {
+    await openNotifTarget({ link: link, type: type, space_id: spaceId, title: title });
+  } catch (_) {
+    toast('Could not open notification', 'error');
   }
-  await loadNotifications();
-  renderNotifPanel();
 };
 
 async function markAllRead() {
   await api('/api/notifications/read-all', 'PUT', { user_id: S.currentUser });
-  await loadNotifications();
+  if (S.data && S.data.notifications) {
+    S.data.notifications.forEach(function (n) { n.is_read = true; });
+  }
+  renderNotifBadge();
   renderNotifPanel();
 }
 
@@ -8580,7 +10464,8 @@ document.addEventListener('DOMContentLoaded', function () {
   qsa('.nav-item[data-view]').forEach(function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
-      navigateTo(el.dataset.view);
+      if (el.dataset.view === 'yourwork') navigateToYourWork('assigned');
+      else navigateTo(el.dataset.view);
     });
   });
 
@@ -8655,70 +10540,82 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function renderCF(cfs) {
       var excluded = ['team', 'product type', 'environment', 'story category', 'testing'];
-      // Deduplicate by lowercase name — keep first occurrence
-      var seen = {};
       var unique = [];
-      cfs.forEach(function(f) {
+      var seen = {};
+      cfs.forEach(function (f) {
         var key = (f.name || '').toLowerCase().trim();
         if (excluded.indexOf(key) !== -1) return;
+        if (isCombinationField(f)) return;
         if (seen[key]) return;
         seen[key] = true;
         unique.push(f);
       });
-      cfContainer.innerHTML = unique.map(function(f) {
-        var opts = Array.isArray(f.options) ? f.options :
-          (typeof f.options === 'string' ? (function(){ try{ return JSON.parse(f.options); }catch(e){ return []; } })() : []);
-        if (f.field_type === 'select') {
+      cfContainer.innerHTML = unique.map(function (f) {
+        var opts = getCustomFieldOptions(f);
+        var req = f.is_required ? ' <span style="color:var(--red)">*</span>' : '';
+        var renderType = getCustomFieldRenderType(f);
+        if (renderType === 'select' || renderType === 'multi_select') {
+          var searchHint = isCombinationField(f) ? ' <span style="font-size:11px;color:var(--text3);font-weight:400">(searchable)</span>' : '';
           return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
-            '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '">' +
-            '<option value="">— Select —</option>' +
-            opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
-            '</select></div>';
-        } else if (f.field_type === 'multi_select') {
+            '<label class="form-label">' + esc(f.name) + searchHint + req + '</label>' +
+            '<div class="cf-select-wrap-modal">' +
+            buildCFSelectWrapInnerHtml(f.id, renderType, opts, '', isCombinationField(f) ? 'Search combinations…' : 'Search…', isCombinationField(f)) +
+            '</div></div>';
+        }
+        if (f.field_type === 'text') {
           return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
-            '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" data-multi="1" multiple style="min-height:80px">' +
-            opts.map(function(o){ return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') +
-            '</select></div>';
-        } else if (f.field_type === 'text') {
-          return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
+            '<label class="form-label">' + esc(f.name) + req + '</label>' +
             '<input type="text" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
-        } else if (f.field_type === 'number') {
+        }
+        if (f.field_type === 'number') {
           return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
+            '<label class="form-label">' + esc(f.name) + req + '</label>' +
             '<input type="number" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
-        } else if (f.field_type === 'textarea') {
+        }
+        if (f.field_type === 'textarea') {
           return '<div class="form-group">' +
-            '<label class="form-label">' + esc(f.name) + (f.is_required ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' +
+            '<label class="form-label">' + esc(f.name) + req + '</label>' +
             '<textarea class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" rows="3"></textarea></div>';
         }
         return '';
       }).join('');
+      bindCreateModalCustomFields(cfContainer);
     }
 
-    // Always use ALL cached custom fields from all spaces (deduplicated)
     var allCFs = S.data.custom_fields || [];
-    if (allCFs.length) {
-      renderCF(allCFs);
+    var spaceCFs = spaceId ? allCFs.filter(function (f) { return f.space_id === spaceId; }) : [];
+    if (spaceCFs.length) {
+      renderCF(spaceCFs);
     } else if (spaceId) {
       cfContainer.innerHTML = '';
-      api('/api/data?space_id=' + spaceId).then(function(data) {
-        if (data && data.custom_fields) {
-          S.data.custom_fields = (S.data.custom_fields || []).filter(function(f){ return f.space_id !== spaceId; }).concat(data.custom_fields);
-          renderCF(S.data.custom_fields);
+      api('/api/data?space_id=' + spaceId).then(function (data) {
+        if (data && data.custom_fields && data.custom_fields.length) {
+          S.data.custom_fields = (S.data.custom_fields || []).filter(function (f) { return f.space_id !== spaceId; }).concat(data.custom_fields);
+          renderCF(data.custom_fields);
+        } else {
+          cfContainer.innerHTML = '';
         }
-      }).catch(function(){});
+      }).catch(function () { cfContainer.innerHTML = ''; });
     } else {
       cfContainer.innerHTML = '';
     }
+    renderIssueProductTypeSets(spaceId);
   };
+
+  if ($('issueProductType')) {
+    $('issueProductType').addEventListener('change', function () {
+      var spaceId = ($('issueSpaceSelect') && $('issueSpaceSelect').value) || ($('issueSpaceId') && $('issueSpaceId').value) || '';
+      var ptId = getProductTeamSpaceId();
+      if (ptId && spaceId === ptId) return;
+      renderIssueProductTypeSets(spaceId);
+    });
+  }
 
   window.openCreateIssueModal = function() {
     resetIssueForm();
     $('issueModalTitle').textContent = 'Create Issue';
-    var spaceToUse = S.currentSpace || ((S.data && S.data.spaces && S.data.spaces[0]) ? S.data.spaces[0].id : '');
+    var ptId = getProductTeamSpaceId();
+    var spaceToUse = S.currentSpace || ptId || ((S.data && S.data.spaces && S.data.spaces[0]) ? S.data.spaces[0].id : '');
     $('issueSpaceId').value = spaceToUse;
     window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(spaceToUse);
     window._onIssueSpaceChange && window._onIssueSpaceChange(spaceToUse);
@@ -8741,35 +10638,47 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Notifications
-  $('notifBtn').addEventListener('click', function () {
+  $('notifBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
     var panel = $('notifPanel');
     if (panel.hasAttribute('hidden')) {
       panel.removeAttribute('hidden');
-      renderNotifPanel();
-      // Mark all as read when panel opens and clear badge immediately
-      if (S.data && S.data.notifications) {
-        S.data.notifications.forEach(function(n){ n.is_read = true; });
-      }
-      var badge = $('notifBadge');
-      if (badge) badge.setAttribute('hidden', '');
-      markAllRead().then(function() {
+      loadNotifications().then(function () {
+        renderNotifPanel();
         renderNotifBadge();
       });
     } else {
       panel.setAttribute('hidden', '');
     }
   });
-  $('markAllReadBtn').addEventListener('click', function () { markAllRead(); });
+  $('markAllReadBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    markAllRead();
+  });
+  var notifListEl = $('notifList');
+  if (notifListEl) {
+    notifListEl.addEventListener('click', function (e) {
+      var item = e.target.closest('.notif-item');
+      if (!item) return;
+      e.stopPropagation();
+      e.preventDefault();
+      window._markNotifRead(
+        item.dataset.notifId,
+        item.dataset.notifLink || '',
+        item.dataset.notifType || '',
+        item.dataset.notifSpaceId || '',
+        item.dataset.notifTitle || ''
+      );
+    });
+  }
 
   // Close notif panel on outside click
   document.addEventListener('click', function (e) {
     var panel = $('notifPanel');
-    if (!panel.hasAttribute('hidden') &&
-        !panel.contains(e.target) &&
-        e.target !== $('notifBtn') &&
-        !$('notifBtn').contains(e.target)) {
-      panel.setAttribute('hidden', '');
-    }
+    var btn = $('notifBtn');
+    if (!panel || panel.hasAttribute('hidden')) return;
+    if (panel.contains(e.target) || (btn && (e.target === btn || btn.contains(e.target)))) return;
+    panel.setAttribute('hidden', '');
   });
 
   // Form submits
@@ -8875,6 +10784,14 @@ document.addEventListener('DOMContentLoaded', function () {
   $('allWorkSearch').addEventListener('input', function () {
     if (S.currentTab === 'allwork') renderAllWork();
   });
+  var ywSearchEl = $('ywSearch');
+  if (ywSearchEl) {
+    ywSearchEl.addEventListener('input', function () {
+      if (S.currentView !== 'yourwork') return;
+      if (S.yourWorkTab === 'recent') renderRecentlyViewedContent();
+      else renderYourWorkContent(_ywCache);
+    });
+  }
   // Date range inputs for All Work
   // Map: [elementId, S.awFilters key, panelKey, fromKey, toKey]
   var dateInputMap = [
@@ -8902,6 +10819,9 @@ document.addEventListener('DOMContentLoaded', function () {
   document.addEventListener('click', function(e) {
     if (!e.target.closest('.aw-ms-wrap')) {
       document.querySelectorAll('.aw-ms-panel').forEach(function(p) { p.hidden = true; });
+    }
+    if (!e.target.closest('.yw-th-filter-wrap')) {
+      document.querySelectorAll('.yw-filter-panel').forEach(function(p) { p.hidden = true; });
     }
   }, true);
 
@@ -9369,6 +11289,14 @@ function renderAdminNotifications(el) {
     '<label class="toggle-switch"><input type="checkbox" id="notifPrefComment" ' + chk('comment_added') + '><span class="toggle-slider"></span></label>' +
     '</div>' +
     '<div class="admin-field-row">' +
+    '<div><div class="admin-field-label">@Mentions</div><div class="admin-field-desc">Notify when someone mentions you in a comment</div></div>' +
+    '<label class="toggle-switch"><input type="checkbox" id="notifPrefMention" ' + chk('mention') + '><span class="toggle-slider"></span></label>' +
+    '</div>' +
+    '<div class="admin-field-row">' +
+    '<div><div class="admin-field-label">Priority Changed</div><div class="admin-field-desc">Notify assignee when issue priority is updated</div></div>' +
+    '<label class="toggle-switch"><input type="checkbox" id="notifPrefPriority" ' + chk('priority_changed') + '><span class="toggle-slider"></span></label>' +
+    '</div>' +
+    '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Sprint Started / Completed</div><div class="admin-field-desc">Notify on sprint lifecycle events</div></div>' +
     '<label class="toggle-switch"><input type="checkbox" id="notifPrefSprint" ' + chk('sprint_started') + '><span class="toggle-slider"></span></label>' +
     '</div>' +
@@ -9401,6 +11329,8 @@ function renderAdminNotifications(el) {
   wireToggle('notifPrefAssigned', 'issue_assigned');
   wireToggle('notifPrefStatus',   'status_changed');
   wireToggle('notifPrefComment',  'comment_added');
+  wireToggle('notifPrefMention',  'mention');
+  wireToggle('notifPrefPriority', 'priority_changed');
   wireToggle('notifPrefSprint',   'sprint_started', ['sprint_completed']);
 }
 
@@ -10193,10 +12123,13 @@ function awInlineStatus(e, issueId, current) {
     return { value: s, html: '<span style="font-size:14px;color:#172b4d;flex:1">' + s + '</span>' + check };
   });
   _awShowMenu(e, items, function(val) {
-    api('/api/issues/' + issueId, 'PUT', { status: val }).then(function() {
-      refreshData().then(renderAllWork);
+    api('/api/issues/' + issueId, 'PUT', { status: val }).then(function (updated) {
+      afterIssueFieldUpdate(issueId, {
+        status: val,
+        updated_at: (updated && updated.updated_at) || new Date().toISOString()
+      });
       toast('Status updated');
-    });
+    }).catch(function () { toast('Failed to update status', 'error'); });
   });
 }
 
@@ -10208,10 +12141,13 @@ function awInlinePriority(e, issueId, current) {
     return { value: p, html: '<span style="font-size:14px;color:#172b4d;flex:1;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' + cap(p) + '</span>' + check };
   });
   _awShowMenu(e, items, function(val) {
-    api('/api/issues/' + issueId, 'PUT', { priority: val }).then(function() {
-      refreshData().then(renderAllWork);
+    api('/api/issues/' + issueId, 'PUT', { priority: val }).then(function (updated) {
+      afterIssueFieldUpdate(issueId, {
+        priority: val,
+        updated_at: (updated && updated.updated_at) || new Date().toISOString()
+      });
       toast('Priority updated');
-    });
+    }).catch(function () { toast('Failed to update priority', 'error'); });
   });
 }
 
@@ -10334,41 +12270,53 @@ function copyDrawerLink() {
 }
 
 // ── Browser back button support ─────────────────────────
-window.addEventListener("popstate", function(e) {
+window.addEventListener('popstate', function () {
   if (window._navigatingBack) return;
+
+  var issueKey = new URLSearchParams(window.location.search).get('issue');
+
+  if (!issueKey && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
+    stopDrawerLiveSync();
+    window._drawerPending = {};
+    _closeIssueDrawer();
+  }
+
+  if (issueKey) {
+    window._navigatingBack = true;
+    var issueByKey = (S.data && S.data.issues || []).find(function (i) { return i.key === issueKey || i.id === issueKey; });
+    openIssuePage(issueByKey ? issueByKey.id : issueKey, { skipHistory: true });
+    setTimeout(function () { window._navigatingBack = false; }, 0);
+    return;
+  }
+
   window._navigatingBack = true;
-  goBackToSavedPage();
+  applyRouteFromUrl({ replaceUrl: true });
+  setTimeout(function () { window._navigatingBack = false; }, 0);
 });
 
-
-
-
-
-
-// ── Back button from issue ──────────────────────────────
 function goBackFromIssue() {
-  var savedIssueId = S.drawerIssueId;
-  _exitIssuePage();
-  history.replaceState(null, '', window.location.pathname);
+  stopDrawerLiveSync();
+  window._drawerPending = {};
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  _closeIssueDrawer();
+  var pView = S._prevView;
+  var pYourWorkTab = S._prevYourWorkTab;
   var returnTab = S._prevTab || window._issueReturnTab || 'backlog';
   var returnSpace = S._prevSpace || window._issueReturnSpace || S.currentSpace;
-  // Last resort: look up the issue's space from loaded data
-  if (!returnSpace && savedIssueId && S.data && S.data.issues) {
-    var savedIss = S.data.issues.find(function(i) { return i.id === savedIssueId; });
-    if (savedIss && savedIss.space_id) returnSpace = savedIss.space_id;
-  }
   window._issueReturnTab = null;
   window._issueReturnSpace = null;
   if (returnSpace) {
-    S.currentSpace = returnSpace;
-    var spaceNavEl = $('spaceNav');
-    if (spaceNavEl) spaceNavEl.removeAttribute('hidden');
-    qsa('.space-item').forEach(function(el) {
-      el.classList.toggle('active', el.dataset.spaceId === returnSpace);
-    });
-    renderTab(returnTab);
+    navigateToSpace(returnSpace, returnTab, { replaceUrl: true });
+  } else if (pView === 'yourwork') {
+    if (pYourWorkTab) S.yourWorkTab = pYourWorkTab;
+    if (S._prevYwOpen) applyYourWorkOpenFilter();
+    else clearYourWorkFilters();
+    navigateTo('yourwork', { replaceUrl: true });
   } else {
-    navigateTo('home');
+    navigateTo('home', { replaceUrl: true });
   }
 }
 

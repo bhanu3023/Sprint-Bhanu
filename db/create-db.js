@@ -711,17 +711,19 @@ async function main() {
     client.release();
   }
 
-  // ──────────────────────────────────────────────
-  // 4. KEEPALIVE HTTP SERVER
-  // ──────────────────────────────────────────────
-  const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'sprintboard-db-seed' }));
-  });
+  await pool.end();
 
-  server.listen(3002, () => {
-    console.log('🌐 Keepalive server running on http://localhost:3002');
-  });
+  if (process.env.KEEPALIVE === '1') {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', service: 'sprintboard-db-seed' }));
+    });
+    server.listen(3002, () => {
+      console.log('🌐 Keepalive server running on http://localhost:3002');
+    });
+  } else {
+    process.exit(0);
+  }
 }
 
 main().catch((err) => {

@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "setup-db": "node db/setup.js"
+    "setup-db": "node db/setup.js",
+    "seed-qa": "node db/seed-qa-data.js",
+    "test-scenarios": "node scripts/test-scenarios.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
