@@ -950,7 +950,10 @@ function renderGlobalReports() {
         var d3 = await api('/api/reports/status?space_id=' + spaceId);
         renderCumulativeReport(c, d3);
       } else if (type === 'control') {
-        var d4 = await api('/api/reports/cycle-time?space_id=' + spaceId);
+        var ctrlSprints = await api('/api/sprints?space_id=' + spaceId);
+        var ctrlTarget = ctrlSprints.find(function(sp){ return sp.status === 'active'; }) || ctrlSprints[ctrlSprints.length - 1];
+        if (!ctrlTarget) { c.innerHTML = '<p class="placeholder-text">No sprints found for this space.</p>'; S.currentSpace = prevSpace; return; }
+        var d4 = await api('/api/reports/control-chart/' + ctrlTarget.id);
         renderControlChart(c, d4);
       }
     } catch(e) {
@@ -3832,10 +3835,11 @@ async function renderReportContent(type, selectedSprintId) {
       || allSprints[allSprints.length - 1];
     if (activeSprint) window._lastSelectedSprintId = activeSprint.id;
     // Only reports actually scoped to one sprint get a Sprint picker. Velocity
-    // Trend, Cumulative Flow, and Control Chart are cross-sprint/space-wide —
-    // their data queries never look at activeSprint, so showing a "Sprint:"
-    // dropdown there looked interactive but silently did nothing when changed.
-    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items','spillover'];
+    // Trend and Cumulative Flow are cross-sprint/space-wide — their data
+    // queries never look at activeSprint, so showing a "Sprint:" dropdown
+    // there looked interactive but silently did nothing when changed. Control
+    // Chart WAS in that category too, but now queries per-sprint data.
+    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items','spillover','control'];
     var sprintSelectorHtml = (sprintTypes.indexOf(type) >= 0 && allSprints && allSprints.length > 0)
       ? '<div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
         '<select class="input input-sm" onchange="window._globalRptSprintChange(this.value,\'' + type + '\')">' +
@@ -3873,7 +3877,7 @@ async function renderReportContent(type, selectedSprintId) {
       var data3 = await api('/api/reports/status?space_id=' + S.currentSpace);
       renderCumulativeReport(c, data3, allSprints, sprintSelectorHtml);
     } else if (type === 'control') {
-      var data4 = await api('/api/reports/cycle-time?space_id=' + S.currentSpace);
+      var data4 = await api('/api/reports/control-chart/' + activeSprint.id);
       renderControlChart(c, data4, allSprints, sprintSelectorHtml);
     }
     window._globalRptSprintChange = async function(sprintId, rtype) {
@@ -3916,7 +3920,7 @@ async function renderReportContent(type, selectedSprintId) {
           var d3 = await api('/api/reports/status?space_id=' + S.currentSpace);
           renderCumulativeReport(cont, d3, allSprints, newSel);
         } else if (rtype === 'control') {
-          var d4 = await api('/api/reports/cycle-time?space_id=' + S.currentSpace);
+          var d4 = await api('/api/reports/control-chart/' + sprintId);
           renderControlChart(cont, d4, allSprints, newSel);
         }
       } catch(e) { cont.innerHTML = '<p class="text-muted">Error: ' + esc(e.message) + '</p>'; }
@@ -5004,40 +5008,140 @@ function renderCumulativeReport(c, data, allSprints, sprintSelectorHtml) {
 
 function renderControlChart(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
-  var items = Array.isArray(data) ? data : [];
+  var sprint = (data && data.sprint) || {};
+  var items = (data && Array.isArray(data.items)) ? data.items : (Array.isArray(data) ? data : []);
   if (!items.length) {
-    c.innerHTML = '<div class="report-chart"><h4>Control Chart — Cycle Time</h4><p class="placeholder-text">No completed issues with history data yet.</p></div>';
+    c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+      '<h4>Control Chart — Cycle Time</h4>' +
+      '<p class="placeholder-text">No issues completed (In Progress → Done) in this sprint yet.</p></div>';
     return;
   }
 
   var cycleDays = items.map(function(r){ return parseFloat(r.cycle_days) || 0; });
   var maxDays = Math.max.apply(null, cycleDays) || 1;
   var avgDays = Math.round(cycleDays.reduce(function(s,v){ return s+v; }, 0) / cycleDays.length * 10) / 10;
+  var fastest = Math.min.apply(null, cycleDays);
+  var slowest = Math.max.apply(null, cycleDays);
+  var colorFor = function(d) { return d < 3 ? '#10b981' : d < 7 ? '#f59e0b' : '#ef4444'; };
 
-  var rows = items.map(function(r) {
+  Object.assign(window._reportDrillData, {
+    ctrl_all: { label: 'Completed Issues', issues: items }
+  });
+
+  // ── Scatter: completion date (x) vs cycle time in days (y) — the
+  // canonical "control chart" view, with a dashed average-cycle-time line.
+  var withDates = items.filter(function(r){ return !!r.done_at; })
+    .slice().sort(function(a,b){ return new Date(a.done_at) - new Date(b.done_at); });
+  var scatterHtml = '';
+  if (withDates.length) {
+    var W = Math.max(560, 48 + 20 + (withDates.length - 1) * 34 + 40);
+    var H = 220, pL = 48, pR = 20, pT = 16, pB = 34;
+    var plotW = W - pL - pR, plotH = H - pT - pB;
+    var n = withDates.length;
+    var xp = function(i) { return pL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2); };
+    var yp = function(v) { return pT + plotH - Math.min(1, v / maxDays) * plotH; };
+    var gridSteps = 4, grid = '';
+    for (var g = 0; g <= gridSteps; g++) {
+      var gv = Math.round((g / gridSteps) * maxDays * 10) / 10;
+      var gy = yp(gv);
+      grid += '<line x1="' + pL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pR) + '" y2="' + gy.toFixed(1) + '" stroke="var(--border)" stroke-dasharray="3,3" stroke-width="1"/>';
+      grid += '<text x="' + (pL - 6) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--text3)">' + gv + '</text>';
+    }
+    var avgY = yp(avgDays);
+    var avgLine = '<line x1="' + pL + '" y1="' + avgY.toFixed(1) + '" x2="' + (W - pR) + '" y2="' + avgY.toFixed(1) + '" stroke="#0052cc" stroke-dasharray="6,4" stroke-width="1.5"/>' +
+      '<text x="' + (W - pR) + '" y="' + (avgY - 5).toFixed(1) + '" text-anchor="end" font-size="10" fill="#0052cc">avg ' + avgDays + 'd</text>';
+    var dots = withDates.map(function(r, i) {
+      var days = parseFloat(r.cycle_days) || 0;
+      var cx = xp(i).toFixed(1), cy = yp(days).toFixed(1);
+      var tip = esc(r.key) + ' — ' + days + 'd (' + esc(fmtDateShort(r.done_at)) + ')';
+      return '<circle cx="' + cx + '" cy="' + cy + '" r="9" fill="transparent" style="cursor:pointer" onclick="openIssuePage(\'' + r.id + '\')"><title>' + tip + '</title></circle>' +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + colorFor(days) + '" stroke="var(--bg2)" stroke-width="1.5" style="pointer-events:none"/>';
+    }).join('');
+    scatterHtml = '<div style="overflow-x:auto"><svg width="' + W + '" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:100%">' +
+      grid + avgLine +
+      '<line x1="' + pL + '" y1="' + pT + '" x2="' + pL + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      '<line x1="' + pL + '" y1="' + (pT + plotH) + '" x2="' + (W - pR) + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      dots +
+      '</svg></div>';
+  }
+
+  // ── Cycle time by assignee ──
+  var byAssignee = {};
+  items.forEach(function(r) {
+    var aid = r.assignee ? r.assignee.id : '_unassigned';
+    if (!byAssignee[aid]) byAssignee[aid] = { assignee: r.assignee || null, issues: [], totalDays: 0 };
+    byAssignee[aid].issues.push(r);
+    byAssignee[aid].totalDays += parseFloat(r.cycle_days) || 0;
+  });
+  var assigneeRows = Object.keys(byAssignee).map(function(aid) {
+    var g = byAssignee[aid];
+    var avg = Math.round((g.totalDays / g.issues.length) * 10) / 10;
+    var safeKey = aid.replace(/[^a-zA-Z0-9_-]/g, '_');
+    window._reportDrillData['ctrl_asg_' + safeKey] = { label: (g.assignee ? g.assignee.name : 'Unassigned') + ' — Completed', issues: g.issues };
+    return { name: g.assignee ? g.assignee.name : 'Unassigned', assignee: g.assignee, avg: avg, count: g.issues.length, safeKey: safeKey };
+  }).sort(function(a, b) { return b.avg - a.avg; });
+  var maxAvg = Math.max.apply(null, assigneeRows.map(function(a){ return a.avg; })) || 1;
+  var assigneeHtml = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:20px">' +
+    '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:14px">Avg Cycle Time by Assignee</div>' +
+    assigneeRows.map(function(a) {
+      var w = Math.round((a.avg / maxAvg) * 100);
+      var avatar = a.assignee ? avatarHtml(a.assignee, 26) : '<span class="avatar" style="width:26px;height:26px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#94a3b8;color:#fff;font-weight:700;flex-shrink:0">?</span>';
+      return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+        avatar +
+        '<span style="width:120px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.name) + '</span>' +
+        '<div style="flex:1;background:var(--bg3);border-radius:4px;height:18px;overflow:hidden">' +
+        '<div onclick="window._showReportIssues(\'ctrl_asg_' + a.safeKey + '\')" title="' + esc(a.name) + ' — avg ' + a.avg + 'd across ' + a.count + ' issues" style="cursor:pointer;width:' + Math.max(w, 4) + '%;height:100%;background:' + colorFor(a.avg) + '"></div>' +
+        '</div>' +
+        '<span style="width:110px;font-size:11px;color:var(--text3);text-align:right;flex-shrink:0">' + a.avg + 'd · ' + a.count + ' issue' + (a.count !== 1 ? 's' : '') + '</span>' +
+        '</div>';
+    }).join('') +
+    '</div>';
+
+  var thStyle = 'padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)';
+  var tableRows = items.map(function(r) {
     var days = parseFloat(r.cycle_days) || 0;
-    var pct = Math.round((days / maxDays) * 100);
-    var color = days < 3 ? '#10b981' : days < 7 ? '#f59e0b' : '#ef4444';
-    return '<div class="rpt-ct-row">' +
-      '<span class="rpt-ct-key" title="' + esc(r.key) + '">' + esc(r.key) + '</span>' +
-      '<span style="flex:1;font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="' + esc(r.title) + '">' + esc(r.title) + '</span>' +
-      '<div class="rpt-ct-track" style="margin:0 8px">' +
-      '<div class="rpt-ct-fill" style="width:' + pct + '%;background:' + color + '"></div>' +
-      '</div>' +
-      '<span class="rpt-ct-days">' + days + 'd</span>' +
-      '</div>';
+    var color = colorFor(days);
+    var assigneeName = r.assignee ? esc(r.assignee.name) : '<span style="color:var(--text3)">Unassigned</span>';
+    return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openIssuePage(\'' + r.id + '\')">' +
+      '<td style="padding:10px 12px;font-weight:600;white-space:nowrap">' + esc(r.key) + '</td>' +
+      '<td style="padding:10px 12px;color:var(--text);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(r.title) + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px">' + assigneeName + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px;text-align:center;color:var(--text2)">' + (r.story_points != null ? r.story_points : '—') + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px;color:var(--text3);white-space:nowrap">' + esc(fmtDateShort(r.done_at)) + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px;font-weight:700;text-align:right;color:' + color + '">' + days + 'd</td>' +
+      '</tr>';
   }).join('');
 
   c.innerHTML = '<div class="report-chart">' +
     sprintSelectorHtml +
-    '<h4>Control Chart — Cycle Time per Issue</h4>' +
-    '<div class="report-stats-row">' + statCard('Avg Cycle Time', avgDays + ' days', '#0129ac') + '</div>' +
-    '<div style="display:flex;gap:12px;font-size:11px;color:var(--text2);margin-bottom:12px">' +
-    '<span style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:2px"></span> &lt;3d' +
-    '<span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;margin-left:8px"></span> 3–7d' +
-    '<span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-left:8px"></span> &gt;7d' +
+    '<h4 style="margin:0 0 4px">Control Chart — ' + esc(sprint.name || 'Sprint') + '</h4>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Cycle time from In Progress to Done, for issues completed in this sprint</p>' +
+    '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
+    statCard('Completed', items.length, '#0052cc') +
+    statCard('Avg Cycle Time', avgDays + ' days', '#0129ac') +
+    statCard('Fastest', fastest + ' days', '#10b981') +
+    statCard('Slowest', slowest + ' days', '#ef4444') +
     '</div>' +
-    rows +
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:20px">' +
+    '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">Cycle Time per Completed Issue</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:14px">Each point is one issue, plotted by completion date — click a point to open it</div>' +
+    scatterHtml +
+    '<div style="display:flex;gap:12px;font-size:11px;color:var(--text2);margin-top:10px">' +
+    '<span style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:50%"></span> &lt;3d' +
+    '<span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%;margin-left:8px"></span> 3–7d' +
+    '<span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:50%;margin-left:8px"></span> &gt;7d' +
+    '</div></div>' +
+    assigneeHtml +
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+    '<thead><tr>' +
+    '<th style="' + thStyle + '">Key</th>' +
+    '<th style="' + thStyle + '">Title</th>' +
+    '<th style="' + thStyle + '">Assignee</th>' +
+    '<th style="' + thStyle + ';text-align:center">SP</th>' +
+    '<th style="' + thStyle + '">Done</th>' +
+    '<th style="' + thStyle + ';text-align:right">Cycle Time</th>' +
+    '</tr></thead>' +
+    '<tbody>' + tableRows + '</tbody></table></div>' +
     '</div>';
 }
 
