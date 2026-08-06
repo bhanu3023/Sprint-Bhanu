@@ -287,9 +287,9 @@ app.get('/api/sprints', wrap(async (req, res) => {
 }));
 
 app.post('/api/sprints', wrap(async (req, res) => {
-  const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids } = req.body;
-  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-    [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || []]);
+  const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids, public_holidays } = req.body;
+  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids,public_holidays) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+    [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || [], public_holidays || []]);
   res.status(201).json(r.rows[0]);
 }));
 
@@ -2172,6 +2172,12 @@ app.post('/api/admin/sync-db', async (req, res) => {
       await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS developer_ids TEXT[] DEFAULT '{}'`);
       await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS qa_ids TEXT[] DEFAULT '{}'`);
     } catch(e) { console.error('Migration warning (sprint developer/qa):', e.message); }
+
+    // Migration: add public holiday dates (within the sprint's own date
+    // range) to sprints
+    try {
+      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS public_holidays TEXT[] DEFAULT '{}'`);
+    } catch(e) { console.error('Migration warning (sprint public_holidays):', e.message); }
 
     // Fix duplicate issue keys on startup
     try {

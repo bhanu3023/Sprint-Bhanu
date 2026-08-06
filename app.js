@@ -3663,16 +3663,19 @@ function collectCheckedIds(containerId) {
   return Array.from(el.querySelectorAll('input[type="checkbox"]:checked')).map(function (cb) { return cb.value; });
 }
 
-// Preview calendar for the sprint's date range — days outside [start, end]
-// render disabled/greyed, days inside are highlighted. Purely a visual
-// preview; it doesn't collect any additional input of its own.
-function renderSprintPublicCalendarPreview() {
-  var el = $('sprintPublicCalendar');
+// Public Holidays calendar for the sprint's date range — only days inside
+// [start, end] are clickable (to mark/unmark as a holiday); everything
+// outside that range renders disabled/greyed and can't be selected.
+// Selections live in window._sprintHolidaySet (a Set of 'YYYY-MM-DD'
+// strings) for the lifetime of the modal; _openSprintModal seeds it from
+// the sprint being edited (or empty for a new one).
+function renderSprintPublicHolidaysCalendar() {
+  var el = $('sprintPublicHolidays');
   if (!el) return;
   var startVal = $('sprintStartDate').value;
   var endVal = $('sprintEndDate').value;
   if (!startVal || !endVal) {
-    el.innerHTML = '<div style="font-size:12px;color:var(--text3);border:1px dashed var(--border);border-radius:6px;padding:14px;text-align:center">Select a start and end date to preview the sprint calendar</div>';
+    el.innerHTML = '<div style="font-size:12px;color:var(--text3);border:1px dashed var(--border);border-radius:6px;padding:14px;text-align:center">Select a start and end date to pick public holidays</div>';
     return;
   }
   var start = new Date(startVal + 'T00:00:00');
@@ -3681,6 +3684,17 @@ function renderSprintPublicCalendarPreview() {
     el.innerHTML = '<div style="font-size:12px;color:#dc2626;border:1px dashed #dc262666;border-radius:6px;padding:14px;text-align:center">End date is before start date</div>';
     return;
   }
+  // A date the range no longer covers can't stay marked as a holiday.
+  var holidaySet = window._sprintHolidaySet || (window._sprintHolidaySet = new Set());
+  Array.from(holidaySet).forEach(function (ds) {
+    var d = new Date(ds + 'T00:00:00');
+    if (d < start || d > end) holidaySet.delete(ds);
+  });
+
+  function toISO(y, m, d) {
+    return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
+
   var weekdays = ['Su','Mo','Tu','We','Th','Fr','Sa'];
   var months = [];
   var mCursor = new Date(start.getFullYear(), start.getMonth(), 1);
@@ -3701,17 +3715,33 @@ function renderSprintPublicCalendarPreview() {
     for (var d = 1; d <= daysInMonth; d++) {
       var thisDay = new Date(year, month, d);
       var inRange = thisDay >= start && thisDay <= end;
-      grid += '<div style="text-align:center;padding:4px 0;border-radius:4px;font-size:11px;' +
-        (inRange
-          ? 'background:var(--accent);color:#fff;font-weight:700'
-          : 'color:var(--text3);opacity:.4;pointer-events:none') +
-        '">' + d + '</div>';
+      var dateStr = toISO(year, month, d);
+      var isHoliday = holidaySet.has(dateStr);
+      if (inRange) {
+        grid += '<div onclick="window._toggleSprintHoliday(\'' + dateStr + '\')" title="' +
+          (isHoliday ? 'Public holiday — click to remove' : 'Click to mark as a public holiday') +
+          '" style="cursor:pointer;text-align:center;padding:4px 0;border-radius:4px;font-size:11px;font-weight:700;color:#fff;background:' +
+          (isHoliday ? '#dc2626' : 'var(--accent)') + '">' + d + '</div>';
+      } else {
+        grid += '<div style="text-align:center;padding:4px 0;border-radius:4px;font-size:11px;color:var(--text3);opacity:.4;pointer-events:none">' + d + '</div>';
+      }
     }
     grid += '</div>';
     return '<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">' + monthName + '</div>' + grid + '</div>';
   }).join('');
-  el.innerHTML = '<div style="border:1px solid var(--border);border-radius:8px;padding:12px">' + html + '</div>';
+  var legend = '<div style="display:flex;gap:14px;font-size:11px;color:var(--text2);margin-top:8px">' +
+    '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:var(--accent);display:inline-block"></span>Sprint day</span>' +
+    '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#dc2626;display:inline-block"></span>Public holiday</span>' +
+    '</div>';
+  el.innerHTML = '<div style="border:1px solid var(--border);border-radius:8px;padding:12px">' + html + legend + '</div>';
 }
+
+window._toggleSprintHoliday = function (dateStr) {
+  var holidaySet = window._sprintHolidaySet || (window._sprintHolidaySet = new Set());
+  if (holidaySet.has(dateStr)) holidaySet.delete(dateStr);
+  else holidaySet.add(dateStr);
+  renderSprintPublicHolidaysCalendar();
+};
 
 window._openSprintModal = function (id) {
   if (id) {
@@ -3726,6 +3756,7 @@ window._openSprintModal = function (id) {
     $('sprintModalTitle').textContent = 'Edit Sprint';
     renderMemberCheckboxList('sprintDeveloperList', sp.space_id, sp.developer_ids);
     renderMemberCheckboxList('sprintQaList', sp.space_id, sp.qa_ids);
+    window._sprintHolidaySet = new Set(sp.public_holidays || []);
   } else {
     $('sprintIdInput').value = '';
     $('sprintSpaceId').value = S.currentSpace;
@@ -3736,10 +3767,11 @@ window._openSprintModal = function (id) {
     $('sprintModalTitle').textContent = 'Create Sprint';
     renderMemberCheckboxList('sprintDeveloperList', S.currentSpace, []);
     renderMemberCheckboxList('sprintQaList', S.currentSpace, []);
+    window._sprintHolidaySet = new Set();
   }
-  renderSprintPublicCalendarPreview();
-  $('sprintStartDate').onchange = renderSprintPublicCalendarPreview;
-  $('sprintEndDate').onchange = renderSprintPublicCalendarPreview;
+  renderSprintPublicHolidaysCalendar();
+  $('sprintStartDate').onchange = renderSprintPublicHolidaysCalendar;
+  $('sprintEndDate').onchange = renderSprintPublicHolidaysCalendar;
   openModal('modal-sprint');
 };
 
@@ -8381,7 +8413,8 @@ async function handleSprintSubmit(e) {
     start_date: $('sprintStartDate').value || null,
     end_date: $('sprintEndDate').value || null,
     developer_ids: collectCheckedIds('sprintDeveloperList'),
-    qa_ids: collectCheckedIds('sprintQaList')
+    qa_ids: collectCheckedIds('sprintQaList'),
+    public_holidays: Array.from(window._sprintHolidaySet || []).sort()
   };
 
   if (id) {
