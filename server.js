@@ -306,9 +306,9 @@ app.get('/api/sprints', wrap(async (req, res) => {
 }));
 
 app.post('/api/sprints', wrap(async (req, res) => {
-  const { space_id, name, goal, start_date, end_date } = req.body;
-  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-    [uid(), space_id, name, goal, start_date || null, end_date || null]);
+  const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids, public_holidays } = req.body;
+  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids,public_holidays) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+    [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || [], public_holidays || []]);
   res.status(201).json(r.rows[0]);
 }));
 
@@ -1182,6 +1182,43 @@ app.get('/api/reports/cycle-time', requireAuth, wrap(async (req, res) => {
     )).rows;
   }
   res.json(rows);
+}));
+
+// Control Chart — cycle time per completed issue IN A GIVEN SPRINT, measured
+// from when it first entered "In Progress" to when it was finally marked
+// "Done" (not creation-to-done, which conflates backlog wait time with
+// actual work time). Includes assignee and story points so the chart can
+// break cycle time down by who worked the ticket.
+app.get('/api/reports/control-chart/:sprintId', requireAuth, wrap(async (req, res) => {
+  const sid = req.params.sprintId;
+  const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+
+  const rows = (await q(`
+    SELECT i.id, i.key, i.title, i.story_points, i.assignee_id,
+      u.name AS assignee_name, u.color AS assignee_color, u.avatar_url AS assignee_avatar,
+      sub.started_at, sub.done_at,
+      ROUND(EXTRACT(EPOCH FROM (sub.done_at - sub.started_at))/86400, 1)::float AS cycle_days
+    FROM issues i
+    LEFT JOIN users u ON u.id = i.assignee_id
+    JOIN LATERAL (
+      SELECT
+        (SELECT MIN(created_at) FROM issue_history
+         WHERE issue_id = i.id AND field_name='status' AND new_value='In Progress') AS started_at,
+        (SELECT MAX(created_at) FROM issue_history
+         WHERE issue_id = i.id AND field_name='status' AND new_value='Done') AS done_at
+    ) sub ON true
+    WHERE i.sprint_id = $1 AND i.status = 'Done' AND i.deleted_at IS NULL
+      AND sub.started_at IS NOT NULL AND sub.done_at IS NOT NULL AND sub.done_at > sub.started_at
+    ORDER BY sub.done_at DESC
+  `, [sid])).rows;
+
+  const items = rows.map(r => ({
+    id: r.id, key: r.key, title: r.title, story_points: r.story_points,
+    assignee: r.assignee_id ? { id: r.assignee_id, name: r.assignee_name, color: r.assignee_color, avatar_url: r.assignee_avatar } : null,
+    started_at: r.started_at, done_at: r.done_at, cycle_days: r.cycle_days
+  }));
+  res.json({ sprint, items });
 }));
 
 // Sprint-specific team workload
@@ -2220,6 +2257,18 @@ app.get('/space/:key/:tab?', (req, res) => {
         created_at TIMESTAMP DEFAULT NOW()
       )`);
     } catch(e) { console.error('Migration warning (file_storage):', e.message); }
+
+    // Migration: add developer/QA assignment lists to sprints
+    try {
+      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS developer_ids TEXT[] DEFAULT '{}'`);
+      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS qa_ids TEXT[] DEFAULT '{}'`);
+    } catch(e) { console.error('Migration warning (sprint developer/qa):', e.message); }
+
+    // Migration: add public holiday dates (within the sprint's own date
+    // range) to sprints
+    try {
+      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS public_holidays TEXT[] DEFAULT '{}'`);
+    } catch(e) { console.error('Migration warning (sprint public_holidays):', e.message); }
 
     // Fix duplicate issue keys on startup
     try {
