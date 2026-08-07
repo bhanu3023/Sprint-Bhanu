@@ -425,11 +425,11 @@ app.get('/api/sprints', requireAuth, wrap(async (req, res) => {
 }));
 
 app.post('/api/sprints', requireAuth, wrap(async (req, res) => {
-  const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids, public_holidays } = req.body;
+  const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids, public_holidays, developer_leaves } = req.body;
   if (!space_id) return res.status(400).json({ error: 'space_id is required' });
   if (!(await denyUnlessCanAct(q, req.user, res, space_id, 'sprint.manage'))) return;
-  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids,public_holidays) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-    [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || [], public_holidays || []]);
+  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids,public_holidays,developer_leaves) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb) RETURNING *',
+    [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || [], public_holidays || [], JSON.stringify(developer_leaves || {})]);
   res.status(201).json(r.rows[0]);
 }));
 
@@ -1479,23 +1479,53 @@ app.get('/api/reports/control-chart/:sprintId', requireAuth, wrap(async (req, re
 // Sprint-specific team workload
 app.get('/api/reports/team-workload/:sprintId', requireAuth, wrap(async (req, res) => {
   const sid = req.params.sprintId;
-  const sprint = (await q('SELECT space_id FROM sprints WHERE id=$1', [sid])).rows[0];
+  const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
-  const r = await q(`
+
+  const devIds = sprint.developer_ids || [];
+  const qaIds = sprint.qa_ids || [];
+  const teamIds = Array.from(new Set([...devIds, ...qaIds]));
+
+  const rows = (await q(`
+    WITH assignee_stats AS (
+      SELECT i.assignee_id AS id,
+        COUNT(i.id)::int AS assigned,
+        COUNT(i.id) FILTER (WHERE i.status='Done')::int AS completed,
+        COUNT(i.id) FILTER (WHERE i.status!='Done')::int AS remaining,
+        COALESCE(SUM(i.story_points),0)::int AS assigned_sp,
+        COALESCE(SUM(i.story_points) FILTER (WHERE i.status='Done'),0)::int AS completed_sp
+      FROM issues i
+      WHERE i.sprint_id=$1 AND i.deleted_at IS NULL AND i.assignee_id IS NOT NULL
+      GROUP BY i.assignee_id
+    ),
+    all_ids AS (
+      SELECT unnest($2::text[]) AS id
+      UNION
+      SELECT id FROM assignee_stats
+    )
     SELECT u.id, u.name, u.color, u.avatar_url,
-      COUNT(i.id)::int AS assigned,
-      COUNT(i.id) FILTER (WHERE i.status='Done')::int AS completed,
-      COUNT(i.id) FILTER (WHERE i.status!='Done')::int AS remaining,
-      COALESCE(SUM(i.story_points),0)::int AS assigned_sp,
-      COALESCE(SUM(i.story_points) FILTER (WHERE i.status='Done'),0)::int AS completed_sp
-    FROM issues i
-    JOIN users u ON u.id = i.assignee_id
-    WHERE i.sprint_id=$1 AND i.deleted_at IS NULL
-    GROUP BY u.id, u.name, u.color, u.avatar_url
-    ORDER BY assigned DESC
-  `, [sid]);
-  res.json(r.rows);
+      COALESCE(s.assigned,0)::int AS assigned,
+      COALESCE(s.completed,0)::int AS completed,
+      COALESCE(s.remaining,0)::int AS remaining,
+      COALESCE(s.assigned_sp,0)::int AS assigned_sp,
+      COALESCE(s.completed_sp,0)::int AS completed_sp
+    FROM all_ids a
+    JOIN users u ON u.id = a.id
+    LEFT JOIN assignee_stats s ON s.id = a.id
+    ORDER BY assigned_sp DESC, u.name ASC
+  `, [sid, teamIds])).rows;
+
+  const devSet = new Set(devIds);
+  const qaSet = new Set(qaIds);
+  const leaves = sprint.developer_leaves || {};
+  const decorated = rows.map(r => ({
+    ...r,
+    role: devSet.has(r.id) && qaSet.has(r.id) ? 'Dev + QA' : devSet.has(r.id) ? 'Developer' : qaSet.has(r.id) ? 'QA' : 'Other',
+    leave_days: leaves[r.id] || 0
+  }));
+
+  res.json({ sprint, rows: decorated });
 }));
 
 // Scope change for a sprint (committed vs added/removed after start)
