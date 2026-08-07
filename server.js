@@ -75,6 +75,16 @@ const pool = process.env.DATABASE_URL
   : new Pool({ host: 'sprint-postgres', port: 5432, database: 'sprintboard', user: 'postgres', password: 'postgres' });
 pool.on('error', (err) => { console.error('[pg pool error] Client lost connection:', err.message); });
 const q = (text, params) => pool.query(text, params);
+const {
+  validateSchemaReadOnly, logProductTeamCombinationStatus, logDuplicateKeyWarning
+} = require('./lib/schema-check');
+const {
+  buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin,
+  UPDATE_WHITELIST, validateSpaceRoleAssignment,
+  getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId,
+  getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed
+} = require('./lib/permissions');
+const { seedDefaultCustomFields, ensureDefaultCustomFields } = require('./lib/default-space-fields');
 const https = require('https');
 
 // ── Microsoft OAuth2 state store (CSRF) ───────────────────
@@ -125,8 +135,28 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
   const [sprints, issues, cf, filters, notifs, ifv] = await Promise.all(queries);
 
   // Filter issues/sprints to only non-archived visible spaces (everyone, including admins)
-  const filteredIssues = issues.rows.filter(function(i) { return visibleSpaceIds.includes(i.space_id); });
+  let filteredIssues = issues.rows.filter(function(i) { return visibleSpaceIds.includes(i.space_id); });
   const filteredSprints = sprints.rows.filter(function(s) { return visibleSpaceIds.includes(s.space_id); });
+
+  // Always include the user's starred issues in the cache (even when scoped to one space)
+  const favIds = issueFavs.rows.map(function (f) { return f.issue_id; });
+  if (favIds.length) {
+    const loadedIds = new Set(filteredIssues.map(function (i) { return i.id; }));
+    const missingFavIds = favIds.filter(function (id) { return !loadedIds.has(id); });
+    if (missingFavIds.length) {
+      const extraIssues = await q(
+        `SELECT id,space_id,sprint_id,parent_id,key,title,type,status,priority,assignee_id,reporter_id,story_points,labels,position,start_date,due_date,original_estimate,time_spent,team,product_type,created_at,updated_at
+         FROM issues WHERE deleted_at IS NULL AND id = ANY($1::varchar[])`,
+        [missingFavIds]
+      );
+      extraIssues.rows.forEach(function (i) {
+        if (visibleSpaceIds.includes(i.space_id) && !loadedIds.has(i.id)) {
+          filteredIssues.push(i);
+          loadedIds.add(i.id);
+        }
+      });
+    }
+  }
 
   res.json({
     org: org.rows[0] || null, users: users.rows, spaces: spaces,
@@ -142,21 +172,28 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
 // ── My Issues (fast, cross-space) ────────────────────────
 app.get('/api/my-issues', requireAuth, wrap(async (req, res) => {
   const userId = req.user.user_id;
+  const admin = isOrgAdmin(req.user.role);
+  const spaceIds = admin ? null : await getVisibleSpaceIds(q, req.user);
+  if (!admin && (!spaceIds || !spaceIds.length)) {
+    return res.json({ assigned: [], reported: [], recent: [] });
+  }
+  const scopeSql = admin ? '' : ' AND i.space_id = ANY($2)';
+  const scopeParams = admin ? [userId] : [userId, spaceIds];
   const [assigned, reported, recent] = await Promise.all([
     q(`SELECT i.*, s.name AS space_name, s.key AS project_key,
               a.name AS assignee_name, a.color AS assignee_color
        FROM issues i
        LEFT JOIN spaces s ON s.id = i.space_id
        LEFT JOIN users a ON a.id = i.assignee_id
-       WHERE i.assignee_id = $1 AND i.deleted_at IS NULL
-       ORDER BY i.updated_at DESC`, [userId]),
+       WHERE i.assignee_id = $1 AND i.deleted_at IS NULL${scopeSql}
+       ORDER BY i.updated_at DESC`, scopeParams),
     q(`SELECT i.*, s.name AS space_name, s.key AS project_key,
               a.name AS assignee_name, a.color AS assignee_color
        FROM issues i
        LEFT JOIN spaces s ON s.id = i.space_id
        LEFT JOIN users a ON a.id = i.assignee_id
-       WHERE i.reporter_id = $1 AND i.deleted_at IS NULL
-       ORDER BY i.updated_at DESC`, [userId]),
+       WHERE i.reporter_id = $1 AND i.deleted_at IS NULL${scopeSql}
+       ORDER BY i.updated_at DESC`, scopeParams),
     q(`SELECT DISTINCT i.*, s.name AS space_name, s.key AS project_key,
               a.name AS assignee_name, a.color AS assignee_color
        FROM issues i
@@ -164,14 +201,57 @@ app.get('/api/my-issues', requireAuth, wrap(async (req, res) => {
        LEFT JOIN users a ON a.id = i.assignee_id
        LEFT JOIN comments c ON c.issue_id = i.id AND c.user_id = $1
        WHERE i.deleted_at IS NULL
-         AND (i.assignee_id = $1 OR i.reporter_id = $1 OR c.id IS NOT NULL)
-       ORDER BY i.updated_at DESC LIMIT 20`, [userId])
+         AND (i.assignee_id = $1 OR i.reporter_id = $1 OR c.id IS NOT NULL)${scopeSql}
+       ORDER BY i.updated_at DESC LIMIT 20`, scopeParams)
   ]);
   res.json({ assigned: assigned.rows, reported: reported.rows, recent: recent.rows });
 }));
 
+// Activity in spaces the current user belongs to (dashboard — last 24h, includes self)
+app.get('/api/dashboard/activity', requireAuth, wrap(async (req, res) => {
+  const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 24, 1), 168);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
+  const spaceIds = await getMemberSpaceIds(q, req.user);
+  if (!spaceIds.length) return res.json([]);
+
+  const [created, history] = await Promise.all([
+    q(`SELECT i.id AS issue_id, i.reporter_id AS user_id, i.created_at,
+              u.name AS user_name, u.color AS user_color,
+              i.key AS issue_key, i.title AS issue_title, i.space_id,
+              s.key AS project_key, s.name AS space_name,
+              'created' AS activity_type, NULL AS field_name, NULL AS old_value, NULL AS new_value
+       FROM issues i
+       JOIN spaces s ON s.id = i.space_id
+       LEFT JOIN users u ON u.id = i.reporter_id
+       WHERE i.deleted_at IS NULL
+         AND i.created_at >= NOW() - ($2::int * INTERVAL '1 hour')
+         AND i.space_id = ANY($1)
+       ORDER BY i.created_at DESC
+       LIMIT $3`, [spaceIds, hours, limit]),
+    q(`SELECT h.issue_id, h.user_id, h.field_name, h.old_value, h.new_value, h.created_at,
+              u.name AS user_name, u.color AS user_color,
+              i.key AS issue_key, i.title AS issue_title, i.space_id,
+              s.key AS project_key, s.name AS space_name,
+              'update' AS activity_type
+       FROM issue_history h
+       JOIN issues i ON i.id = h.issue_id AND i.deleted_at IS NULL
+       JOIN spaces s ON s.id = i.space_id
+       LEFT JOIN users u ON u.id = h.user_id
+       WHERE h.created_at >= NOW() - ($2::int * INTERVAL '1 hour')
+         AND i.space_id = ANY($1)
+         AND h.field_name NOT IN ('restored', 'created')
+       ORDER BY h.created_at DESC
+       LIMIT $3`, [spaceIds, hours, limit])
+  ]);
+
+  const combined = created.rows.concat(history.rows)
+    .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); })
+    .slice(0, limit);
+  res.json(combined);
+}));
+
 // ── Organization ─────────────────────────────────────────
-app.get('/api/org', wrap(async (req, res) => {
+app.get('/api/org', requireAuth, wrap(async (req, res) => {
   const r = await q('SELECT * FROM organizations LIMIT 1');
   res.json(r.rows[0] || null);
 }));
@@ -186,22 +266,36 @@ app.put('/api/org', requireAuth, wrap(async (req, res) => {
 }));
 
 // ── Spaces ────────────────────────────────────────────────
-app.get('/api/spaces', wrap(async (req, res) => {
+app.get('/api/spaces', requireAuth, wrap(async (req, res) => {
+  const userId = req.user.user_id || req.user.id;
+  const admin = isOrgAdmin(req.user.role);
+  const params = [];
+  let memberJoin = '';
+  if (!admin) {
+    params.push(userId);
+    memberJoin = ' JOIN space_members vis ON vis.space_id=s.id AND vis.user_id=$1';
+  }
   const r = await q(`SELECT s.*, COUNT(sm.id)::int AS member_count
-    FROM spaces s LEFT JOIN space_members sm ON sm.space_id=s.id
-    WHERE s.is_archived=false GROUP BY s.id ORDER BY s.name`);
+    FROM spaces s${memberJoin}
+    LEFT JOIN space_members sm ON sm.space_id=s.id
+    WHERE s.is_archived=false
+    GROUP BY s.id ORDER BY s.name`, params);
   res.json(r.rows);
 }));
 
 app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'owner')
-    return res.status(403).json({ error: 'Only admins can create spaces' });
+  if (!requireOrgAdmin(req.user, res)) return;
   const { name, key, description, icon, color, space_type, visibility, owner_id } = req.body;
   const id = uid();
   const r = await q(`INSERT INTO spaces(id,name,key,description,icon,color,space_type,visibility,owner_id)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
     [id, name, key, description, icon, color, space_type, visibility, owner_id]);
   await q(`INSERT INTO space_members(id,space_id,user_id,role) VALUES($1,$2,$3,'site_admin')`, [uid(), id, owner_id]);
+  try {
+    await seedDefaultCustomFields(q, uid, id);
+  } catch (e) {
+    console.error('[spaces] Default custom fields seed failed:', e.message);
+  }
   res.status(201).json(r.rows[0]);
 }));
 
@@ -234,10 +328,19 @@ app.post('/api/spaces/recover', requireAuth, wrap(async (req, res) => {
 }));
 
 app.put('/api/spaces/:id', requireAuth, wrap(async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'owner') return res.status(403).json({ error: 'Not authorized' });
-  const keys = Object.keys(req.body), vals = Object.values(req.body);
-  const set = keys.map((k, i) => `${k}=$${i + 2}`).join(',');
-  const r = await q(`UPDATE spaces SET ${set},updated_at=NOW() WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+  const spaceId = req.params.id;
+  let body = req.body;
+  if (isOrgAdmin(req.user.role)) {
+    const upd = buildDynamicUpdate('spaces', body, 2);
+    if (!upd) return res.status(400).json({ error: 'Nothing to update' });
+    const r = await q(`UPDATE spaces SET ${upd.set},updated_at=NOW() WHERE id=$1 RETURNING *`, [spaceId, ...upd.vals]);
+    return res.json(r.rows[0]);
+  }
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'space.settings'))) return;
+  body = pickAllowed(body, UPDATE_WHITELIST.spaces_space_admin);
+  const upd = buildDynamicUpdate('spaces_space_admin', body, 2);
+  if (!upd) return res.status(400).json({ error: 'Nothing to update' });
+  const r = await q(`UPDATE spaces SET ${upd.set},updated_at=NOW() WHERE id=$1 RETURNING *`, [spaceId, ...upd.vals]);
   res.json(r.rows[0]);
 }));
 
@@ -275,62 +378,85 @@ app.post('/api/issues/:id/favorite', requireAuth, wrap(async (req, res) => {
   }
 }));
 
-app.get('/api/spaces/:id/members', wrap(async (req, res) => {
+app.get('/api/spaces/:id/members', requireAuth, wrap(async (req, res) => {
+  if (!(await denyUnlessCanAct(q, req.user, res, req.params.id, 'space_member.read'))) return;
   const r = await q(`SELECT sm.*, u.name, u.email, u.avatar_url, u.color
     FROM space_members sm JOIN users u ON u.id=sm.user_id WHERE sm.space_id=$1`, [req.params.id]);
   res.json(r.rows);
 }));
 
 // ── Space Members ─────────────────────────────────────────
-app.post('/api/space-members', wrap(async (req, res) => {
+app.post('/api/space-members', requireAuth, wrap(async (req, res) => {
   const { space_id, user_id, role } = req.body;
+  if (!space_id || !user_id) return res.status(400).json({ error: 'space_id and user_id are required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, space_id, 'space_member.manage'))) return;
+  const validated = await validateSpaceRoleAssignment(q, req.user, space_id, role || 'member');
+  if (!validated.ok) return res.status(403).json({ error: validated.error });
   const r = await q('INSERT INTO space_members(id,space_id,user_id,role) VALUES($1,$2,$3,$4) RETURNING *',
-    [uid(), space_id, user_id, role || 'member']);
+    [uid(), space_id, user_id, validated.role]);
   res.status(201).json(r.rows[0]);
 }));
 
-app.put('/api/space-members/:id', wrap(async (req, res) => {
-  const r = await q('UPDATE space_members SET role=$1 WHERE id=$2 RETURNING *', [req.body.role, req.params.id]);
+app.put('/api/space-members/:id', requireAuth, wrap(async (req, res) => {
+  const rec = await getSpaceMemberRecord(q, req.params.id);
+  if (!rec) return res.status(404).json({ error: 'Not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, rec.space_id, 'space_member.manage'))) return;
+  const validated = await validateSpaceRoleAssignment(q, req.user, rec.space_id, req.body.role);
+  if (!validated.ok) return res.status(403).json({ error: validated.error });
+  const r = await q('UPDATE space_members SET role=$1 WHERE id=$2 RETURNING *', [validated.role, req.params.id]);
   res.json(r.rows[0]);
 }));
 
-app.delete('/api/space-members/:id', wrap(async (req, res) => {
+app.delete('/api/space-members/:id', requireAuth, wrap(async (req, res) => {
+  const rec = await getSpaceMemberRecord(q, req.params.id);
+  if (!rec) return res.status(404).json({ error: 'Not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, rec.space_id, 'space_member.manage'))) return;
   await q('DELETE FROM space_members WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
 
 // ── Sprints ───────────────────────────────────────────────
-app.get('/api/sprints', wrap(async (req, res) => {
-  const r = await q('SELECT * FROM sprints WHERE space_id=$1 ORDER BY created_at DESC', [req.query.space_id]);
+app.get('/api/sprints', requireAuth, wrap(async (req, res) => {
+  const spaceId = req.query.space_id;
+  if (!spaceId) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'sprint.read'))) return;
+  const r = await q('SELECT * FROM sprints WHERE space_id=$1 ORDER BY created_at DESC', [spaceId]);
   res.json(r.rows);
 }));
 
-app.post('/api/sprints', wrap(async (req, res) => {
+app.post('/api/sprints', requireAuth, wrap(async (req, res) => {
   const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids, public_holidays } = req.body;
+  if (!space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, space_id, 'sprint.manage'))) return;
   const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids,public_holidays) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
     [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || [], public_holidays || []]);
   res.status(201).json(r.rows[0]);
 }));
 
-app.put('/api/sprints/:id', wrap(async (req, res) => {
-  const keys = Object.keys(req.body), vals = Object.values(req.body);
-  const set = keys.map((k, i) => `${k}=$${i + 2}`).join(',');
-  const r = await q(`UPDATE sprints SET ${set} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+app.put('/api/sprints/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getSprintSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'sprint.manage'))) return;
+  const upd = buildDynamicUpdate('sprints', req.body, 2);
+  if (!upd) return res.status(400).json({ error: 'Nothing to update' });
+  const r = await q(`UPDATE sprints SET ${upd.set} WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
   res.json(r.rows[0]);
 }));
 
-app.delete('/api/sprints/:id', wrap(async (req, res) => {
+app.delete('/api/sprints/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getSprintSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'sprint.manage'))) return;
   await q('UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1', [req.params.id]);
   await q('DELETE FROM sprints WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
 
-app.post('/api/sprints/:id/start', wrap(async (req, res) => {
+app.post('/api/sprints/:id/start', requireAuth, wrap(async (req, res) => {
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [req.params.id])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
-  // Multiple active sprints are allowed
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'sprint.manage'))) return;
   const r = await q("UPDATE sprints SET status='active' WHERE id=$1 RETURNING *", [req.params.id]);
-  // Notify all space members
   const spaceRow = (await q('SELECT key FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
   const sprintLink = spaceRow ? '/space/' + encodeURIComponent(spaceRow.key) + '/board' : null;
   const members = await q('SELECT user_id FROM space_members WHERE space_id=$1', [sprint.space_id]);
@@ -343,9 +469,11 @@ app.post('/api/sprints/:id/start', wrap(async (req, res) => {
   res.json(r.rows[0]);
 }));
 
-app.post('/api/sprints/:id/complete', wrap(async (req, res) => {
+app.post('/api/sprints/:id/complete', requireAuth, wrap(async (req, res) => {
   const sid = req.params.id;
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'sprint.manage'))) return;
   const done = await q("SELECT COALESCE(SUM(story_points),0)::int AS pts FROM issues WHERE sprint_id=$1 AND status='Done'", [sid]);
   await q("UPDATE sprints SET status='completed',velocity=$2 WHERE id=$1", [sid, done.rows[0].pts]);
   // Capture spillover issues before moving them to backlog
@@ -384,11 +512,20 @@ app.post('/api/sprints/:id/complete', wrap(async (req, res) => {
 }));
 
 // ── Issues ────────────────────────────────────────────────
-app.get('/api/issues', wrap(async (req, res) => {
+app.get('/api/issues', requireAuth, wrap(async (req, res) => {
   const { space_id, sprint_id, type, status, assignee_id, priority, search } = req.query;
+  if (space_id) {
+    if (!(await denyUnlessCanAct(q, req.user, res, space_id, 'issue.read'))) return;
+  } else if (!isOrgAdmin(req.user.role)) {
+    return res.status(400).json({ error: 'space_id is required' });
+  }
   let where = [], params = [], n = 1;
   const add = (col, val) => { where.push(`${col}=$${n++}`); params.push(val); };
   if (space_id) add('i.space_id', space_id);
+  else if (!isOrgAdmin(req.user.role)) {
+    where.push(`i.space_id IN (SELECT space_id FROM space_members WHERE user_id=$${n++})`);
+    params.push(req.user.id);
+  }
   if (sprint_id) {
     if (sprint_id === 'null') where.push('i.sprint_id IS NULL');
     else add('i.sprint_id', sprint_id);
@@ -412,7 +549,31 @@ app.get('/api/issues', wrap(async (req, res) => {
   res.json(r.rows);
 }));
 
-app.get('/api/issues/:id', wrap(async (req, res) => {
+app.get('/api/issues/deleted', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
+  const r = await q(`SELECT i.id, i.key, i.title, i.status, i.space_id, i.deleted_at, i.deleted_by,
+      s.name AS space_name, u.name AS deleted_by_name
+    FROM issues i
+    LEFT JOIN spaces s ON s.id = i.space_id
+    LEFT JOIN users u ON u.id = i.deleted_by
+    WHERE i.deleted_at IS NOT NULL
+    ORDER BY i.deleted_at DESC
+    LIMIT 500`);
+  res.json(r.rows);
+}));
+
+app.post('/api/issues/:id/restore', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
+  const row = (await q('SELECT id, key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [req.params.id])).rows[0];
+  if (!row) return res.status(404).json({ error: 'Deleted issue not found' });
+  await q('UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1', [req.params.id]);
+  await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+    VALUES($1,$2,$3,'restored',NULL,$4)`,
+    [uid(), req.params.id, req.user.id, row.key]).catch(() => {});
+  res.json({ ok: true });
+}));
+
+app.get('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   const param = req.params.id;
   const issue = (await q(`SELECT i.*,
       a.name AS assignee_name, a.color AS assignee_color,
@@ -424,8 +585,9 @@ app.get('/api/issues/:id', wrap(async (req, res) => {
     LEFT JOIN users rep ON rep.id=i.reporter_id
     LEFT JOIN spaces s ON s.id=i.space_id
     LEFT JOIN issues p ON p.id=i.parent_id
-    WHERE i.id=$1 OR UPPER(i.key)=UPPER($1)`, [param])).rows[0];
+    WHERE (i.id=$1 OR UPPER(i.key)=UPPER($1)) AND i.deleted_at IS NULL`, [param])).rows[0];
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, issue.space_id, 'issue.read'))) return;
   const issueId = issue.id;
   const [worklogs, comments, links, subtasks, cfv, history, attachments] = await Promise.all([
     q(`SELECT w.*, u.name AS user_name, u.color AS user_color FROM worklogs w
@@ -455,9 +617,10 @@ app.get('/api/issues/:id', wrap(async (req, res) => {
   res.json(issue);
 }));
 
-app.post('/api/issues', wrap(async (req, res) => {
+app.post('/api/issues', requireAuth, wrap(async (req, res) => {
   const b = req.body;
   if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, b.space_id, 'issue.create'))) return;
   const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [b.space_id])).rows[0];
   if (!spaceKeyRow) return res.status(400).json({ error: 'Invalid space_id' });
   const spaceKey = spaceKeyRow.key;
@@ -474,18 +637,23 @@ app.post('/api/issues', wrap(async (req, res) => {
      b.type || 'task', b.priority || 'medium', b.assignee_id || null, b.reporter_id || null,
      b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
      b.original_estimate || null, b.team || null, b.product_type || null]);
+  await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+    VALUES($1,$2,$3,'created',NULL,$4)`, [uid(), id, req.user.id, key]).catch(function () {});
   res.status(201).json(r.rows[0]);
 }));
 
 app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
-  const keys = Object.keys(req.body), vals = Object.values(req.body);
-  if (!keys.length) return res.json((await q('SELECT * FROM issues WHERE id=$1', [req.params.id])).rows[0]);
-  // Fetch old values before update to track history
+  const spaceId = await getIssueSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'issue.update'))) return;
+  const upd = buildDynamicUpdate('issues', req.body, 2);
+  if (!upd) {
+    return res.json((await q('SELECT * FROM issues WHERE id=$1', [req.params.id])).rows[0]);
+  }
+  const keys = upd.keys;
   const oldRow = (await q('SELECT * FROM issues WHERE id=$1', [req.params.id])).rows[0];
-  const set = keys.map((k, i) => `${k}=$${i + 2}`).join(',');
-  const r = await q(`UPDATE issues SET ${set},updated_at=NOW() WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+  const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
   const newRow = r.rows[0];
-  // Record history for each changed field
   const TRACKED = ['title','status','priority','assignee_id','reporter_id','sprint_id','labels','story_points','start_date','due_date','description','fix_description'];
   if (oldRow) {
     for (const key of keys) {
@@ -494,10 +662,10 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
       const newVal = req.body[key] != null ? String(req.body[key]) : null;
       if (oldVal !== newVal) {
         await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value) VALUES($1,$2,$3,$4,$5,$6)`,
-          [uid(), req.params.id, req.user.user_id, key, oldVal, newVal]).catch(()=>{});
+          [uid(), req.params.id, req.user.id, key, oldVal, newVal]).catch(()=>{});
       }
     }
-    const actor = req.user.user_id;
+    const actor = req.user.id;
     const issueKey = oldRow.key || req.params.id;
     const spaceId = oldRow.space_id;
     const link = '/?issue=' + encodeURIComponent(issueKey);
@@ -532,39 +700,43 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   res.json(newRow);
 }));
 
-app.delete('/api/issues/:id', wrap(async (req, res) => {
+app.delete('/api/issues/:id', requireAuth, wrap(async (req, res) => {
+  const issue = (await q('SELECT id, space_id, key FROM issues WHERE id=$1 AND deleted_at IS NULL', [req.params.id])).rows[0];
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, issue.space_id, 'issue.delete'))) return;
   const id = req.params.id;
-  await q('DELETE FROM comments WHERE issue_id=$1', [id]);
-  await q('DELETE FROM worklogs WHERE issue_id=$1', [id]);
-  await q('DELETE FROM issue_links WHERE source_id=$1 OR target_id=$1', [id]);
-  await q('DELETE FROM issue_field_values WHERE issue_id=$1', [id]);
-  await q('DELETE FROM issues WHERE parent_id=$1', [id]);
-  await q('DELETE FROM issues WHERE id=$1', [id]);
+  await q(`UPDATE issues SET deleted_at=NOW(), deleted_by=$2, updated_at=NOW()
+    WHERE (id=$1 OR parent_id=$1) AND deleted_at IS NULL`, [id, req.user.id]);
+  await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+    VALUES($1,$2,$3,'deleted',NULL,$4)`,
+    [uid(), id, req.user.id, issue.key]).catch(() => {});
   res.json({ ok: true });
 }));
 
-app.put('/api/issues/:id/move', wrap(async (req, res) => {
-  const { sprint_id, position } = req.body;
-  const r = await q('UPDATE issues SET sprint_id=$2,position=$3,updated_at=NOW() WHERE id=$1 RETURNING *',
-    [req.params.id, sprint_id === undefined ? null : sprint_id, position || 0]);
-  res.json(r.rows[0]);
-}));
-
-app.post('/api/issues/bulk', wrap(async (req, res) => {
+app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
   const { ids, updates } = req.body;
-  const keys = Object.keys(updates), vals = Object.values(updates);
-  if (!keys.length || !ids.length) return res.json({ ok: true, updated: 0 });
-  const set = keys.map((k, i) => `${k}=$${i + 2}`).join(',');
-  const r = await q(`UPDATE issues SET ${set},updated_at=NOW() WHERE id=ANY($1) RETURNING *`, [ids, ...vals]);
+  if (!ids || !ids.length) return res.json({ ok: true, updated: 0 });
+  const picked = pickAllowed(updates || {}, UPDATE_WHITELIST.issues);
+  const keys = Object.keys(picked);
+  if (!keys.length) return res.json({ ok: true, updated: 0 });
+  const firstIssue = (await q('SELECT space_id FROM issues WHERE id=$1', [ids[0]])).rows[0];
+  if (!firstIssue) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, firstIssue.space_id, 'issue.bulk'))) return;
+  const upd = buildDynamicUpdate('issues', picked, 2);
+  const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=ANY($1) RETURNING *`, [ids, ...upd.vals]);
   res.json({ ok: true, updated: r.rowCount, issues: r.rows });
 }));
 
 // ── Comments ──────────────────────────────────────────────
-app.post('/api/comments', wrap(async (req, res) => {
-  const { issue_id, user_id, body, mentioned_user_ids } = req.body;
+app.post('/api/comments', requireAuth, wrap(async (req, res) => {
+  const { issue_id, body, mentioned_user_ids } = req.body;
+  if (!issue_id || !body) return res.status(400).json({ error: 'issue_id and body are required' });
+  const issueRow = (await q('SELECT space_id, key, title, assignee_id, reporter_id FROM issues WHERE id=$1', [issue_id])).rows[0];
+  if (!issueRow) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, issueRow.space_id, 'comment.create'))) return;
+  const user_id = req.user.id;
   const r = await q('INSERT INTO comments(id,issue_id,user_id,body) VALUES($1,$2,$3,$4) RETURNING *',
     [uid(), issue_id, user_id, body]);
-  // Notify assignee and reporter (skip commenter)
   const issue = (await q('SELECT * FROM issues WHERE id=$1', [issue_id])).rows[0];
   if (issue) {
     const commenter = user_id;
@@ -595,12 +767,18 @@ app.post('/api/comments', wrap(async (req, res) => {
   res.status(201).json(r.rows[0]);
 }));
 
-app.put('/api/comments/:id', wrap(async (req, res) => {
+app.put('/api/comments/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getCommentIssueSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'comment.update'))) return;
   const r = await q('UPDATE comments SET body=$1,updated_at=NOW() WHERE id=$2 RETURNING *', [req.body.body, req.params.id]);
   res.json(r.rows[0]);
 }));
 
-app.delete('/api/comments/:id', wrap(async (req, res) => {
+app.delete('/api/comments/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getCommentIssueSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'comment.delete'))) return;
   await q('DELETE FROM comments WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
@@ -641,10 +819,19 @@ app.get('/api/files/:id', async (req, res) => {
 });
 
 // ── Worklogs ──────────────────────────────────────────────
-app.get('/api/worklogs', wrap(async (req, res) => {
+app.get('/api/worklogs', requireAuth, wrap(async (req, res) => {
   const { space_id, user_id, from, to } = req.query;
+  if (space_id && !(await denyUnlessCanAct(q, req.user, res, space_id, 'worklog.read'))) return;
   let where = [], params = [], n = 1;
-  if (space_id) { where.push(`i.space_id=$${n++}`); params.push(space_id); }
+  if (space_id) {
+    where.push(`i.space_id=$${n++}`);
+    params.push(space_id);
+  } else if (!isOrgAdmin(req.user.role)) {
+    const visible = await getVisibleSpaceIds(q, req.user);
+    if (!visible.length) return res.json([]);
+    where.push(`i.space_id = ANY($${n++})`);
+    params.push(visible);
+  }
   if (user_id) { where.push(`w.user_id=$${n++}`); params.push(user_id); }
   if (from) { where.push(`w.work_date>=$${n++}`); params.push(from); }
   if (to) { where.push(`w.work_date<=$${n++}`); params.push(to); }
@@ -658,7 +845,10 @@ app.get('/api/worklogs', wrap(async (req, res) => {
 // Anyone authenticated can log time on any issue — attributed to the logged-in user (not assignee)
 app.post('/api/worklogs', requireAuth, wrap(async (req, res) => {
   const { issue_id, time_spent, work_date, description, is_billable } = req.body;
-  const user_id = req.user.user_id; // always use session user, ignore any client-sent user_id
+  const issueSpace = issue_id ? await getIssueSpaceId(q, issue_id) : null;
+  if (!issueSpace) return res.status(400).json({ error: 'Valid issue_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, issueSpace, 'worklog.create'))) return;
+  const user_id = req.user.id;
   const r = await q(`INSERT INTO worklogs(id,issue_id,user_id,time_spent,work_date,description,is_billable)
     VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
     [uid(), issue_id, user_id, time_spent, work_date || new Date(), description, is_billable || false]);
@@ -714,6 +904,10 @@ app.get('/api/roadmap', requireAuth, wrap(async (req, res) => {
              WHERE 1=1`;
   const params = [];
   if (space_id) { params.push(space_id); sql += ` AND r.space_id=$${params.length}`; }
+  else if (!isOrgAdmin(req.user.role)) {
+    params.push(req.user.user_id || req.user.id);
+    sql += ` AND r.space_id IN (SELECT space_id FROM space_members WHERE user_id=$${params.length})`;
+  }
   if (status)   { params.push(status);   sql += ` AND r.status=$${params.length}`; }
   sql += ' ORDER BY r.start_date ASC NULLS LAST, r.created_at ASC';
   res.json((await q(sql, params)).rows);
@@ -795,9 +989,13 @@ app.post('/api/roadmap/colors', requireAuth, wrap(async (req, res) => {
 }));
 
 // ── Issue Links ───────────────────────────────────────────
-app.post('/api/links', wrap(async (req, res) => {
+app.post('/api/links', requireAuth, wrap(async (req, res) => {
   const { source_id, target_id, link_type } = req.body;
   if (!source_id || !target_id || !link_type) return res.status(400).json({ error: 'source_id, target_id and link_type are required' });
+  const sourceSpace = await getIssueSpaceId(q, source_id);
+  const targetSpace = await getIssueSpaceId(q, target_id);
+  if (!sourceSpace || !targetSpace || sourceSpace !== targetSpace) return res.status(400).json({ error: 'Invalid issue link' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sourceSpace, 'link.manage'))) return;
   // Check for existing link in either direction to avoid duplicate constraint error
   const existing = await q(
     'SELECT id FROM issue_links WHERE (source_id=$1 AND target_id=$2 AND link_type=$3) OR (source_id=$2 AND target_id=$1 AND link_type=$3)',
@@ -809,13 +1007,20 @@ app.post('/api/links', wrap(async (req, res) => {
   res.status(201).json(r.rows[0]);
 }));
 
-app.delete('/api/links/:id', wrap(async (req, res) => {
+app.delete('/api/links/:id', requireAuth, wrap(async (req, res) => {
+  const linkRow = (await q('SELECT source_id FROM issue_links WHERE id=$1', [req.params.id])).rows[0];
+  if (!linkRow) return res.status(404).json({ error: 'Not found' });
+  const spaceId = await getIssueSpaceId(q, linkRow.source_id);
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'link.manage'))) return;
   await q('DELETE FROM issue_links WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
 
 // ── Attachments ───────────────────────────────────────────
-app.get('/api/issues/:id/attachments', wrap(async (req, res) => {
+app.get('/api/issues/:id/attachments', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getIssueSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'attachment.read'))) return;
   const r = await q(`SELECT a.*, u.name AS uploader_name FROM issue_attachments a
     LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.issue_id=$1 ORDER BY a.created_at DESC`, [req.params.id]);
   res.json(r.rows);
@@ -827,18 +1032,21 @@ app.post('/api/issues/:id/attachments', requireAuth, (req, res, next) => {
   memUpload.array('files', 20)(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
+      const spaceId = await getIssueSpaceId(q, req.params.id);
+      if (!spaceId) return res.status(404).json({ error: 'Issue not found' });
+      if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'attachment.upload'))) return;
       const saved = [];
       for (const f of req.files) {
         const fileId = uid();
         await q(`INSERT INTO file_storage(id,original_name,mime_type,size,data,uploaded_by) VALUES($1,$2,$3,$4,$5,$6)`,
-          [fileId, f.originalname, f.mimetype, f.size, f.buffer, req.user.user_id]);
+          [fileId, f.originalname, f.mimetype, f.size, f.buffer, req.user.id]);
         const r = await q(`INSERT INTO issue_attachments(id,issue_id,filename,original_name,size,mime_type,uploaded_by)
           VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-          [uid(), req.params.id, fileId, f.originalname, f.size, f.mimetype, req.user.user_id]);
+          [uid(), req.params.id, fileId, f.originalname, f.size, f.mimetype, req.user.id]);
         saved.push(r.rows[0]);
         await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
           VALUES($1,$2,$3,'attachment',NULL,$4)`,
-          [uid(), req.params.id, req.user.user_id, f.originalname]);
+          [uid(), req.params.id, req.user.id, f.originalname]);
       }
       res.status(201).json(saved);
     } catch(e) { next(e); }
@@ -872,19 +1080,28 @@ app.patch('/api/attachments/:id', requireAuth, wrap(async (req, res) => {
 }));
 
 // ── Custom Fields ─────────────────────────────────────────
-app.get('/api/custom-fields', wrap(async (req, res) => {
-  // With no space_id, return every field across every space — used to
-  // refresh the full client-side cache after a bulk action like
-  // apply-to-all/create-for-all that touches more than just the current space.
+app.get('/api/custom-fields', requireAuth, wrap(async (req, res) => {
   const sid = req.query.space_id;
-  const r = sid
-    ? await q('SELECT * FROM custom_fields WHERE space_id=$1 ORDER BY position', [sid])
-    : await q('SELECT * FROM custom_fields ORDER BY position');
+  if (sid && !(await denyUnlessCanAct(q, req.user, res, sid, 'custom_field.read'))) return;
+  if (sid) {
+    try {
+      await ensureDefaultCustomFields(q, uid, sid);
+    } catch (e) {
+      console.error('[custom-fields] Default field seed failed for space', sid, e.message);
+    }
+    const r = await q('SELECT * FROM custom_fields WHERE space_id=$1 ORDER BY position', [sid]);
+    return res.json(r.rows);
+  }
+  const r = isOrgAdmin(req.user.role)
+    ? await q('SELECT * FROM custom_fields ORDER BY position')
+    : await q('SELECT cf.* FROM custom_fields cf JOIN space_members sm ON sm.space_id=cf.space_id WHERE sm.user_id=$1 ORDER BY cf.position', [req.user.id]);
   res.json(r.rows);
 }));
 
-app.post('/api/custom-fields', wrap(async (req, res) => {
+app.post('/api/custom-fields', requireAuth, wrap(async (req, res) => {
   const b = req.body;
+  if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, b.space_id, 'custom_field.manage'))) return;
   if (isReservedFieldName(b.name)) {
     return res.status(400).json({ error: `"${b.name}" is a built-in field name — choose a different name for this custom field` });
   }
@@ -901,6 +1118,7 @@ app.post('/api/custom-fields', wrap(async (req, res) => {
 // apply-to-all below, which copies one that already exists on some board).
 // Skips any space that already has a field with the same name.
 app.post('/api/custom-fields/create-for-all', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   const b = req.body;
   if (!b.name || !b.field_type) return res.status(400).json({ error: 'name and field_type are required' });
   if (isReservedFieldName(b.name)) {
@@ -929,21 +1147,17 @@ app.post('/api/custom-fields/create-for-all', requireAuth, wrap(async (req, res)
   res.json({ ok: true, added: addedTo.length, totalSpaces: spaces.length, addedTo, skipped });
 }));
 
-app.put('/api/custom-fields/:id', wrap(async (req, res) => {
+app.put('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getCustomFieldSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Field not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'custom_field.manage'))) return;
   const body = { ...req.body };
   if (body.name !== undefined && isReservedFieldName(body.name)) {
     return res.status(400).json({ error: `"${body.name}" is a built-in field name — choose a different name for this custom field` });
   }
-  // Fix options jsonb binding same as POST
-  if (body.options !== undefined) {
-    body.options = JSON.stringify(Array.isArray(body.options) ? body.options : []);
-  }
-  const keys = Object.keys(body);
-  const vals = keys.map(k => k === 'options' ? body[k] + '::jsonb' : body[k]);
-  // Build set clause, casting options to jsonb
-  const set = keys.map((k, i) => k === 'options' ? `options=$${i+2}::jsonb` : `${k}=$${i+2}`).join(',');
-  const r = await q(`UPDATE custom_fields SET ${set} WHERE id=$1 RETURNING *`,
-    [req.params.id, ...keys.map(k => body[k])]);
+  const upd = buildDynamicUpdate('custom_fields', body, 2);
+  if (!upd) return res.status(400).json({ error: 'Nothing to update' });
+  const r = await q(`UPDATE custom_fields SET ${upd.set} WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
   res.json(r.rows[0]);
 }));
 
@@ -952,6 +1166,7 @@ app.put('/api/custom-fields/:id', wrap(async (req, res) => {
 // name. Returns which boards it was actually added to and which were
 // skipped (and why) so the UI can show something more useful than a count.
 app.post('/api/custom-fields/:id/apply-to-all', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
   if (!field) return res.status(404).json({ error: 'Field not found' });
   // is_archived defaults to false, but treat NULL the same way defensively
@@ -981,6 +1196,9 @@ app.post('/api/custom-fields/:id/apply-to-all', requireAuth, wrap(async (req, re
 // Upsert a single custom field value for an issue
 app.put('/api/issues/:id/field-values/:fieldId', requireAuth, wrap(async (req, res) => {
   const { id: issueId, fieldId } = req.params;
+  const spaceId = await getIssueSpaceId(q, issueId);
+  if (!spaceId) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'issue.update'))) return;
   const { value } = req.body;
   // Check if record exists
   const existing = await q('SELECT id FROM issue_field_values WHERE issue_id=$1 AND field_id=$2', [issueId, fieldId]);
@@ -1000,53 +1218,76 @@ app.put('/api/issues/:id/field-values/:fieldId', requireAuth, wrap(async (req, r
   res.json({ ok: true });
 }));
 
-app.delete('/api/custom-fields/:id', wrap(async (req, res) => {
+app.delete('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getCustomFieldSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Field not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'custom_field.manage'))) return;
   await q('DELETE FROM issue_field_values WHERE field_id=$1', [req.params.id]);
   await q('DELETE FROM custom_fields WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
 
 // ── Saved Filters ─────────────────────────────────────────
-app.get('/api/filters', wrap(async (req, res) => {
+app.get('/api/filters', requireAuth, wrap(async (req, res) => {
+  if (req.query.space_id && !(await denyUnlessCanAct(q, req.user, res, req.query.space_id, 'filter.read'))) return;
   let where = [], params = [], n = 1;
   if (req.query.space_id) { where.push(`space_id=$${n++}`); params.push(req.query.space_id); }
-  if (req.query.user_id) { where.push(`user_id=$${n++}`); params.push(req.query.user_id); }
+  if (req.query.user_id) {
+    if (req.query.user_id !== req.user.id && !isOrgAdmin(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    where.push(`user_id=$${n++}`); params.push(req.query.user_id);
+  } else if (!req.query.space_id && !isOrgAdmin(req.user.role)) {
+    where.push(`space_id IN (SELECT space_id FROM space_members WHERE user_id=$${n++})`);
+    params.push(req.user.user_id || req.user.id);
+  }
   const w = where.length ? ' WHERE ' + where.join(' AND ') : '';
   const r = await q('SELECT * FROM saved_filters' + w + ' ORDER BY name', params);
   res.json(r.rows);
 }));
 
-app.post('/api/filters', wrap(async (req, res) => {
+app.post('/api/filters', requireAuth, wrap(async (req, res) => {
   const b = req.body;
+  if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, b.space_id, 'filter.manage'))) return;
   const r = await q(`INSERT INTO saved_filters(id,space_id,user_id,name,conditions,is_shared)
     VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [uid(), b.space_id, b.user_id, b.name, JSON.stringify(b.conditions || b.filter_config || {}), b.is_shared || false]);
+    [uid(), b.space_id, req.user.id, b.name, JSON.stringify(b.conditions || b.filter_config || {}), b.is_shared || false]);
   res.status(201).json(r.rows[0]);
 }));
 
-app.put('/api/filters/:id', wrap(async (req, res) => {
-  const fields = { ...req.body };
-  if (fields.conditions && typeof fields.conditions === 'object') fields.conditions = JSON.stringify(fields.conditions);
-  const keys = Object.keys(fields), vals = Object.values(fields);
-  const set = keys.map((k, i) => `${k}=$${i + 2}`).join(',');
-  const r = await q(`UPDATE saved_filters SET ${set} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+app.put('/api/filters/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getFilterSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Filter not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'filter.manage'))) return;
+  const body = { ...req.body };
+  if (body.conditions && typeof body.conditions === 'object') body.conditions = JSON.stringify(body.conditions);
+  const upd = buildDynamicUpdate('saved_filters', body, 2);
+  if (!upd) return res.status(400).json({ error: 'Nothing to update' });
+  const r = await q(`UPDATE saved_filters SET ${upd.set} WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
   res.json(r.rows[0]);
 }));
 
-app.delete('/api/filters/:id', wrap(async (req, res) => {
+app.delete('/api/filters/:id', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getFilterSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Filter not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'filter.manage'))) return;
   await q('DELETE FROM saved_filters WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
 
 // ── Move issue (drag/drop backlog ↔ sprint) ───────────────
 app.put('/api/issues/:id/move', requireAuth, wrap(async (req, res) => {
+  const spaceId = await getIssueSpaceId(q, req.params.id);
+  if (!spaceId) return res.status(404).json({ error: 'Issue not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'issue.move'))) return;
   const { sprint_id } = req.body;
   const oldRow = (await q('SELECT sprint_id FROM issues WHERE id=$1', [req.params.id])).rows[0];
   const r = await q('UPDATE issues SET sprint_id=$1,updated_at=NOW() WHERE id=$2 RETURNING *',
     [sprint_id || null, req.params.id]);
   if (oldRow) {
     await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value) VALUES($1,$2,$3,$4,$5,$6)`,
-      [uid(), req.params.id, req.user.user_id, 'sprint_id',
+      [uid(), req.params.id, req.user.id, 'sprint_id',
        oldRow.sprint_id ? String(oldRow.sprint_id) : null,
        sprint_id ? String(sprint_id) : null]).catch(()=>{});
   }
@@ -1058,6 +1299,7 @@ app.get('/api/reports/sprint/:sprintId', requireAuth, wrap(async (req, res) => {
   const sid = req.params.sprintId;
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
   const stats = (await q(`SELECT
       COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE status='Done')::int AS done,
@@ -1069,6 +1311,8 @@ app.get('/api/reports/sprint/:sprintId', requireAuth, wrap(async (req, res) => {
 }));
 
 app.get('/api/reports/velocity', requireAuth, wrap(async (req, res) => {
+  if (!req.query.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, req.query.space_id, 'report.view'))) return;
   const r = await q(`SELECT id, name, velocity, start_date, end_date
     FROM sprints WHERE space_id=$1 AND status='completed' ORDER BY end_date`,
     [req.query.space_id]);
@@ -1076,29 +1320,37 @@ app.get('/api/reports/velocity', requireAuth, wrap(async (req, res) => {
 }));
 
 app.get('/api/reports/status', requireAuth, wrap(async (req, res) => {
+  if (!req.query.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, req.query.space_id, 'report.view'))) return;
   const r = await q('SELECT status, COUNT(*)::int AS count FROM issues WHERE space_id=$1 GROUP BY status ORDER BY status',
     [req.query.space_id]);
   res.json(r.rows);
 }));
 
 app.get('/api/reports/priority', requireAuth, wrap(async (req, res) => {
+  if (!req.query.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, req.query.space_id, 'report.view'))) return;
   const r = await q('SELECT priority, COUNT(*)::int AS count FROM issues WHERE space_id=$1 GROUP BY priority ORDER BY priority',
     [req.query.space_id]);
   res.json(r.rows);
 }));
 
 app.get('/api/reports/workload', requireAuth, wrap(async (req, res) => {
+  const spaceId = req.query.space_id;
+  if (!spaceId) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'report.view'))) return;
   const r = await q(`SELECT u.id, u.name, COUNT(i.id)::int AS issue_count,
-      COALESCE(SUM(i.points),0)::int AS total_points
+      COALESCE(SUM(i.story_points),0)::int AS total_points
     FROM users u JOIN issues i ON i.assignee_id=u.id
     WHERE i.space_id=$1 GROUP BY u.id, u.name ORDER BY issue_count DESC`,
-    [req.query.space_id]);
+    [spaceId]);
   res.json(r.rows);
 }));
 
 app.get('/api/reports/burndown/:sprintId', requireAuth, wrap(async (req, res) => {
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [req.params.sprintId])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
 
   const issues = (await q('SELECT id, story_points AS points, status FROM issues WHERE sprint_id=$1', [sprint.id])).rows;
   const total = issues.length;
@@ -1157,6 +1409,8 @@ app.get('/api/reports/burndown/:sprintId', requireAuth, wrap(async (req, res) =>
 }));
 
 app.get('/api/reports/cycle-time', requireAuth, wrap(async (req, res) => {
+  if (!req.query.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, req.query.space_id, 'report.view'))) return;
   // Try issue_history first (accurate)
   let rows = (await q(
     `SELECT i.id, i.key, i.title, i.created_at,
@@ -1193,6 +1447,7 @@ app.get('/api/reports/control-chart/:sprintId', requireAuth, wrap(async (req, re
   const sid = req.params.sprintId;
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
 
   const rows = (await q(`
     SELECT i.id, i.key, i.title, i.story_points, i.assignee_id,
@@ -1224,6 +1479,9 @@ app.get('/api/reports/control-chart/:sprintId', requireAuth, wrap(async (req, re
 // Sprint-specific team workload
 app.get('/api/reports/team-workload/:sprintId', requireAuth, wrap(async (req, res) => {
   const sid = req.params.sprintId;
+  const sprint = (await q('SELECT space_id FROM sprints WHERE id=$1', [sid])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
   const r = await q(`
     SELECT u.id, u.name, u.color, u.avatar_url,
       COUNT(i.id)::int AS assigned,
@@ -1245,6 +1503,7 @@ app.get('/api/reports/scope-change/:sprintId', requireAuth, wrap(async (req, res
   const sid = req.params.sprintId;
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
   const current = (await q(
     'SELECT id, key, title, status, type, priority, assignee_id, story_points FROM issues WHERE sprint_id=$1 AND deleted_at IS NULL', [sid]
   )).rows;
@@ -1271,6 +1530,9 @@ app.get('/api/reports/scope-change/:sprintId', requireAuth, wrap(async (req, res
 // Bug summary for a sprint
 app.get('/api/reports/bugs/:sprintId', requireAuth, wrap(async (req, res) => {
   const sid = req.params.sprintId;
+  const sprint = (await q('SELECT space_id FROM sprints WHERE id=$1', [sid])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
   const r = (await q(`
     SELECT
       COUNT(*) FILTER (WHERE status!='Done')::int AS open_bugs,
@@ -1287,6 +1549,7 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
   const sid = req.params.sprintId;
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
 
   let spillover = [];
   if (sprint.status === 'completed') {
@@ -1383,13 +1646,14 @@ async function createNotif({ user_id, space_id, type, title, body, link }) {
   }
 }
 
-app.get('/api/notifications', wrap(async (req, res) => {
+app.get('/api/notifications', requireAuth, wrap(async (req, res) => {
   const r = await q('SELECT * FROM notifications WHERE user_id=$1 ORDER BY is_read ASC, created_at DESC LIMIT 100',
-    [req.query.user_id]);
+    [req.user.id]);
   res.json(r.rows);
 }));
 
 app.post('/api/notifications', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   const { user_id, space_id, type, title, body, link } = req.body;
   if (!user_id || !type || !title) return res.status(400).json({ error: 'user_id, type, title required' });
   const r = await q('INSERT INTO notifications(id,user_id,space_id,type,title,body,link) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
@@ -1398,17 +1662,18 @@ app.post('/api/notifications', requireAuth, wrap(async (req, res) => {
 }));
 
 app.delete('/api/notifications/:id', requireAuth, wrap(async (req, res) => {
-  await q('DELETE FROM notifications WHERE id=$1 AND user_id=$2', [req.params.id, req.user.user_id]);
+  await q('DELETE FROM notifications WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
   res.json({ ok: true });
 }));
 
-app.put('/api/notifications/:id/read', wrap(async (req, res) => {
-  const r = await q('UPDATE notifications SET is_read=true WHERE id=$1 RETURNING *', [req.params.id]);
+app.put('/api/notifications/:id/read', requireAuth, wrap(async (req, res) => {
+  const r = await q('UPDATE notifications SET is_read=true WHERE id=$1 AND user_id=$2 RETURNING *', [req.params.id, req.user.id]);
+  if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
   res.json(r.rows[0]);
 }));
 
-app.put('/api/notifications/read-all', wrap(async (req, res) => {
-  await q('UPDATE notifications SET is_read=true WHERE user_id=$1 AND is_read=false', [req.body.user_id]);
+app.put('/api/notifications/read-all', requireAuth, wrap(async (req, res) => {
+  await q('UPDATE notifications SET is_read=true WHERE user_id=$1 AND is_read=false', [req.user.id]);
   res.json({ ok: true });
 }));
 
@@ -1438,6 +1703,7 @@ async function requireAuth(req, res, next) {
       WHERE s.token=$1 AND s.expires_at>NOW()`, [token]);
     if (!r.rows[0] || !r.rows[0].is_active) return res.status(401).json({ error: 'Session expired' });
     req.user = r.rows[0];
+    req.user.id = req.user.user_id;
     next();
   } catch (e) { return res.status(401).json({ error: 'Auth error' }); }
 }
@@ -1611,12 +1877,14 @@ app.get('/api/auth/invite/:token', wrap(async (req, res) => {
 }));
 
 app.get('/api/auth/invitations', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   const r = await q(`SELECT id, email, role, status, expires_at, invited_by, created_at
     FROM invitations ORDER BY created_at DESC`);
   res.json(r.rows);
 }));
 
 app.delete('/api/auth/invitations/:id', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   await q(`UPDATE invitations SET status='cancelled' WHERE id=$1`, [req.params.id]);
   res.json({ ok: true });
 }));
@@ -1657,6 +1925,7 @@ app.get('/api/auth/me', requireAuth, wrap(async (req, res) => {
 
 // ── User Management ────────────────────────────────────────
 app.get('/api/users', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   const r = await q('SELECT id,name,email,role,color,avatar_url,is_active,last_login,created_at,theme FROM users ORDER BY created_at');
   res.json(r.rows);
 }));
@@ -1674,7 +1943,7 @@ app.put('/api/users/:id', requireAuth, wrap(async (req, res) => {
   const push = (col, val) => { setClauses.push(`${col}=$${vals.length + 1}`); vals.push(val); };
 
   if (name     !== undefined) push('name', name);
-  if (email    !== undefined && isSelf) push('email', email);
+  if (email    !== undefined && isAdmin && !isSelf) push('email', email);
   if (theme    !== undefined) push('theme', theme);
   if (color    !== undefined) push('color', color);
   if (avatar_url !== undefined) push('avatar_url', avatar_url);
@@ -1887,6 +2156,7 @@ app.get('/api/admin/audit-log', requireAuth, wrap(async (req, res) => {
 }));
 
 app.get('/api/admin/email-settings', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   const r = await q(`SELECT email_settings FROM organizations LIMIT 1`);
   const dbCfg = r.rows[0]?.email_settings || {};
   if (dbCfg.smtp_pass) dbCfg.smtp_pass = '••••••••';
@@ -1909,6 +2179,7 @@ app.put('/api/admin/email-settings', requireAuth, wrap(async (req, res) => {
 }));
 
 app.post('/api/admin/email-test', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res)) return;
   const body = `<h2 style="color:#1e293b;margin-top:0">Test Email</h2>
     <p style="color:#475569">Hi <strong>${req.user.name}</strong>,</p>
     <p style="color:#475569">This is a test email from SprintBoard. Your SMTP configuration is working correctly!</p>
@@ -1954,23 +2225,10 @@ app.post('/api/auth/invitations/:id/resend', requireAuth, wrap(async (req, res) 
   res.json({ ok: true, invite_url: inviteUrl, email_sent: emailResult.sent, email_reason: emailResult.reason });
 }));
 
-// ── Temporary: Git push helper (removed after deploy) ────
-app.post('/api/admin/git-run', requireAuth, wrap(async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'owner') return res.status(403).json({ error: 'Admins only' });
-  const { cmd } = req.body;
-  const ALLOWED = ['git init','git add','git commit','git remote','git push','git config','git branch','git status','git log'];
-  if (!cmd || !ALLOWED.some(function(p){ return cmd.startsWith(p); })) return res.status(400).json({ error: 'Command not allowed' });
-  const { exec } = require('child_process');
-  const cwd = __dirname;
-  exec(cmd, { cwd: cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, function(err, stdout, stderr) {
-    res.json({ ok: !err || stderr === '', stdout: stdout, stderr: stderr, code: err ? err.code : 0 });
-  });
-}));
-
 // ── Error Handler ─────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: err.message });
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // ── Crash Protection ──────────────────────────────────────
@@ -1979,24 +2237,6 @@ process.on('uncaughtException', (err) => {
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection] Server kept alive:', reason);
-});
-
-// ── Admin: DB Sync endpoint ───────────────────────────────
-app.post('/api/admin/sync-db', async (req, res) => {
-  const secret = req.headers['x-sync-secret'] || req.body?.secret;
-  if (secret !== 'neutara-sync-2026') return res.status(403).json({ error: 'Forbidden' });
-  try {
-    const output = await new Promise((resolve, reject) => {
-      require('child_process').exec('node db/create-db.js', { cwd: __dirname }, (err, stdout, stderr) => {
-        if (err) reject(stderr || err.message);
-        else resolve(stdout);
-      });
-    });
-    console.log('[sync-db]', output);
-    res.json({ ok: true, output });
-  } catch(e) {
-    res.status(500).json({ ok: false, error: String(e) });
-  }
 });
 
 // SPA routes — refresh-safe deep links
@@ -2020,299 +2260,17 @@ app.get('/space/:key/:tab?', (req, res) => {
   res.sendFile(SPA_HTML);
 });
 
-// ── Startup ───────────────────────────────────────────────
+// ── Startup (read-only — no DDL) ─────────────────────────
 (async () => {
   try {
     await pool.query('SELECT 1');
-
-    // Bootstrap: if tables don't exist (fresh deployment), run create-db.js
-    try {
-      const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema='public' AND table_name='users')`);
-      if (!tableCheck.rows[0].exists) {
-        console.log('🏗️  No tables found — running initial DB setup...');
-        await new Promise((resolve, reject) => {
-          require('child_process').exec('node db/create-db.js', { cwd: __dirname }, (err, stdout, stderr) => {
-            if (stdout) console.log(stdout);
-            if (err) { console.error('DB setup error:', stderr); reject(err); }
-            else resolve();
-          });
-        });
-        console.log('✅ Initial DB setup complete.');
-      }
-    } catch(e) { console.error('Bootstrap check failed:', e.message); }
-
-    // Migration: add 'cancelled' to invitations status constraint
-    try {
-      await pool.query(`ALTER TABLE invitations DROP CONSTRAINT IF EXISTS invitations_status_check`);
-      await pool.query(`ALTER TABLE invitations ADD CONSTRAINT invitations_status_check CHECK (status IN ('pending','accepted','expired','cancelled'))`);
-    } catch(e) { console.error('Migration warning (invitations status):', e.message); }
-
-    // Migration: add 'Blocked' to issues status constraint — the app already has
-    // full UI/color/report support for a Blocked status, but the DB never allowed
-    // the value, so issues could never actually be saved as Blocked.
-    try {
-      await pool.query(`ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_status_check`);
-      await pool.query(`ALTER TABLE issues ADD CONSTRAINT issues_status_check CHECK (status IN ('To Do','In Progress','In Review','Done','Blocked'))`);
-    } catch(e) { console.error('Migration warning (issues status):', e.message); }
-
-    // Migration: ensure the "Combination" custom field exists on the
-    // Product_Team board as a multi-select with the real source->destination
-    // options. Creates it automatically on startup instead of requiring
-    // someone to click through Settings > Custom Fields — safe to run on
-    // every restart. Self-corrects two earlier mistakes exactly once each:
-    // the original placeholder options, and field_type being a single
-    // 'select' instead of 'multi_select'. Any other existing options (e.g.
-    // a manual edit) are left alone.
-    try {
-      const comboModule = require('./combination-options');
-      const comboPayload = comboModule.buildCombinationOptionsPayload
-        ? comboModule.buildCombinationOptionsPayload()
-        : { v: 2, groups: comboModule.COMBINATION_GROUPS, flat: comboModule };
-      const combSpaces = await q(
-        "SELECT id FROM spaces WHERE name=$1 AND (is_archived=false OR is_archived IS NULL)",
-        ['Product_Team']
-      );
-      for (const sp of combSpaces.rows) {
-        const combField = (await q(
-          'SELECT id, options, field_type FROM custom_fields WHERE space_id=$1 AND LOWER(name)=LOWER($2)',
-          [sp.id, 'Combination']
-        )).rows[0];
-        const payloadJson = JSON.stringify(comboPayload);
-        if (!combField) {
-          await q(
-            `INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position,show_in)
-             VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`,
-            [uid(), sp.id, 'Combination', 'select', payloadJson, false, 0, ['drawer', 'create']]
-          );
-          console.log('✅ Created "Combination" field on Product_Team (grouped by product type)');
-        } else {
-          let existing = combField.options;
-          if (typeof existing === 'string') {
-            try { existing = JSON.parse(existing); } catch (_) { existing = null; }
-          }
-          const needsUpgrade = !existing || existing.v !== 2 || !existing.groups;
-          if (needsUpgrade) {
-            await q(
-              'UPDATE custom_fields SET options=$2::jsonb, field_type=$3, show_in=$4::text[] WHERE id=$1',
-              [combField.id, payloadJson, 'select', ['drawer', 'create']]
-            );
-            console.log('✅ Upgraded Combination field to product-type groups on Product_Team');
-          }
-        }
-      }
-    } catch(e) { console.error('Migration warning (Combination field):', e.message); }
-
-    // Migration: issue_favorites (starred tickets per user)
-    try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS issue_favorites (
-        user_id VARCHAR REFERENCES users(id) ON DELETE CASCADE,
-        issue_id VARCHAR REFERENCES issues(id) ON DELETE CASCADE,
-        created_at TIMESTAMP DEFAULT NOW(),
-        PRIMARY KEY (user_id, issue_id)
-      )`);
-    } catch(e) { console.error('Migration warning (issue_favorites):', e.message); }
-
-    // Migration: create issue_history table
-    try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS issue_history (
-        id VARCHAR PRIMARY KEY,
-        issue_id VARCHAR REFERENCES issues(id) ON DELETE CASCADE,
-        user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL,
-        field_name VARCHAR NOT NULL,
-        old_value TEXT,
-        new_value TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      )`);
-    } catch(e) { console.error('Migration warning (issue_history):', e.message); }
-
-    // Migration: add worklogs created_at if missing
-    try {
-      await pool.query(`ALTER TABLE worklogs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
-    } catch(e) {}
-
-    // Migration: create issue_attachments table
-    try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS issue_attachments (
-        id VARCHAR PRIMARY KEY,
-        issue_id VARCHAR REFERENCES issues(id) ON DELETE CASCADE,
-        filename VARCHAR NOT NULL,
-        original_name VARCHAR NOT NULL,
-        size BIGINT DEFAULT 0,
-        mime_type VARCHAR,
-        uploaded_by VARCHAR REFERENCES users(id) ON DELETE SET NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      )`);
-    } catch(e) { console.error('Migration warning (issue_attachments):', e.message); }
-
-    // Migration: add email_settings column to organizations
-    try {
-      await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS email_settings JSONB`);
-    } catch(e) { console.error('Migration warning (email_settings):', e.message); }
-
-    // Migration: replace 'admin' with 'site_admin' in space_members role constraint
-    try {
-      await pool.query(`ALTER TABLE space_members DROP CONSTRAINT IF EXISTS space_members_role_check`);
-      await pool.query(`UPDATE space_members SET role='site_admin' WHERE role='admin'`);
-      await pool.query(`ALTER TABLE space_members ADD CONSTRAINT space_members_role_check CHECK (role IN ('owner','site_admin','manager','member','viewer'))`);
-    } catch(e) { console.error('Migration warning (space_members role):', e.message); }
-
-    // Migration: create roadmap_items table
-    try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS roadmap_items (
-        id VARCHAR PRIMARY KEY,
-        title VARCHAR NOT NULL,
-        description TEXT,
-        status VARCHAR DEFAULT 'planned',
-        start_date DATE,
-        end_date DATE,
-        space_id VARCHAR REFERENCES spaces(id) ON DELETE SET NULL,
-        issue_id VARCHAR REFERENCES issues(id) ON DELETE SET NULL,
-        color VARCHAR DEFAULT '#4d90e0',
-        priority VARCHAR DEFAULT 'medium',
-        assigned_to VARCHAR REFERENCES users(id) ON DELETE SET NULL,
-        created_by VARCHAR REFERENCES users(id) ON DELETE SET NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )`);
-    } catch(e) { console.error('Migration warning (roadmap_items):', e.message); }
-
-    // Migration: add group_name + category to roadmap_items
-    try {
-      await pool.query(`ALTER TABLE roadmap_items ADD COLUMN IF NOT EXISTS group_name VARCHAR DEFAULT 'General'`);
-      await pool.query(`ALTER TABLE roadmap_items ADD COLUMN IF NOT EXISTS category  VARCHAR DEFAULT 'Items'`);
-      await pool.query(`ALTER TABLE roadmap_items ADD COLUMN IF NOT EXISTS milestone BOOLEAN DEFAULT FALSE`);
-    } catch(e) { console.error('Migration warning (roadmap group/category):', e.message); }
-
-    // Migration: create roadmap_colors table
-    try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS roadmap_colors (
-        color_key  VARCHAR NOT NULL,
-        color      VARCHAR NOT NULL,
-        created_by VARCHAR REFERENCES users(id) ON DELETE CASCADE,
-        PRIMARY KEY (color_key, created_by)
-      )`);
-    } catch(e) { console.error('Migration warning (roadmap_colors):', e.message); }
-
-    // Migration: rename issues.points → story_points to match UI field name
-    try {
-      await pool.query(`ALTER TABLE issues RENAME COLUMN points TO story_points`);
-    } catch(e) { /* already renamed or doesn't exist */ }
-
-    // Migration: add story_points column if it still doesn't exist (fresh installs)
-    try {
-      await pool.query(`ALTER TABLE issues ADD COLUMN IF NOT EXISTS story_points INTEGER`);
-    } catch(e) {}
-
-    // Migration: add theme preference to users
-    try {
-      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR DEFAULT 'dark'`);
-    } catch(e) { console.error('Migration warning (user theme):', e.message); }
-
-    // Migration: add fix_description to issues
-    try {
-      await pool.query(`ALTER TABLE issues ADD COLUMN IF NOT EXISTS fix_description TEXT`);
-    } catch(e) { console.error('Migration warning (fix_description):', e.message); }
-
-    // Migration: add start_date, due_date, original_estimate to issues
-    try {
-      await pool.query(`ALTER TABLE issues ADD COLUMN IF NOT EXISTS start_date DATE`);
-      await pool.query(`ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE`);
-      await pool.query(`ALTER TABLE issues ADD COLUMN IF NOT EXISTS original_estimate INTEGER`);
-    } catch(e) { console.error('Migration warning (issues dates/estimate):', e.message); }
-
-    // Migration: create notifications table
-    try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS notifications (
-        id         VARCHAR PRIMARY KEY,
-        user_id    VARCHAR REFERENCES users(id) ON DELETE CASCADE,
-        space_id   VARCHAR REFERENCES spaces(id) ON DELETE SET NULL,
-        type       VARCHAR NOT NULL,
-        title      VARCHAR NOT NULL,
-        body       TEXT,
-        link       VARCHAR,
-        is_read    BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT NOW()
-      )`);
-    } catch(e) { console.error('Migration warning (notifications):', e.message); }
-
-    // Migration: normalize legacy notification links (/spaces/KEY/issues/ISSUE-1 → /?issue=ISSUE-1)
-    try {
-      await pool.query(`
-        UPDATE notifications
-        SET link = '/?issue=' || UPPER(substring(link from '([A-Za-z][A-Za-z0-9_]*-[0-9]+)$'))
-        WHERE link ~ '/issues/[A-Za-z][A-Za-z0-9_]*-[0-9]+$'
-          AND link NOT LIKE '/?issue=%'
-      `);
-    } catch(e) { console.error('Migration warning (notification links):', e.message); }
-
-    // Migration: create file_storage table for DB-backed image uploads
-    try {
-      await pool.query(`CREATE TABLE IF NOT EXISTS file_storage (
-        id VARCHAR PRIMARY KEY,
-        original_name VARCHAR NOT NULL,
-        mime_type VARCHAR NOT NULL,
-        size INTEGER,
-        data BYTEA NOT NULL,
-        uploaded_by VARCHAR REFERENCES users(id) ON DELETE SET NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      )`);
-    } catch(e) { console.error('Migration warning (file_storage):', e.message); }
-
-    // Migration: add developer/QA assignment lists to sprints
-    try {
-      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS developer_ids TEXT[] DEFAULT '{}'`);
-      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS qa_ids TEXT[] DEFAULT '{}'`);
-    } catch(e) { console.error('Migration warning (sprint developer/qa):', e.message); }
-
-    // Migration: add public holiday dates (within the sprint's own date
-    // range) to sprints
-    try {
-      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS public_holidays TEXT[] DEFAULT '{}'`);
-    } catch(e) { console.error('Migration warning (sprint public_holidays):', e.message); }
-
-    // Fix duplicate issue keys on startup
-    try {
-      const dupRows = await q(`
-        SELECT i.id, i.key, i.space_id, s.key AS space_key
-        FROM issues i
-        JOIN spaces s ON s.id = i.space_id
-        WHERE i.key IN (
-          SELECT key FROM issues WHERE deleted_at IS NULL GROUP BY key HAVING COUNT(*) > 1
-        ) AND i.deleted_at IS NULL
-        ORDER BY i.space_id, i.key, i.created_at ASC
-      `);
-      if (dupRows.rows.length > 0) {
-        console.log('[startup] Found ' + dupRows.rows.length + ' issues with duplicate keys — fixing...');
-        // Group by space
-        const bySpace = {};
-        dupRows.rows.forEach(function(r) {
-          if (!bySpace[r.space_id]) bySpace[r.space_id] = [];
-          bySpace[r.space_id].push(r);
-        });
-        for (const spaceId of Object.keys(bySpace)) {
-          const maxRow = (await q(
-            "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1",
-            [spaceId]
-          )).rows[0];
-          let counter = maxRow.mx;
-          const spaceKey = bySpace[spaceId][0].space_key;
-          // Skip the first occurrence of each duplicate key (keep it), renumber the rest
-          const seen = new Set();
-          for (const row of bySpace[spaceId]) {
-            if (!seen.has(row.key)) { seen.add(row.key); continue; }
-            counter++;
-            const newKey = spaceKey + '-' + counter;
-            await q('UPDATE issues SET key=$1 WHERE id=$2', [newKey, row.id]);
-            console.log('[startup] Renamed ' + row.key + ' → ' + newKey + ' (id=' + row.id + ')');
-          }
-        }
-        console.log('[startup] Duplicate key fix complete.');
-      }
-    } catch(e) { console.error('[startup] Duplicate key fix error:', e.message); }
+    await validateSchemaReadOnly(pool);
+    await logProductTeamCombinationStatus(pool, q);
+    await logDuplicateKeyWarning(pool, q);
 
     console.log('==================================================');
     console.log('  SprintBoard Server');
-    console.log('  Database connected');
+    console.log('  Database connected (schema read-only at boot)');
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log('  Listening on http://localhost:' + PORT);

@@ -1,5 +1,3 @@
-window._isMemberOnly = (function() { try { const u = JSON.parse(localStorage.getItem("sb-user")); return u && u.role === "member"; } catch(e) { return false; } })();
-
 // ═══════════════════════════════════════════════════════════
 // SPRINTBOARD ENTERPRISE — SPA CORE LOGIC
 // ═══════════════════════════════════════════════════════════
@@ -45,6 +43,215 @@ const esc = (str) => {
   d.textContent = String(str);
   return d.innerHTML;
 };
+
+function stripHtmlForDisplay(html) {
+  if (!html) return '';
+  var s = String(html);
+  if (!/<[a-z][\s\S]*>/i.test(s)) return s;
+  var d = document.createElement('div');
+  d.innerHTML = s;
+  return (d.textContent || d.innerText || '').replace(/\s+/g, ' ').trim();
+}
+
+function truncateForHistory(text, max) {
+  max = max || 120;
+  if (!text) return text;
+  var s = String(text);
+  if (s.length <= max) return s;
+  return s.substring(0, max).trim() + '…';
+}
+
+function htmlFieldIsEmpty(html) {
+  return !stripHtmlForDisplay(html);
+}
+
+function normalizeRichTextForCompare(html) {
+  if (!html) return '';
+  var d = document.createElement('div');
+  d.innerHTML = String(html);
+  d.querySelectorAll('br').forEach(function (br) {
+    br.replaceWith(document.createTextNode('\n'));
+  });
+  ['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote'].forEach(function (tag) {
+    d.querySelectorAll(tag).forEach(function (el) {
+      el.appendChild(document.createTextNode('\n'));
+    });
+  });
+  var text = (d.textContent || d.innerText || '').replace(/\u00a0/g, ' ').replace(/\r/g, '');
+  var lines = text.split('\n').map(function (line) {
+    return line.replace(/\s+/g, ' ').trim();
+  });
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  while (lines.length && !lines[0]) lines.shift();
+  return lines.join('\n');
+}
+
+function richTextMediaSignature(html) {
+  if (!html) return '';
+  var d = document.createElement('div');
+  d.innerHTML = String(html);
+  var parts = [];
+  d.querySelectorAll('img[src]').forEach(function (img) {
+    parts.push('img:' + (img.getAttribute('src') || ''));
+  });
+  d.querySelectorAll('a[href]').forEach(function (a) {
+    parts.push('a:' + (a.getAttribute('href') || '') + '|' + (a.textContent || '').trim());
+  });
+  return parts.join(';');
+}
+
+function richTextHasMeaningfulChange(originalHtml, currentHtml) {
+  if (normalizeRichTextForCompare(originalHtml) !== normalizeRichTextForCompare(currentHtml)) return true;
+  return richTextMediaSignature(originalHtml) !== richTextMediaSignature(currentHtml);
+}
+
+function updateDrawerDescEditorState(editorId, originalHtml) {
+  var map = {
+    drawerDesc: { btns: 'drawerDescBtns', save: 'drawerDescSave' },
+    drawerFixDesc: { btns: 'drawerFixDescBtns', save: 'drawerFixDescSave' }
+  };
+  var cfg = map[editorId];
+  if (!cfg) return;
+  var el = $(editorId);
+  var btns = $(cfg.btns);
+  var saveBtn = $(cfg.save);
+  if (!el || !btns || !saveBtn) return;
+  var changed = richTextHasMeaningfulChange(originalHtml || '', el.innerHTML);
+  btns.style.display = 'flex';
+  saveBtn.disabled = !changed;
+  saveBtn.style.opacity = changed ? '1' : '0.45';
+  saveBtn.style.cursor = changed ? 'pointer' : 'not-allowed';
+}
+
+function markDrawerDescDirty(editorId) {
+  var origKey = editorId === 'drawerDesc' ? '_drawerDescOriginalHtml' : '_drawerFixDescOriginalHtml';
+  updateDrawerDescEditorState(editorId, window[origKey] || '');
+}
+
+function getPtComboTypesNeedingCombination() {
+  return (typeof window !== 'undefined' && window.PRODUCT_TYPES_WITH_COMBINATIONS)
+    || ['Message', 'Email', 'Content'];
+}
+
+function validateIssueForDone(issueOrId) {
+  var issue = (issueOrId && typeof issueOrId === 'object') ? issueOrId : null;
+  var issueId = issue ? issue.id : issueOrId;
+  var missing = [];
+  var useDrawer = issueId && S.drawerIssueId === issueId && $('drawerDesc') && $('drawerFixDesc');
+
+  var desc = useDrawer ? $('drawerDesc').innerHTML : (issue && issue.description);
+  var fixDesc = useDrawer ? $('drawerFixDesc').innerHTML : (issue && issue.fix_description);
+  if (htmlFieldIsEmpty(desc)) missing.push('Description');
+  if (htmlFieldIsEmpty(fixDesc)) missing.push('Fix Description');
+
+  var sprintVal = useDrawer && $('drawerSprint') ? $('drawerSprint').value : (issue && issue.sprint_id);
+  if (!sprintVal) missing.push('Sprint');
+
+  var teamVal = useDrawer && $('drawerTeam') ? $('drawerTeam').value : (issue && issue.team);
+  if (!teamVal) missing.push('Team');
+
+  var assigneeVal = useDrawer && $('drawerAssignee') ? $('drawerAssignee').value : (issue && issue.assignee_id);
+  if (!assigneeVal) missing.push('Assignee');
+
+  var type = ((issue && issue.type) || (window._drawerIssueData && window._drawerIssueData.type) || 'task').toLowerCase();
+  if (['story', 'task', 'bug'].indexOf(type) >= 0) {
+    var pts = useDrawer && $('drawerPoints') ? $('drawerPoints').value : (issue && issue.story_points);
+    if (pts === '' || pts === null || pts === undefined || Number(pts) <= 0) missing.push('Story Points');
+  }
+
+  var ptId = getProductTeamSpaceId();
+  var spaceId = (issue && issue.space_id) || (window._drawerIssueData && window._drawerIssueData.space_id) || S.currentSpace;
+  if (ptId && String(spaceId) === String(ptId)) {
+    var comboVal = null;
+    if (!useDrawer && issue) {
+      var meta = findCombinationFieldMeta(spaceId);
+      if (meta && meta.id) {
+        var cfv = (S.data.issue_field_values || []).find(function (v) {
+          return String(v.issue_id) === String(issue.id) && String(v.field_id) === String(meta.id);
+        });
+        comboVal = cfv ? cfv.value : null;
+      }
+    }
+    var sel = useDrawer
+      ? (_drawerPtComboSel || readPtComboSelectionFromContainer($('drawerCombinationField')))
+      : parsePtComboSelection(issue && issue.product_type, comboVal);
+    if (!sel || !sel.productTypes || !sel.productTypes.length) {
+      missing.push('Product Type');
+    } else {
+      var needsCombo = sel.productTypes.some(function (t) {
+        return getPtComboTypesNeedingCombination().indexOf(t) >= 0;
+      });
+      if (needsCombo && (!sel.combinations || !sel.combinations.length)) missing.push('Combination');
+    }
+  }
+
+  return missing;
+}
+
+function canTransitionIssueToDone(issueOrId, previousStatus) {
+  var missing = validateIssueForDone(issueOrId);
+  if (!missing.length) return true;
+  toast('Fill required fields before marking Done: ' + missing.join(', '), 'error');
+  if (S.drawerIssueId && $('drawerStatus')) {
+    var revert = previousStatus
+      || (window._drawerIssueData && window._drawerIssueData.status)
+      || 'To Do';
+    $('drawerStatus').value = revert;
+    updateStatusBtn(revert);
+  }
+  return false;
+}
+
+function isMentionBoundaryChar(ch) {
+  return !ch || ch === ' ' || ch === '\n' || ch === '\r' || ch === '\t' || ch === '\u00a0';
+}
+
+function findActiveMentionAt(textBefore) {
+  if (!textBefore) return null;
+  for (var i = textBefore.length - 1; i >= 0; i--) {
+    if (textBefore[i] !== '@') continue;
+    if (i > 0 && !isMentionBoundaryChar(textBefore[i - 1])) continue;
+    var query = textBefore.substring(i + 1);
+    if (/[\n\r]/.test(query)) continue;
+    if (query.split(/\s+/).filter(Boolean).length > 4) continue;
+    return { atIdx: i, query: query };
+  }
+  return null;
+}
+
+function collectMentionUserIds(commentEl, plainBody) {
+  var ids = [];
+  if (commentEl && commentEl.querySelectorAll) {
+    commentEl.querySelectorAll('.mention-chip[data-user-id]').forEach(function (chip) {
+      var uid = chip.getAttribute('data-user-id');
+      if (uid && ids.indexOf(uid) < 0) ids.push(uid);
+    });
+  }
+  if (plainBody) {
+    var members = (window._drawerMembers || S.data.users || []).slice().sort(function (a, b) {
+      return (b.name || '').length - (a.name || '').length;
+    });
+    members.forEach(function (m) {
+      if (!m.name || !m.id) return;
+      if (plainBody.indexOf('@' + m.name) !== -1 && ids.indexOf(m.id) < 0) ids.push(m.id);
+    });
+  }
+  return ids;
+}
+
+function highlightMentionsInCommentBody(body) {
+  var html = esc(body);
+  var members = (window._drawerMembers || S.data.users || []).slice().sort(function (a, b) {
+    return (b.name || '').length - (a.name || '').length;
+  });
+  members.forEach(function (m) {
+    if (!m.name) return;
+    var escapedName = m.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    html = html.replace(new RegExp('@' + escapedName, 'g'),
+      '<span style="color:#0052cc;font-weight:600">@' + esc(m.name) + '</span>');
+  });
+  return html;
+}
 
 function fmtMins(mins) {
   if (!mins || mins <= 0) return '0h';
@@ -121,15 +328,16 @@ function parseEstimate(str) {
 // ═══════════════════════════════════════════════════════════
 function getAuthToken() { return localStorage.getItem('sb-token') || ''; }
 
-async function api(url, method, body) {
+async function api(url, method, body, opts) {
+  opts = opts || {};
   method = method || 'GET';
   try {
     var token = getAuthToken();
     var headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = 'Bearer ' + token;
-    var opts = { method: method, headers: headers };
-    if (body !== undefined && body !== null) opts.body = JSON.stringify(body);
-    var res = await fetch(url, opts);
+    var fetchOpts = { method: method, headers: headers };
+    if (body !== undefined && body !== null) fetchOpts.body = JSON.stringify(body);
+    var res = await fetch(url, fetchOpts);
     if (res.status === 401) {
       localStorage.removeItem('sb-token');
       localStorage.removeItem('sb-user');
@@ -145,7 +353,7 @@ async function api(url, method, body) {
     return await res.json();
   } catch (e) {
     if (e.message && e.message.includes('redirect')) return;
-    toast(e.message || 'API request failed', 'error');
+    if (!opts.silent) toast(e.message || 'API request failed', 'error');
     throw e;
   }
 }
@@ -224,7 +432,7 @@ function getRecentlyViewedIssues(withinMs) {
   list.sort(function (a, b) {
     return new Date(b.viewedAt || 0) - new Date(a.viewedAt || 0);
   });
-  return list.map(mergeRecentViewedEntry);
+  return list.map(mergeRecentViewedEntry).filter(function (i) { return isIssueInMySpaces(i); });
 }
 
 async function enrichRecentlyViewedIssues() {
@@ -666,7 +874,32 @@ function getSpaceMembers(spaceId) {
   return recs.map(function (m) { return findUser(m.user_id); }).filter(Boolean);
 }
 
+function getMyVisibleSpaceIds() {
+  if (canCreateSpace()) {
+    return (S.data.spaces || []).filter(function (s) { return !s.is_archived; }).map(function (s) { return s.id; });
+  }
+  return (S.data.space_members || [])
+    .filter(function (m) { return m.user_id === S.currentUser; })
+    .map(function (m) { return m.space_id; });
+}
+
+function isIssueInMySpaces(issue) {
+  if (!issue || !issue.space_id) return false;
+  if (canCreateSpace()) return true;
+  return getMyVisibleSpaceIds().indexOf(issue.space_id) >= 0;
+}
+
+function getVisibleIssues() {
+  var ids = getMyVisibleSpaceIds();
+  if (canCreateSpace()) return S.data.issues || [];
+  return (S.data.issues || []).filter(function (i) { return ids.indexOf(i.space_id) >= 0; });
+}
+
 function getSpaceIssues(spaceId) {
+  if (!canCreateSpace()) {
+    var mine = getMyVisibleSpaceIds();
+    if (mine.indexOf(spaceId) < 0) return [];
+  }
   return (S.data.issues || []).filter(function (i) { return i.space_id == spaceId; });
 }
 
@@ -900,13 +1133,19 @@ async function init() {
             if (savedNav.yourWorkTab) S.yourWorkTab = savedNav.yourWorkTab;
             if (savedNav.view === 'space' && savedNav.spaceId && getSpace(savedNav.spaceId)) {
               var wantTab = savedNav.tab || 'summary';
-              if ((wantTab === 'reports' || wantTab === 'space-settings') && !isSpaceOwner(savedNav.spaceId)) {
+              if ((wantTab === 'reports' || wantTab === 'space-settings') && !canManageSpace(savedNav.spaceId)) {
                 wantTab = 'summary';
               }
               navigateToSpace(savedNav.spaceId, wantTab, { replaceUrl: true });
               restoredNav = true;
-            } else if (['home','yourwork','spaces','worklog-report','product-roadmap','user-management','settings','global-reports'].indexOf(savedNav.view) !== -1) {
-              navigateTo(savedNav.view, { replaceUrl: true });
+            } else if (['home','yourwork','spaces','worklog-report','product-roadmap','settings','global-reports'].indexOf(savedNav.view) !== -1) {
+              if (savedNav.view === 'global-reports' && !canViewReports()) {
+                navigateTo('home', { replaceUrl: true });
+              } else if ((savedNav.view === 'worklog-report' || savedNav.view === 'product-roadmap') && !isOrgAdminUser()) {
+                navigateTo('home', { replaceUrl: true });
+              } else {
+                navigateTo(savedNav.view, { replaceUrl: true });
+              }
               restoredNav = true;
             }
           }
@@ -1032,12 +1271,63 @@ function renderTopbarProfile(user) {
   };
 }
 
+function formatOrgRoleLabel(role) {
+  var r = (role || 'member').toLowerCase();
+  if (r === 'owner' || r === 'admin') return 'Admin';
+  return 'Member';
+}
+
+function normalizeSpaceRole(role) {
+  if (!role) return 'member';
+  var r = String(role).toLowerCase();
+  if (r === 'site_admin' || r === 'manager' || r === 'owner' || r === 'admin') return 'site_admin';
+  return 'member';
+}
+
+function formatSpaceRoleLabel(role) {
+  return normalizeSpaceRole(role) === 'site_admin' ? 'Space Admin' : 'Member';
+}
+
+function isOrgAdminUser(user) {
+  user = user || S.currentUserObj || {};
+  var r = (user.role || 'member').toLowerCase();
+  return r === 'owner' || r === 'admin';
+}
+
+function orgRoleBadgeHtml(role, opts) {
+  opts = opts || {};
+  var r = (role || 'member').toLowerCase();
+  var label = formatOrgRoleLabel(r);
+  var isAdmin = r === 'owner' || r === 'admin';
+  var style = 'font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:3px 10px;border-radius:20px;display:inline-block';
+  if (opts.compact) style += ';font-size:9px;padding:2px 8px';
+  if (opts.dark) {
+    if (isAdmin) style += ';background:rgba(219,234,254,0.18);color:#93c5fd;border:1px solid rgba(147,197,253,0.35)';
+    else style += ';background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.2)';
+  } else if (isAdmin) style += ';background:#dbeafe;color:#1e40af;border:1px solid #93c5fd';
+  else style += ';background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe';
+  return '<span style="' + style + '" title="Organization role">' + esc(label) + '</span>';
+}
+
+function spaceRoleBadgeHtml(role) {
+  if (!role) return '';
+  var label = formatSpaceRoleLabel(role);
+  var isAdmin = normalizeSpaceRole(role) === 'site_admin';
+  var style = 'font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:3px 10px;border-radius:20px;display:inline-block;';
+  style += isAdmin
+    ? 'background:#ecfdf5;color:#047857;border:1px solid #6ee7b7'
+    : 'background:#f1f5f9;color:#475569;border:1px solid #cbd5e1';
+  return '<span style="' + style + '" title="Space role in current space">' + esc(label) + '</span>';
+}
+
 function openProfileSettingsModal() {
   var user = S.currentUserObj || {};
   var nameParts = (user.name || '').split(' ');
   var firstName = nameParts[0] || '';
   var lastName = nameParts.slice(1).join(' ') || '';
   var color = user.color || '#0129AC';
+  var spaceRole = S.currentSpace ? getMySpaceRole(S.currentSpace) : null;
+  var currentSpace = S.currentSpace && (S.data.spaces || []).find(function (s) { return s.id === S.currentSpace; });
   var av = user.avatar_url
     ? '<img src="' + esc(user.avatar_url) + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover">'
     : '<div style="width:64px;height:64px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">' + initials(user.name) + '</div>';
@@ -1061,7 +1351,11 @@ function openProfileSettingsModal() {
         '<div>' +
           '<div style="font-size:14px;font-weight:600;color:#0f172a">' + esc(user.name || '') + '</div>' +
           '<div style="font-size:12px;color:#64748b;margin-top:2px">' + esc(user.email || '') + '</div>' +
-          '<div style="margin-top:6px"><span style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:20px">' + cap(user.role || 'member') + '</span></div>' +
+          '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">' +
+            orgRoleBadgeHtml(user.role) +
+            (spaceRole ? spaceRoleBadgeHtml(spaceRole) : '') +
+            (currentSpace ? '<span style="font-size:10px;color:#94a3b8">· ' + esc(currentSpace.name) + '</span>' : '') +
+          '</div>' +
         '</div>' +
       '</div>' +
       // Form
@@ -1078,7 +1372,8 @@ function openProfileSettingsModal() {
         '</div>' +
         '<div style="margin-bottom:20px">' +
           '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">Email Address</label>' +
-          '<input id="_profEmail" type="email" value="' + esc(user.email || '') + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+          '<div style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#64748b;background:#f8fafc;box-sizing:border-box;cursor:default;user-select:all">' + esc(user.email || '') + '</div>' +
+          '<div style="font-size:11px;color:#94a3b8;margin-top:5px">Email is managed by your organization and cannot be changed here.</div>' +
         '</div>' +
         '<div style="display:flex;gap:10px;justify-content:flex-end">' +
           '<button id="_profileCancelBtn" style="padding:9px 20px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;color:#64748b;font-size:13px;font-weight:600;cursor:pointer">Cancel</button>' +
@@ -1097,18 +1392,17 @@ function openProfileSettingsModal() {
   overlay.querySelector('#_profileSaveBtn').onclick = async function() {
     var fn = overlay.querySelector('#_profFirstName').value.trim();
     var ln = overlay.querySelector('#_profLastName').value.trim();
-    var em = overlay.querySelector('#_profEmail').value.trim();
     var fullName = (fn + ' ' + ln).trim();
     if (!fullName) { toast('Name is required', 'error'); return; }
     var saveBtn = overlay.querySelector('#_profileSaveBtn');
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
-      var updated = await api('/api/users/' + user.id, 'PUT', { name: fullName, email: em });
+      var updated = await api('/api/users/' + user.id, 'PUT', { name: fullName });
       // Update local state
-      if (S.currentUserObj) { S.currentUserObj.name = updated.name; S.currentUserObj.email = updated.email; }
+      if (S.currentUserObj) { S.currentUserObj.name = updated.name; }
       if (S.data && S.data.users) {
         var idx = S.data.users.findIndex(function(u){ return u.id === user.id; });
-        if (idx !== -1) { S.data.users[idx].name = updated.name; S.data.users[idx].email = updated.email; }
+        if (idx !== -1) { S.data.users[idx].name = updated.name; }
       }
       renderTopbarProfile(S.currentUserObj);
       close();
@@ -1128,7 +1422,7 @@ function renderUserFooter(user) {
   var av = user.avatar_url
     ? '<img src="' + esc(user.avatar_url) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.2)" />'
     : '<div style="width:36px;height:36px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;border:2px solid rgba(255,255,255,0.2);flex-shrink:0">' + initials(user.name) + '</div>';
-  var roleBadge = '<span style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);padding:1px 6px;border-radius:10px">' + cap(user.role || 'member') + '</span>';
+  var roleBadge = orgRoleBadgeHtml(user.role, { compact: true, dark: true });
   footer.innerHTML =
     '<div style="border-top:1px solid rgba(255,255,255,0.08);padding:10px 12px 8px;display:flex;align-items:center;gap:10px;min-width:0">' +
       av +
@@ -1185,6 +1479,8 @@ var SPACE_TAB_TO_SLUG = {
   sprint: 'sprint',
   reports: 'reports',
   allwork: 'all-work',
+  filters: 'filters',
+  calendar: 'calendar',
   'space-settings': 'settings'
 };
 var SPACE_SLUG_TO_TAB = {
@@ -1193,6 +1489,8 @@ var SPACE_SLUG_TO_TAB = {
   sprint: 'sprint',
   reports: 'reports',
   'all-work': 'allwork',
+  filters: 'filters',
+  calendar: 'calendar',
   settings: 'space-settings'
 };
 
@@ -1200,9 +1498,11 @@ var SPACE_SUBNAV_ITEMS = [
   { t: 'summary', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>', l: 'Summary' },
   { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog' },
   { t: 'sprint', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', l: 'Active Sprint' },
-  { t: 'reports', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>', l: 'Reports' },
   { t: 'allwork', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'All Work' },
-  { t: 'space-settings', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', l: 'Settings' }
+  { t: 'filters', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>', l: 'Saved Filters' },
+  { t: 'calendar', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', l: 'Calendar' },
+  { t: 'reports', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>', l: 'Reports', spaceAdminOnly: true },
+  { t: 'space-settings', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', l: 'Settings', spaceAdminOnly: true }
 ];
 
 function getSpaceByKey(key) {
@@ -1247,7 +1547,10 @@ function collapseSpaceSubnav() {
 }
 
 function buildSpaceSubnavHtml(spaceId, tab) {
-  return SPACE_SUBNAV_ITEMS.map(function (x) {
+  var showAdminItems = canManageSpace(spaceId);
+  return SPACE_SUBNAV_ITEMS.filter(function (x) {
+    return !x.spaceAdminOnly || showAdminItems;
+  }).map(function (x) {
     var href = spacePath(spaceId, x.t);
     return '<a class="nav-item space-subitem' + (x.t === tab ? ' active' : '') + '" href="' + href + '" data-tab="' + x.t + '" data-space-id="' + spaceId + '"><span class="nav-icon">' + x.i + '</span> ' + x.l + '</a>';
   }).join('');
@@ -1350,8 +1653,8 @@ function saveNavState() {
 function navigateTo(view, opts) {
   opts = opts || {};
   document.body.classList.remove('settings-active');
-  if (view === 'global-reports' && !isSpaceOwner(S.currentSpace)) {
-    toast('Only owners can access Reports', 'error');
+  if (view === 'global-reports' && !canViewReports()) {
+    toast('Only admins and space admins can access Reports', 'error');
     return;
   }
   _exitIssuePage();
@@ -1387,7 +1690,6 @@ function navigateTo(view, opts) {
   else if (view === 'spaces') renderSpacesView();
   else if (view === 'worklog-report') renderWorklogReport();
   else if (view === 'product-roadmap') renderProductRoadmap();
-  else if (view === 'user-management') renderUserManagement();
   else if (view === 'settings') { document.body.classList.add('settings-active'); renderAdminSettings('org-general'); }
   else if (view === 'global-reports') renderGlobalReports();
 }
@@ -1477,8 +1779,8 @@ window.navigateToSpace = navigateToSpace;
 
 function renderTab(tab, opts) {
   opts = opts || {};
-  if (!isSpaceOwner(S.currentSpace) && (tab === 'reports' || tab === 'space-settings')) {
-    toast('Only owners can access this section', 'error');
+  if (!canManageSpace(S.currentSpace) && (tab === 'reports' || tab === 'space-settings')) {
+    toast('Only admins and space admins can access this section', 'error');
     return;
   }
   _exitIssuePage();
@@ -1523,8 +1825,10 @@ function renderTab(tab, opts) {
       renderAllWork();
     })(); break;
     case 'filters': renderFilters(); break;
+    case 'calendar': renderCalendar(); break;
     case 'space-settings': renderSpaceSettings(); break;
   }
+  updateRoleBasedUI();
 }
 
 function updateBreadcrumb(items) {
@@ -1582,28 +1886,26 @@ async function refreshAfterIssueChange() {
 // SIDEBAR
 // ═══════════════════════════════════════════════════════════
 function renderSidebar() {
-  var role = (S.currentUserObj || {}).role;
-  var isOwner = role === 'owner';
-  var isOwnerOrAdmin = role === 'owner' || role === 'admin';
+  var isOrgAdmin = isOrgAdminUser();
 
-  // Show/hide the + new space button (owner only)
+  // Only org admins can create spaces
   var newSpaceBtn = $('newSpaceBtn');
-  if (newSpaceBtn) newSpaceBtn.style.display = isOwner ? '' : 'none';
+  if (newSpaceBtn) newSpaceBtn.style.display = canCreateSpace() ? '' : 'none';
 
-  // Reports and Settings: visible to global owner OR space owner
-  var effectiveOwner = isOwner || isSpaceOwner(S.currentSpace);
-  var ownerOnlyItems = document.querySelectorAll('[data-tab="reports"], [data-tab="space-settings"], [data-view="global-reports"]');
-  ownerOnlyItems.forEach(function(el) { el.style.display = effectiveOwner ? '' : 'none'; });
+  // Global Reports — org admin or space admin on any space
+  var showGlobalReports = canViewReports();
+  var globalReportsEl = document.querySelector('[data-view="global-reports"]');
+  if (globalReportsEl) globalReportsEl.style.display = showGlobalReports ? '' : 'none';
 
-  // Work Log and Product Roadmap visible to owner and admin only (hidden for members)
-  var memberHiddenItems = document.querySelectorAll('[data-view="worklog-report"], [data-view="product-roadmap"]');
-  memberHiddenItems.forEach(function(el) { el.style.display = isOwnerOrAdmin ? '' : 'none'; });
+  // Work Log and Product Roadmap — org admin only
+  var orgOnlyItems = document.querySelectorAll('[data-view="worklog-report"], [data-view="product-roadmap"]');
+  orgOnlyItems.forEach(function(el) { el.style.display = isOrgAdmin ? '' : 'none'; });
 
   // Starred issues (tickets)
   var favIssueIds = (S.data.issue_favorites || []).map(function (f) { return f.issue_id; });
   var favIssues = favIssueIds.map(function (id) {
     return (S.data.issues || []).find(function (i) { return i.id == id; });
-  }).filter(Boolean);
+  }).filter(function (i) { return i && isIssueInMySpaces(i); });
   var favIssuesEl = $('favIssues');
   if (favIssuesEl) {
     favIssuesEl.innerHTML = favIssues.length
@@ -1646,7 +1948,7 @@ function renderSidebar() {
 
   // All spaces — members only see spaces they are assigned to in DB
   var allSpaces = (S.data.spaces || []).filter(function (s) { return !s.is_archived; });
-  var spaces = isOwnerOrAdmin ? allSpaces : allSpaces.filter(function(s) {
+  var spaces = isOrgAdmin ? allSpaces : allSpaces.filter(function(s) {
     return (S.data.space_members || []).some(function(m) {
       return m.space_id === s.id && m.user_id === S.currentUser;
     });
@@ -1677,11 +1979,13 @@ function renderSidebar() {
       showSpaceContextMenu(btn, spaceId);
     });
   });
+
+  updateRoleBasedUI();
 }
 
 function spaceNavItem(sp) {
   var active = S.currentSpace == sp.id ? ' active' : '';
-  var isOwner = canCreateSpace();
+  var canManage = canManageSpace(sp.id);
   var initLetter = sp.name ? sp.name.charAt(0).toUpperCase() : '?';
   var bgColor = sp.color || '#0129ac';
   var isActive = S.currentSpace != null && String(S.currentSpace) === String(sp.id);
@@ -1693,7 +1997,7 @@ function spaceNavItem(sp) {
     '<span class="space-dot" style="background:transparent;"></span>' +
     '<span class="space-jira-icon" style="background:' + bgColor + ';width:20px;height:20px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;margin-right:6px;">' + initLetter + '</span>' +
     '<span class="space-item-name">' + esc(sp.name) + '</span>' +
-    (isOwner ? '<button class="btn-icon space-item-menu-btn" data-space-menu-id="' + sp.id + '" title="More options">\u22EF</button>' : '') +
+    (canManage ? '<button class="btn-icon space-item-menu-btn" data-space-menu-id="' + sp.id + '" title="More options">\u22EF</button>' : '') +
     '</a>' +
     subnav +
     '</div>';
@@ -1731,17 +2035,31 @@ function countOpenAssignedIssues(data) {
 }
 
 function getOpenAssignedCountLocal() {
-  return (S.data.issues || []).filter(function (i) {
+  return getVisibleIssues().filter(function (i) {
     return i.assignee_id == S.currentUser && i.status !== 'Done';
   }).length;
 }
 
 function getMyIssueCountFromLocalData() {
   var ids = {};
-  (S.data.issues || []).forEach(function (i) {
+  getVisibleIssues().forEach(function (i) {
     if (i.assignee_id == S.currentUser || i.reporter_id == S.currentUser) ids[i.id] = true;
   });
   return Object.keys(ids).length;
+}
+
+function formatDashboardActivity(row) {
+  if (!row) return 'updated an issue';
+  if (row.activity_type === 'created' || row.field_name === 'created') return 'created';
+  var field = row.field_name || '';
+  if (field === 'status') return 'changed status to ' + (row.new_value || '');
+  if (field === 'priority') return 'changed priority to ' + (row.new_value || '');
+  if (field === 'assignee_id') return 'changed assignee';
+  if (field === 'title') return 'updated title';
+  if (field === 'description' || field === 'fix_description') return 'updated description';
+  if (field === 'sprint_id') return 'moved sprint';
+  if (field) return 'updated ' + field.replace(/_/g, ' ');
+  return 'updated an issue';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1754,14 +2072,11 @@ function renderHome() {
       return m.space_id === s.id && m.user_id === S.currentUser;
     });
   });
-  var allIssues = S.data.issues || [];
+  var allIssues = getVisibleIssues();
   var myAssignedReportedCount = _ywCache ? countAssignedPlusReported(_ywCache) : getMyIssueCountFromLocalData();
   var openIssuesCount = _ywCache ? countOpenAssignedIssues(_ywCache) : getOpenAssignedCountLocal();
   var myIssues = allIssues.filter(function (i) { return i.assignee_id == S.currentUser && i.status !== 'Done'; });
   var recentlyViewed24h = getRecentlyViewedIssues(RECENT_VIEWED_24H_MS);
-  var recentIssues = recentlyViewed24h.length
-    ? recentlyViewed24h
-    : allIssues.slice().sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); }).slice(0, 10);
 
   // Hero greeting
   var hour = new Date().getHours();
@@ -1826,9 +2141,9 @@ function renderHome() {
   }
   $('myIssues').innerHTML = myHtml;
 
-  renderHomeRecentSection(recentIssues);
+  renderHomeRecentSection();
 
-  api('/api/my-issues').then(function (data) {
+  api('/api/my-issues', 'GET', null, { silent: true }).then(function (data) {
     _ywCache = data;
     if (S.currentView !== 'home') return;
     var el = $('dbMyIssuesStat');
@@ -1838,23 +2153,37 @@ function renderHome() {
   }).catch(function () {});
 }
 
-function renderHomeRecentSection(issuesOverride) {
-  var recentIssues = issuesOverride || getRecentlyViewedIssues(RECENT_VIEWED_24H_MS);
-  var actHtml = '';
-  for (var j = 0; j < recentIssues.length; j++) {
-    var ri = recentIssues[j];
-    var user = findUser(ri.assignee_id);
-    actHtml += '<div class="db-act-row" onclick="openIssuePage(\'' + ri.id + '\')">' +
-      avatarHtml(user, 30) +
-      '<div class="db-act-body">' +
-      '<div class="db-act-title"><span class="db-act-key">' + esc(issueKeyStr(ri)) + '</span> ' + esc(ri.title) + '</div>' +
-      '<div class="db-act-time">' + (ri.viewedAt ? 'Viewed ' + relativeTime(ri.viewedAt) : relativeTime(ri.updated_at)) + '</div>' +
-      '</div></div>';
-  }
+function renderHomeRecentSection() {
   var el = $('recentActivity');
-  if (el) {
-    el.innerHTML = actHtml || '<div class="db-issue-empty">No tickets viewed in the last 24 hours — open any ticket to see it here</div>';
-  }
+  if (!el) return;
+  el.innerHTML = '<div class="db-issue-empty">Loading team activity…</div>';
+  api('/api/dashboard/activity?hours=24&limit=30', 'GET', null, { silent: true }).then(function (rows) {
+    if (S.currentView !== 'home') return;
+    if (!rows || !rows.length) {
+      el.innerHTML = '<div class="db-issue-empty">No activity in your spaces in the last 24 hours</div>';
+      return;
+    }
+    var actHtml = '';
+    for (var j = 0; j < rows.length; j++) {
+      var row = rows[j];
+      var user = { name: row.user_name, color: row.user_color, id: row.user_id };
+      var actionText = formatDashboardActivity(row);
+      var who = (row.user_id && row.user_id === S.currentUser) ? 'You' : (row.user_name || 'Someone');
+      actHtml += '<div class="db-act-row" onclick="openIssuePage(\'' + row.issue_id + '\')">' +
+        avatarHtml(user, 30) +
+        '<div class="db-act-body">' +
+        '<div class="db-act-title"><strong>' + esc(who) + '</strong> ' + esc(actionText) +
+        ' · <span class="db-act-key">' + esc(row.issue_key || '') + '</span> ' + esc(row.issue_title || '') + '</div>' +
+        '<div class="db-act-time">' + relativeTime(row.created_at) +
+        (row.space_name ? ' · ' + esc(row.space_name) : '') + '</div>' +
+        '</div></div>';
+    }
+    el.innerHTML = actHtml;
+  }).catch(function () {
+    if (el && S.currentView === 'home') {
+      el.innerHTML = '<div class="db-issue-empty">Team activity unavailable — refresh after restarting the server</div>';
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -4149,6 +4478,7 @@ function renderTimeline() {
 function renderBacklog() {
   var sprints = getSpaceSprints(S.currentSpace);
   var allSpaceIssues = getSpaceIssues(S.currentSpace);
+  var canManageSprints = canCreateSprint(S.currentSpace);
   var statFilter = window._activeStatFilter || null;
   var issues = allSpaceIssues;
   if (statFilter) {
@@ -4213,15 +4543,17 @@ function renderBacklog() {
       ' <span class="text-muted">' + points + ' pts</span></div>' +
       '<div class="lane-header-actions">';
 
-    if (sp.status === 'planning') {
+    if (sp.status === 'planning' && canManageSprints) {
       html += '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();window._startSprint(\'' + sp.id + '\')">Start Sprint</button>';
     }
-    if (sp.status === 'active') {
-      html += (window._isMemberOnly ? "" : '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._completeSprint(\'' + sp.id + '\')">' + 'Complete</button>');
+    if (sp.status === 'active' && canManageSprints) {
+      html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._completeSprint(\'' + sp.id + '\')">Complete</button>';
     }
-    html += (window._isMemberOnly ? "" : '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._openSprintModal(\'' + sp.id + '\')">' + 'Edit</button>') +
-      (window._isMemberOnly ? "" : '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._deleteSprint(\'' + sp.id + '\')">' + 'Delete</button>') +
-      '</div></div>' +
+    if (canManageSprints) {
+      html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._openSprintModal(\'' + sp.id + '\')">Edit</button>' +
+        '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._deleteSprint(\'' + sp.id + '\')">Delete</button>';
+    }
+    html += '</div></div>' +
       '<div class="backlog-lane-body' + (collapsed ? ' collapsed' : '') + '" data-sprint-drop="' + sp.id + '" ' +
       'ondragover="event.preventDefault();event.currentTarget.classList.add(\'drag-over\')" ' +
       'ondragleave="window._laneDragLeave(event)" ' +
@@ -4468,6 +4800,13 @@ window._toggleSprintHoliday = function (dateStr) {
 };
 
 window._openSprintModal = function (id) {
+  var spaceId = id
+    ? ((S.data.sprints || []).find(function (s) { return s.id == id; }) || {}).space_id
+    : S.currentSpace;
+  if (!canCreateSprint(spaceId)) {
+    toast('Only admins and space admins can manage sprints', 'error');
+    return;
+  }
   if (id) {
     var sp = (S.data.sprints || []).find(function (s) { return s.id == id; });
     if (!sp) return;
@@ -4584,6 +4923,10 @@ window._dropToStatus = async function (event, status) {
   event.currentTarget.classList.remove('drag-over');
   var issueId = event.dataTransfer.getData('text/plain');
   if (!issueId) return;
+  if (status === 'Done') {
+    var cached = (S.data.issues || []).find(function (iss) { return iss.id === issueId; });
+    if (!canTransitionIssueToDone(cached || issueId)) return;
+  }
   await api('/api/issues/' + issueId, 'PUT', { status: status });
   await refreshData();
   renderSprintBoard();
@@ -6328,7 +6671,6 @@ var AW_ALL_COLUMNS = [
   { key: 'story_points',    label: 'Points',         sortCol: 'story_points', def: false },
   { key: 'start_date',      label: 'Start Date',     sortCol: 'start_date',   def: false },
   { key: 'created_at',      label: 'Created',        sortCol: 'created_at',   def: false },
-  { key: 'labels',          label: 'Labels',         sortCol: 'labels',       def: false },
   { key: 'fix_description', label: 'Fix Description',sortCol: null,           def: false },
 ];
 var _AW_COL_STORE_KEY = 'sb_aw_cols';
@@ -6576,7 +6918,6 @@ function renderAllWork(opts) {
           case 'start_date':      cell = '<td onclick="' + nav + '">' + (fmtDateShort(iss.start_date) || '\u2014') + '</td>'; break;
           case 'created_at':      cell = '<td onclick="' + nav + '">' + (fmtDateShort(iss.created_at) || '\u2014') + '</td>'; break;
           case 'reporter':        cell = '<td onclick="' + nav + '">' + (reporter ? esc(reporter.name) : '\u2014') + '</td>'; break;
-          case 'labels':          cell = '<td onclick="' + nav + '">' + (iss.labels ? esc(iss.labels) : '\u2014') + '</td>'; break;
           case 'fix_description': cell = '<td onclick="' + nav + '">' + (iss.fix_description ? esc(iss.fix_description.slice(0,60)) + (iss.fix_description.length>60?'…':'') : '\u2014') + '</td>'; break;
           default:
             // Custom field column (cf_<fieldId>)
@@ -6778,8 +7119,7 @@ function renderFilterConditions(conditions) {
       '<option value="status"' + (cond.field === 'status' ? ' selected' : '') + '>Status</option>' +
       '<option value="priority"' + (cond.field === 'priority' ? ' selected' : '') + '>Priority</option>' +
       '<option value="type"' + (cond.field === 'type' ? ' selected' : '') + '>Type</option>' +
-      '<option value="assignee_id"' + (cond.field === 'assignee_id' ? ' selected' : '') + '>Assignee</option>' +
-      '<option value="labels"' + (cond.field === 'labels' ? ' selected' : '') + '>Labels</option></select>' +
+      '<option value="assignee_id"' + (cond.field === 'assignee_id' ? ' selected' : '') + '>Assignee</option></select>' +
       '<select class="input input-sm fc-op">' +
       '<option value="equals"' + (cond.operator === 'equals' ? ' selected' : '') + '>equals</option>' +
       '<option value="not_equals"' + (cond.operator === 'not_equals' ? ' selected' : '') + '>not equals</option>' +
@@ -6798,6 +7138,11 @@ var _settingsActiveTab = 'general';
 function renderSpaceSettings(subTab) {
   var space = getSpace(S.currentSpace);
   if (!space) return;
+  if (!canManageSpace(space.id)) {
+    toast('Only admins and space admins can access Settings', 'error');
+    navigateToSpace(S.currentSpace, 'summary');
+    return;
+  }
   if (subTab) _settingsActiveTab = subTab;
   // Update tab bar active state
   qsa('#settingsTabBar .tab-btn').forEach(function (btn) {
@@ -6807,7 +7152,9 @@ function renderSpaceSettings(subTab) {
   switch (_settingsActiveTab) {
     case 'general': renderSettingsGeneral(space); break;
     case 'people': renderSettingsPeople(space); break;
-    case 'customfields': renderSettingsCustomFields(space); break;
+    case 'customfields':
+      renderSettingsCustomFields(space);
+      break;
     default: renderSettingsGeneral(space);
   }
 }
@@ -6818,6 +7165,8 @@ window._switchSettingsTab = function (tab) {
 };
 
 function renderSettingsGeneral(space) {
+  var canManage = canManageSpace(space.id);
+  var canDelete = isOrgAdminUser();
   $('settingsTabContent').innerHTML =
     '<div class="settings-section"><h3>General</h3>' +
     '<p><strong>Name:</strong> ' + esc(space.name) + '</p>' +
@@ -6828,46 +7177,56 @@ function renderSettingsGeneral(space) {
     '<p><strong>Type:</strong> ' + cap(space.space_type || 'scrum') + '</p>' +
     '<p><strong>Visibility:</strong> ' + visLabel(space.visibility) + '</p>' +
     '<div class="settings-actions">' +
-    '<button class="btn btn-outline" onclick="window._editSpaceSettings()">Edit Space</button>' +
-    '<button class="btn btn-danger" onclick="window._deleteSpace(\'' + space.id + '\')">Delete Space</button></div></div>';
+    (canManage ? '<button class="btn btn-outline" onclick="window._editSpaceSettings()">Edit Space</button>' : '') +
+    (canDelete ? '<button class="btn btn-danger" onclick="window._deleteSpace(\'' + space.id + '\')">Delete Space</button>' : '') +
+    '</div></div>';
 }
 
 function renderSettingsPeople(space) {
   var memberRecs = (S.data.space_members || []).filter(function (m) { return m.space_id == space.id; });
-  var roles = [
-    { value: 'owner',      label: 'Owner'      },
-    { value: 'site_admin', label: 'Site Admin' },
-    { value: 'manager',    label: 'Manager'    },
-    { value: 'member',     label: 'Member'     },
-    { value: 'viewer',     label: 'Viewer'     }
-  ];
+  var orgAdmin = isOrgAdminUser();
+  var spaceAdmin = canManageSpace(space.id) && !orgAdmin;
+  var assignableRoles = orgAdmin
+    ? [{ value: 'member', label: 'Member' }, { value: 'site_admin', label: 'Space Admin' }]
+    : [{ value: 'member', label: 'Member' }];
 
   var rowsHtml = '';
   for (var i = 0; i < memberRecs.length; i++) {
     var rec = memberRecs[i];
     var user = findUser(rec.user_id);
     if (!user) continue;
-    var role = (rec.role || 'member').toLowerCase();
+    var role = normalizeSpaceRole(rec.role || 'member');
     var joined = fmtDate(rec.joined_at || rec.created_at);
+    var isTargetSpaceAdmin = role === 'site_admin';
 
-    var roleOptions = '';
-    for (var r = 0; r < roles.length; r++) {
-      roleOptions += '<option value="' + roles[r].value + '"' + (roles[r].value === role ? ' selected' : '') + '>' + roles[r].label + '</option>';
+    var roleCell;
+    if (orgAdmin) {
+      var roleOptions = '';
+      for (var r = 0; r < assignableRoles.length; r++) {
+        roleOptions += '<option value="' + assignableRoles[r].value + '"' + (assignableRoles[r].value === role ? ' selected' : '') + '>' + assignableRoles[r].label + '</option>';
+      }
+      roleCell = '<select class="input input-sm people-role-select" data-member-id="' + rec.id + '" data-user-id="' + user.id + '" style="max-width:140px">' + roleOptions + '</select>';
+    } else if (spaceAdmin && isTargetSpaceAdmin) {
+      roleCell = spaceRoleBadgeHtml(rec.role);
+    } else if (spaceAdmin) {
+      roleCell = '<select class="input input-sm people-role-select" data-member-id="' + rec.id + '" data-user-id="' + user.id + '" style="max-width:140px"><option value="member" selected>Member</option></select>';
+    } else {
+      roleCell = spaceRoleBadgeHtml(rec.role);
     }
 
     rowsHtml += '<tr>' +
       '<td>' + avatarHtml(user, 28) + '</td>' +
       '<td>' + esc(user.name) + '</td>' +
       '<td class="text-muted">' + esc(user.email || '') + '</td>' +
-      '<td><select class="input input-sm people-role-select" data-member-id="' + rec.id + '" data-user-id="' + user.id + '" style="max-width:120px">' + roleOptions + '</select></td>' +
+      '<td>' + roleCell + '</td>' +
       '<td class="text-muted text-sm">' + joined + '</td>' +
-      '<td><button class="btn btn-outline btn-sm people-remove-btn" data-member-id="' + rec.id + '" data-user-name="' + esc(user.name) + '">Remove</button></td>' +
+      '<td>' + (canManageSpace(space.id) ? '<button class="btn btn-outline btn-sm people-remove-btn" data-member-id="' + rec.id + '" data-user-name="' + esc(user.name) + '">Remove</button>' : '') + '</td>' +
       '</tr>';
   }
 
   var html = '<div class="flex items-center justify-between mb-16">' +
     '<h3 style="margin:0">Members</h3>' +
-    '<button class="btn btn-primary btn-sm" id="inviteMemberBtnSettings">+ Add User</button>' +
+    (canManageSpace(space.id) ? '<button class="btn btn-primary btn-sm" id="inviteMemberBtnSettings">+ Add User</button>' : '') +
     '</div>' +
     '<div class="table-container"><table class="data-table" style="width:100%"><thead><tr>' +
     '<th style="width:40px"></th><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th style="width:80px">Actions</th>' +
@@ -6911,7 +7270,31 @@ function renderSettingsPeople(space) {
   });
 }
 
+function customFieldShowsIn(field, place) {
+  var show = field && field.show_in;
+  if (!show || !show.length) return place === 'drawer';
+  if (Array.isArray(show)) return show.indexOf(place) >= 0;
+  return false;
+}
+
 function renderSettingsCustomFields(space) {
+  $('settingsTabContent').innerHTML =
+    '<div class="text-muted" style="padding:24px;text-align:center">Loading custom fields…</div>';
+  api('/api/custom-fields?space_id=' + encodeURIComponent(space.id), 'GET', null, { silent: true })
+    .then(function (fetched) {
+      if (Array.isArray(fetched)) {
+        S.data.custom_fields = (S.data.custom_fields || [])
+          .filter(function (f) { return f.space_id != space.id; })
+          .concat(fetched);
+      }
+      paintSettingsCustomFields(space);
+    })
+    .catch(function () {
+      paintSettingsCustomFields(space);
+    });
+}
+
+function paintSettingsCustomFields(space) {
   var fields = (S.data.custom_fields || []).filter(function (f) { return f.space_id == space.id; });
 
   var rowsHtml = '';
@@ -6945,7 +7328,8 @@ function renderSettingsCustomFields(space) {
     '</div>' +
     '<div class="table-container"><table class="data-table" style="width:100%"><thead><tr>' +
     '<th>Name</th><th>Type</th><th>Required</th><th>Options</th><th style="width:280px">Actions</th>' +
-    '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:24px">No custom fields yet</td></tr>') + '</tbody></table></div>';
+    '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:24px">No custom fields yet — refresh the page</td></tr>') + '</tbody></table></div>' +
+    '<p class="text-muted text-sm" style="margin-top:12px">Default fields (Environment, Severity, etc.) are added automatically for every space. Edit, delete, or add more below.</p>';
 
   $('settingsTabContent').innerHTML = html;
 
@@ -7038,13 +7422,14 @@ function showSpaceContextMenu(anchorBtn, spaceId) {
   var existing = qs('.space-context-menu');
   if (existing) existing.remove();
 
-  var isAdminUser = S.currentUserObj && (S.currentUserObj.role === 'admin' || S.currentUserObj.role === 'owner');
+  var canManage = canManageSpace(spaceId);
+  var isOrgAdmin = isOrgAdminUser();
   var menu = document.createElement('div');
   menu.className = 'space-context-menu';
   menu.innerHTML =
-    (isAdminUser ? '<div class="space-context-menu-item" data-action="people"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Manage people</div>' : '') +
-    (isAdminUser ? '<div class="space-context-menu-item" data-action="settings"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Space settings</div>' : '') +
-    (isAdminUser ? '<div class="space-context-menu-item danger" data-action="delete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> Delete space</div>' : '');
+    (canManage ? '<div class="space-context-menu-item" data-action="people"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Manage people</div>' : '') +
+    (canManage ? '<div class="space-context-menu-item" data-action="settings"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Space settings</div>' : '') +
+    (isOrgAdmin ? '<div class="space-context-menu-item danger" data-action="delete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> Delete space</div>' : '');
 
   // Position relative to the button
   var rect = anchorBtn.getBoundingClientRect();
@@ -7117,7 +7502,19 @@ function openInviteMemberModal() {
     optionsHtml += '<option value="' + u.id + '">' + esc(u.name) + '  ·  ' + esc(u.email || '') + '</option>';
   }
   sel.innerHTML = optionsHtml;
-  $('inviteMemberRole').value = 'member';
+
+  var roleWrap = $('inviteMemberRole') && $('inviteMemberRole').closest('.form-group');
+  var roleSelect = $('inviteMemberRole');
+  if (roleSelect) {
+    if (isOrgAdminUser()) {
+      roleSelect.innerHTML = '<option value="member">Member</option><option value="site_admin">Space Admin</option>';
+      if (roleWrap) roleWrap.style.display = '';
+    } else {
+      roleSelect.innerHTML = '<option value="member">Member</option>';
+      if (roleWrap) roleWrap.style.display = 'none';
+    }
+    roleSelect.value = 'member';
+  }
 
   // Show user preview card when a user is selected
   sel.onchange = function () {
@@ -7554,6 +7951,8 @@ async function openDrawer(issueId) {
   }
   $('drawerDesc').innerHTML = renderDesc(descText);
   $('drawerFixDesc').innerHTML = renderDesc(fixDescText);
+  var descBtns = $('drawerDescBtns'); if (descBtns) descBtns.style.display = 'none';
+  var fixBtns = $('drawerFixDescBtns'); if (fixBtns) fixBtns.style.display = 'none';
 
   $('drawerStatus').value = issue.status || 'To Do';
   $('drawerPriority').value = issue.priority || 'medium';
@@ -7598,7 +7997,6 @@ async function openDrawer(issueId) {
   var sprints = (S.data.sprints || []).filter(function (sp) { return sp.space_id == spaceId; });
   populateSprintSelect($('drawerSprint'), sprints, issue.sprint_id);
 
-  $('drawerLabels').value = issue.labels || '';
   $('drawerPoints').value = issue.story_points != null ? issue.story_points : '';
   $('drawerStartDate').value = fmtDateISO(issue.start_date);
   $('drawerDueDate').value = fmtDateISO(issue.due_date);
@@ -7684,7 +8082,6 @@ function startDrawerLiveSync(issueId) {
         $('drawerReporter').value = fresh.reporter_id || '';
       }
       if (activeId !== 'drawerSprint')      $('drawerSprint').value      = fresh.sprint_id   || '';
-      if (activeId !== 'drawerLabels')      $('drawerLabels').value      = fresh.labels      || '';
       if (activeId !== 'drawerPoints')      $('drawerPoints').value      = fresh.story_points != null ? fresh.story_points : '';
       if (activeId !== 'drawerStartDate')   $('drawerStartDate').value   = fresh.start_date  ? fresh.start_date.slice(0,10) : '';
       if (activeId !== 'drawerDueDate')     $('drawerDueDate').value     = fresh.due_date    ? fresh.due_date.slice(0,10)   : '';
@@ -7742,8 +8139,37 @@ function bindDrawerEdits(issue) {
     }, 800);
   }
 
+  async function saveFieldNow(field, value) {
+    try {
+      var payload = {};
+      payload[field] = value;
+      await api('/api/issues/' + issueId, 'PUT', payload);
+      var updated = await api('/api/issues/' + issueId);
+      if (updated) {
+        $('drawerUpdated').textContent = fmtDateTime(updated.updated_at);
+        var patch = Object.assign({}, payload);
+        if (updated.updated_at) patch.updated_at = updated.updated_at;
+        afterIssueFieldUpdate(issueId, patch);
+        if (window._drawerIssueData) window._drawerIssueData[field] = value;
+      }
+      refreshData();
+      toast('Saved');
+    } catch (e) {
+      toast('Save failed', 'error');
+      throw e;
+    }
+  }
 
-  $('drawerStatus').onchange = function () { autoSave('status', $('drawerStatus').value); updateStatusBtn($('drawerStatus').value); };
+
+  var _drawerStatusPrevious = issue.status || 'To Do';
+  $('drawerStatus').onchange = function () {
+    var newStatus = $('drawerStatus').value;
+    if (newStatus === 'Done' && !canTransitionIssueToDone(issueId, _drawerStatusPrevious)) return;
+    autoSave('status', newStatus);
+    updateStatusBtn(newStatus);
+    _drawerStatusPrevious = newStatus;
+    if (window._drawerIssueData) window._drawerIssueData.status = newStatus;
+  };
   updateStatusBtn($('drawerStatus').value);
   $('drawerPriority').onchange  = function () { autoSave('priority',     $('drawerPriority').value); };
   $('drawerAssignee').onchange  = function () { autoSave('assignee_id',  $('drawerAssignee').value || null); };
@@ -7800,7 +8226,6 @@ function bindDrawerEdits(issue) {
     }
     autoSave('sprint_id', sprintId || null);
   };
-  $('drawerLabels').oninput     = function () { autoSave('labels',       $('drawerLabels').value); };
   $('drawerPoints').oninput     = function () {
     autoSave('story_points', $('drawerPoints').value ? parseInt($('drawerPoints').value, 10) : null);
   };
@@ -7838,10 +8263,12 @@ function bindDrawerEdits(issue) {
 
   bindDrawerTitleField(autoSave);
 
-  var _drawerDescOriginal = '';
+  var _drawerDescOriginal = $('drawerDesc') ? $('drawerDesc').innerHTML : (issue.description || '');
+  window._drawerDescOriginalHtml = _drawerDescOriginal;
   $('drawerDesc').onfocus = function() {
     _drawerDescOriginal = $('drawerDesc').innerHTML;
-    var b = $('drawerDescBtns'); if(b) b.style.display='flex';
+    window._drawerDescOriginalHtml = _drawerDescOriginal;
+    updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
   };
 
   // Open links inside contenteditable description
@@ -7857,48 +8284,76 @@ function bindDrawerEdits(issue) {
   var drawerDescCancelBtn = $('drawerDescCancel');
   if(drawerDescSaveBtn) drawerDescSaveBtn.onclick = async function(e) {
     e.preventDefault(); e.stopPropagation();
+    var descEl = $('drawerDesc');
+    if (!richTextHasMeaningfulChange(_drawerDescOriginal, descEl.innerHTML)) return;
     drawerDescSaveBtn.disabled = true;
     drawerDescSaveBtn.textContent = 'Saving...';
-    var b = $('drawerDescBtns'); if(b) b.style.display='none';
-    var descEl = $('drawerDesc');
-    var imgs = descEl.querySelectorAll('img[src^="data:"],img[src^="blob:"]');
-    for (var i = 0; i < imgs.length; i++) {
-      try {
-        var resp = await fetch(imgs[i].src);
-        var blob = await resp.blob();
-        var fd = new FormData();
-        fd.append('files', blob, 'desc-img-' + Date.now() + '.png');
-        var up = await fetch('/api/upload-temp', { method:'POST', headers:{'Authorization':'Bearer '+getAuthToken()}, body:fd });
-        var upJson = await up.json();
-        if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
-      } catch(ex) { console.error('img upload failed', ex); }
+    try {
+      var imgs = descEl.querySelectorAll('img[src^="data:"],img[src^="blob:"]');
+      for (var i = 0; i < imgs.length; i++) {
+        try {
+          var resp = await fetch(imgs[i].src);
+          var blob = await resp.blob();
+          var fd = new FormData();
+          fd.append('files', blob, 'desc-img-' + Date.now() + '.png');
+          var up = await fetch('/api/upload-temp', { method:'POST', headers:{'Authorization':'Bearer '+getAuthToken()}, body:fd });
+          var upJson = await up.json();
+          if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
+        } catch(ex) { console.error('img upload failed', ex); }
+      }
+      await saveFieldNow('description', descEl.innerHTML.trim());
+      _drawerDescOriginal = descEl.innerHTML;
+      window._drawerDescOriginalHtml = _drawerDescOriginal;
+      var b = $('drawerDescBtns'); if(b) b.style.display='none';
+    } finally {
+      drawerDescSaveBtn.disabled = false;
+      drawerDescSaveBtn.textContent = 'Save';
+      drawerDescSaveBtn.style.opacity = '1';
+      drawerDescSaveBtn.style.cursor = 'pointer';
     }
-    autoSave('description', descEl.innerHTML.trim());
   };
   if(drawerDescCancelBtn) drawerDescCancelBtn.onclick = function() {
     $('drawerDesc').innerHTML = _drawerDescOriginal;
+    window._drawerDescOriginalHtml = _drawerDescOriginal;
     var b = $('drawerDescBtns'); if(b) b.style.display='none';
   };
   $('drawerDesc').oninput = function () {
-    autoSave('description', $('drawerDesc').innerHTML.trim());
+    updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
   };
-  var _drawerFixDescOriginal = '';
+  var _drawerFixDescOriginal = $('drawerFixDesc') ? $('drawerFixDesc').innerHTML : (issue.fix_description || '');
+  window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
   $('drawerFixDesc').onfocus = function() {
     _drawerFixDescOriginal = $('drawerFixDesc').innerHTML;
-    var b = $('drawerFixDescBtns'); if(b) b.style.display='flex';
+    window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
+    updateDrawerDescEditorState('drawerFixDesc', _drawerFixDescOriginal);
   };
   var fixSaveBtn = $('drawerFixDescSave');
   var fixCancelBtn = $('drawerFixDescCancel');
-  if(fixSaveBtn) fixSaveBtn.onclick = function() {
-    var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
-    autoSave('fix_description', $('drawerFixDesc').innerHTML.trim());
+  if(fixSaveBtn) fixSaveBtn.onclick = async function(e) {
+    e.preventDefault(); e.stopPropagation();
+    var fixEl = $('drawerFixDesc');
+    if (!richTextHasMeaningfulChange(_drawerFixDescOriginal, fixEl.innerHTML)) return;
+    fixSaveBtn.disabled = true;
+    fixSaveBtn.textContent = 'Saving...';
+    try {
+      await saveFieldNow('fix_description', fixEl.innerHTML.trim());
+      _drawerFixDescOriginal = fixEl.innerHTML;
+      window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
+      var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
+    } finally {
+      fixSaveBtn.disabled = false;
+      fixSaveBtn.textContent = 'Save';
+      fixSaveBtn.style.opacity = '1';
+      fixSaveBtn.style.cursor = 'pointer';
+    }
   };
   if(fixCancelBtn) fixCancelBtn.onclick = function() {
     $('drawerFixDesc').innerHTML = _drawerFixDescOriginal;
+    window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
     var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
   };
   $('drawerFixDesc').oninput = function () {
-    autoSave('fix_description', $('drawerFixDesc').textContent.trim());
+    updateDrawerDescEditorState('drawerFixDesc', _drawerFixDescOriginal);
   };
 
   // Expose pending to the global save handler (fallback)
@@ -7912,7 +8367,7 @@ function bindDrawerEdits(issue) {
     if (!textarea || textarea._mentionBound) return;
     textarea._mentionBound = true;
     var dropdown = $('mentionDropdown');
-    var mentionStart = -1;
+    var activeMentionCharIdx = -1;
 
     function getMembers() {
       return window._drawerMembers || S.data.users || [];
@@ -7920,7 +8375,7 @@ function bindDrawerEdits(issue) {
 
     function closeMention() {
       dropdown.style.display = 'none';
-      mentionStart = -1;
+      activeMentionCharIdx = -1;
     }
 
     // Returns all text before the caret inside a contenteditable element
@@ -7961,8 +8416,12 @@ function bindDrawerEdits(issue) {
         while (walker.nextNode()) nodes.push(walker.currentNode);
         // build full text before caret
         var fullText = getTextBeforeCaret(textarea);
-        var atIdx2 = fullText.lastIndexOf('@');
-        if (atIdx2 === -1) return;
+        var atIdx2 = activeMentionCharIdx;
+        if (atIdx2 < 0) {
+          var active = findActiveMentionAt(fullText);
+          if (!active) return;
+          atIdx2 = active.atIdx;
+        }
         // count chars to find the node containing @
         var charCount = 0;
         for (var ni = 0; ni < nodes.length; ni++) {
@@ -8023,14 +8482,15 @@ function bindDrawerEdits(issue) {
             insertMentionAtCaret(name, id);
           } else {
             var val = textarea.value;
-            var before = val.substring(0, mentionStart);
+            var before = val.substring(0, activeMentionCharIdx);
             var after = val.substring(textarea.selectionStart);
             textarea.value = before + '@' + name + ' ' + after;
-            var pos = mentionStart + name.length + 2;
+            var pos = activeMentionCharIdx + name.length + 2;
             textarea.setSelectionRange(pos, pos);
             textarea.focus();
           }
           closeMention();
+          activeMentionCharIdx = -1;
         });
       });
     }
@@ -8043,14 +8503,10 @@ function bindDrawerEdits(issue) {
       } else {
         textBefore = textarea.value.substring(0, textarea.selectionStart);
       }
-      var atIdx = textBefore.lastIndexOf('@');
-      if (atIdx === -1) { closeMention(); return; }
-      var charBefore = textBefore[atIdx - 1];
-      if (atIdx > 0 && charBefore !== ' ' && charBefore !== '\n') { closeMention(); return; }
-      var query = textBefore.substring(atIdx + 1);
-      if (query.split(' ').length > 4) { closeMention(); return; }
-      mentionStart = atIdx;
-      showMention(query);
+      var active = findActiveMentionAt(textBefore);
+      if (!active) { closeMention(); return; }
+      activeMentionCharIdx = active.atIdx;
+      showMention(active.query);
     });
 
     textarea.addEventListener('keydown', function(e) {
@@ -8166,13 +8622,7 @@ function bindDrawerEdits(issue) {
     }
 
     if (commentBody) {
-      var mentionedUserIds = [];
-      if (_ci && _ci.querySelectorAll) {
-        _ci.querySelectorAll('.mention-chip[data-user-id]').forEach(function (chip) {
-          var uid = chip.getAttribute('data-user-id');
-          if (uid && mentionedUserIds.indexOf(uid) < 0) mentionedUserIds.push(uid);
-        });
-      }
+      var mentionedUserIds = collectMentionUserIds(_ci, commentBody);
       // Optimistic UI - show comment instantly before API response
       var me = S.currentUserObj || {};
       var tempComment = {
@@ -8497,6 +8947,47 @@ function linkTypeLabel(type) {
   return found ? found.label : type.replace(/_/g, ' ');
 }
 
+// Accept issue key, full URL, or partial URL (?issue=KEY) — same format as copy link
+function parseIssueLinkReference(input) {
+  if (!input) return '';
+  var s = String(input).trim();
+  if (!s) return '';
+  var qMatch = s.match(/[?&]issue=([^&#\s]+)/i);
+  if (qMatch) {
+    try { return decodeURIComponent(qMatch[1]).trim(); } catch (_) { return qMatch[1].trim(); }
+  }
+  try {
+    if (/^https?:\/\//i.test(s) || s.charAt(0) === '/') {
+      var u = new URL(s, window.location.origin);
+      var q = u.searchParams.get('issue');
+      if (q) return q.trim();
+    }
+  } catch (_) {}
+  return s;
+}
+
+function renderLinkSearchResults(matches) {
+  var results = $('linkSearchResults');
+  if (!results) return;
+  if (!matches.length) {
+    results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">No matching issues found</p>';
+    return;
+  }
+  var html = '';
+  for (var mi = 0; mi < matches.length; mi++) {
+    var m = matches[mi];
+    html += '<div class="link-search-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:4px;font-size:12px" ' +
+      'onmouseenter="this.style.background=\'var(--bg4)\'" onmouseleave="this.style.background=\'\'" ' +
+      'onclick="window._selectLinkIssue(\'' + m.id + '\',\'' + esc(m.key) + '\',\'' + esc(m.title).replace(/'/g, "\\'") + '\')">' +
+      '<span style="font-size:11px">' + typeIcon(m.type) + '</span>' +
+      '<span style="font-weight:700;color:var(--accent);min-width:48px">' + esc(m.key) + '</span>' +
+      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(m.title) + '</span>' +
+      statusBadge(m.status) +
+      '</div>';
+  }
+  results.innerHTML = html;
+}
+
 function renderDrawerLinks(issue) {
   var c = $('drawerLinks');
   var links = issue.links || [];
@@ -8557,7 +9048,7 @@ function renderDrawerLinks(issue) {
   html += '</select></div>' +
     '<div style="margin-bottom:8px">' +
     '<label class="form-label">Search for an issue</label>' +
-    '<input type="text" id="linkSearchInput" class="input input-sm" placeholder="Search by issue key or title (e.g. BT-1)" oninput="window._searchLinkIssues(this.value)" style="width:100%">' +
+    '<input type="text" id="linkSearchInput" class="input input-sm" placeholder="Paste issue URL or search by key (e.g. ENG-5)" oninput="window._searchLinkIssues(this.value)" style="width:100%">' +
     '</div>' +
     '<div id="linkSearchResults" style="max-height:160px;overflow-y:auto;margin-bottom:8px"></div>' +
     '<div id="linkSelectedIssue" style="display:none;padding:6px 8px;border:1px solid var(--accent);border-radius:4px;background:var(--accent-bg);margin-bottom:8px;display:none;align-items:center;gap:6px"></div>' +
@@ -8591,37 +9082,50 @@ window._hideLinkDialog = function() {
 
 window._searchLinkIssues = function(term) {
   var results = $('linkSearchResults');
+  if (!results) return;
   var currentIssueId = S.drawerIssueId;
-  // Get already-linked issue IDs to exclude them
-  var linkedIds = [];
-  var linkItems = document.querySelectorAll('#drawerLinks .link-item [onclick]');
-  // Show all when empty, otherwise filter by key/title
+  var searchTerm = parseIssueLinkReference(term) || (term || '').trim();
+  var lower = searchTerm.toLowerCase();
+
   var matches = (S.data.issues || []).filter(function(i) {
     if (i.id === currentIssueId) return false;
-    if (!term || term.trim().length === 0) return true; // show all when empty
-    var lower = term.toLowerCase().trim();
+    if (!searchTerm) return true;
     return (i.key && i.key.toLowerCase().indexOf(lower) >= 0) ||
            (i.title && i.title.toLowerCase().indexOf(lower) >= 0);
-  }).slice(0, 10);
+  });
 
-  if (!matches.length) {
-    results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">No matching issues found</p>';
+  if (searchTerm) {
+    var exact = (S.data.issues || []).find(function(i) {
+      return i.id !== currentIssueId && i.key && i.key.toLowerCase() === lower;
+    });
+    if (exact) matches = [exact];
+  }
+
+  matches = matches.slice(0, 10);
+  if (matches.length) {
+    renderLinkSearchResults(matches);
     return;
   }
 
-  var html = '';
-  for (var mi = 0; mi < matches.length; mi++) {
-    var m = matches[mi];
-    html += '<div class="link-search-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:4px;font-size:12px" ' +
-      'onmouseenter="this.style.background=\'var(--bg4)\'" onmouseleave="this.style.background=\'\'" ' +
-      'onclick="window._selectLinkIssue(\'' + m.id + '\',\'' + esc(m.key) + '\',\'' + esc(m.title).replace(/'/g, "\\'") + '\')">' +
-      '<span style="font-size:11px">' + typeIcon(m.type) + '</span>' +
-      '<span style="font-weight:700;color:var(--accent);min-width:48px">' + esc(m.key) + '</span>' +
-      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(m.title) + '</span>' +
-      statusBadge(m.status) +
-      '</div>';
+  if (!searchTerm) {
+    renderLinkSearchResults((S.data.issues || []).filter(function(i) { return i.id !== currentIssueId; }).slice(0, 10));
+    return;
   }
-  results.innerHTML = html;
+
+  results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">Looking up issue…</p>';
+  api('/api/issues/' + encodeURIComponent(searchTerm)).then(function(iss) {
+    if (!iss || !iss.id || iss.id === currentIssueId) {
+      results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">No matching issues found</p>';
+      return;
+    }
+    S.data.issues = S.data.issues || [];
+    if (!S.data.issues.some(function(i) { return i.id == iss.id; })) {
+      S.data.issues.push(iss);
+    }
+    renderLinkSearchResults([iss]);
+  }).catch(function() {
+    results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">No matching issues found</p>';
+  });
 };
 
 window._selectLinkIssue = function(id, key, title) {
@@ -8703,14 +9207,17 @@ function _renderActivityTab(tab, issue) {
       '<button onclick="window._deleteComment(\'' + cm.id + '\')" style="' + btnStyle + ';color:#dc2626" title="Delete"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>Delete</button>' +
       '</span>';
     var bodyHtml = (function(body) {
-      var html = esc(body).replace(/@([\w][\w.]*(?:\s[\w][\w.]*)?)/g, '<span style="color:#0052cc;font-weight:600">@$1</span>');
+      if (/<[a-z][\s\S]*>/i.test(body)) {
+        var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
+        return safe;
+      }
+      var html = highlightMentionsInCommentBody(body);
       html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
         return '<div style="margin-top:8px"><img src="' + url + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" onclick="window.open(this.src)" title="' + fname + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + fname + '</div></div>';
       });
       html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
         return '<div style="margin-top:6px"><a href="' + url + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + fname + '</a></div>';
       });
-      if (/<[a-z][\s\S]*>/i.test(body)) return body;
       return html;
     })(cm.body);
 
@@ -8818,8 +9325,29 @@ function _renderActivityTab(tab, issue) {
       }
       return val;
     }
-    var oldVal = resolveVal(h.field_name, h.old_value) || '—';
-    var newVal = resolveVal(h.field_name, h.new_value) || '—';
+    function formatHistoryValue(field, val) {
+      var resolved = resolveVal(field, val) || '—';
+      if (resolved === '—') return resolved;
+      if (field === 'description' || field === 'fix_description' || /<[a-z][\s\S]*>/i.test(resolved)) {
+        resolved = stripHtmlForDisplay(resolved);
+      }
+      if (field === 'product_type' || field === 'team') {
+        resolved = String(resolved).replace(/,/g, ', ');
+      }
+      if (resolved.charAt(0) === '{' || resolved.charAt(0) === '[') {
+        try {
+          var parsed = JSON.parse(resolved);
+          if (parsed && parsed.combinations) {
+            resolved = (parsed.combinations || []).join(', ') || resolved;
+          } else if (Array.isArray(parsed)) {
+            resolved = parsed.join(', ');
+          }
+        } catch (_) {}
+      }
+      return truncateForHistory(resolved, 120);
+    }
+    var oldVal = formatHistoryValue(h.field_name, h.old_value);
+    var newVal = formatHistoryValue(h.field_name, h.new_value);
     var isAttach = h.field_name === 'attachment';
     var actionLine;
     if (isAttach && !h.old_value) {
@@ -9971,7 +10499,7 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   // Fallback: fetch from API if local cache doesn't have this space's fields
   if (!spaceFields.length && spaceId) {
     try {
-      var fetched = await api('/api/custom-fields?space_id=' + spaceId);
+      var fetched = await api('/api/custom-fields?space_id=' + encodeURIComponent(spaceId), 'GET', null, { silent: true });
       if (fetched && fetched.length) {
         spaceFields = fetched;
         S.data.custom_fields = (S.data.custom_fields || [])
@@ -10001,6 +10529,7 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   spaceFields.forEach(function(field) {
     if (_builtinFields.indexOf((field.name || '').toLowerCase().trim()) !== -1) return;
     if (isCombinationField(field)) return;
+    if (!customFieldShowsIn(field, 'drawer')) return;
     var fid = field.id;
     var fname = esc(field.name);
     var ftype = field.field_type || 'text';
@@ -10073,11 +10602,9 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
 // SPACE CRUD
 // ═══════════════════════════════════════════════════════════
 function canCreateSpace() {
-  var role = (S.currentUserObj || {}).role;
-  return role === 'owner';
+  return isOrgAdminUser();
 }
 
-// Returns current user's role in a given space (from space_members)
 function getMySpaceRole(spaceId) {
   if (!spaceId) return null;
   var sm = (S.data.space_members || []).find(function(m) {
@@ -10086,12 +10613,53 @@ function getMySpaceRole(spaceId) {
   return sm ? (sm.role || 'member') : null;
 }
 
-// Returns true if the current user can access owner-level features for the given space
+function isSpaceAdmin(spaceId) {
+  if (!spaceId) return false;
+  if (isOrgAdminUser()) return true;
+  return normalizeSpaceRole(getMySpaceRole(spaceId)) === 'site_admin';
+}
+
+function isSpaceMemberOnly(spaceId) {
+  if (!spaceId) return false;
+  if (isOrgAdminUser()) return false;
+  var role = getMySpaceRole(spaceId);
+  return !!role && normalizeSpaceRole(role) === 'member';
+}
+
+// Space settings, reports, sprints, people — org admin or space admin (requires space)
+function canManageSpace(spaceId) {
+  return isSpaceAdmin(spaceId);
+}
+
+function canCreateSprint(spaceId) {
+  return canManageSpace(spaceId);
+}
+
+function isSpaceAdminAnywhere() {
+  if (isOrgAdminUser()) return true;
+  return (S.data.space_members || []).some(function(m) {
+    return m.user_id === S.currentUser && normalizeSpaceRole(m.role) === 'site_admin';
+  });
+}
+
+function canViewReports() {
+  return isOrgAdminUser() || isSpaceAdminAnywhere();
+}
+
+function updateRoleBasedUI() {
+  var createSprintBtn = $('createSprintBtn');
+  if (createSprintBtn) {
+    var showSprint = S.currentTab === 'backlog' && !!S.currentSpace && canCreateSprint(S.currentSpace);
+    createSprintBtn.style.display = showSprint ? '' : 'none';
+  }
+  var inviteMemberBtn = $('inviteMemberBtn');
+  if (inviteMemberBtn) {
+    inviteMemberBtn.style.display = canManageSpace(S.currentSpace) ? '' : 'none';
+  }
+}
+
 function isSpaceOwner(spaceId) {
-  var globalRole = (S.currentUserObj || {}).role;
-  if (globalRole === 'owner') return true;
-  var spaceRole = getMySpaceRole(spaceId);
-  return spaceRole === 'owner';
+  return canManageSpace(spaceId);
 }
 
 function openSpaceModal(space) {
@@ -10216,7 +10784,6 @@ function resetIssueForm() {
   $('issueType').value = 'task';
   $('issuePriority').value = 'medium';
   $('issuePoints').value = '';
-  if ($('issueLabels')) $('issueLabels').value = '';
   if ($('issueTeam')) $('issueTeam').value = '';
   if ($('issueProductType')) $('issueProductType').value = '';
   _issuePtComboSel = null;
@@ -10303,7 +10870,6 @@ async function handleIssueSubmit(e) {
     story_points: $('issuePoints').value ? parseInt($('issuePoints').value, 10) : null,
     team: $('issueTeam') ? ($('issueTeam').value || null) : null,
     product_type: ptPayload ? ptPayload.product_type : ($('issueProductType') ? ($('issueProductType').value || null) : null),
-    labels: $('issueLabels') ? $('issueLabels').value : '',
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
     description: (function() { var el = document.getElementById('issueDescContent'); if (!el) return ''; var h = el.innerHTML.trim(); return (h === '' || h === '<br>') ? '' : h; })(),
@@ -10480,7 +11046,7 @@ async function handleWorklogSubmit(e) {
 async function loadNotifications() {
   if (!S.currentUser) return;
   try {
-    var notifs = await api('/api/notifications?user_id=' + S.currentUser);
+    var notifs = await api('/api/notifications');
     S.data.notifications = Array.isArray(notifs) ? notifs : [];
     renderNotifBadge();
   } catch (e) {
@@ -10688,7 +11254,7 @@ window._markNotifRead = async function (id, link, type, spaceId, title) {
 };
 
 async function markAllRead() {
-  await api('/api/notifications/read-all', 'PUT', { user_id: S.currentUser });
+  await api('/api/notifications/read-all', 'PUT', {});
   if (S.data && S.data.notifications) {
     S.data.notifications.forEach(function (n) { n.is_read = true; });
   }
@@ -10793,13 +11359,14 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!cfContainer) return;
 
     function renderCF(cfs) {
-      var excluded = ['team', 'product type', 'environment', 'story category', 'testing'];
+      var excluded = ['team', 'product type'];
       var unique = [];
       var seen = {};
       cfs.forEach(function (f) {
         var key = (f.name || '').toLowerCase().trim();
         if (excluded.indexOf(key) !== -1) return;
         if (isCombinationField(f)) return;
+        if (!customFieldShowsIn(f, 'create')) return;
         if (seen[key]) return;
         seen[key] = true;
         unique.push(f);
@@ -10831,6 +11398,27 @@ document.addEventListener('DOMContentLoaded', function () {
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
             '<textarea class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" rows="3"></textarea></div>';
         }
+        if (f.field_type === 'date') {
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + req + '</label>' +
+            '<input type="date" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
+        }
+        if (f.field_type === 'checkbox') {
+          return '<div class="form-group">' +
+            '<label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
+            '<input type="checkbox" class="cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" value="true">' +
+            esc(f.name) + req + '</label></div>';
+        }
+        if (f.field_type === 'user') {
+          var userOpts = (S.data && S.data.users || []).filter(function (u) { return u.is_active !== false; });
+          var userSelect = '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '">' +
+            '<option value="">— Select user —</option>' +
+            userOpts.map(function (u) {
+              return '<option value="' + esc(u.id) + '">' + esc(u.name) + '</option>';
+            }).join('') + '</select>';
+          return '<div class="form-group">' +
+            '<label class="form-label">' + esc(f.name) + req + '</label>' + userSelect + '</div>';
+        }
         return '';
       }).join('');
       bindCreateModalCustomFields(cfContainer);
@@ -10842,10 +11430,10 @@ document.addEventListener('DOMContentLoaded', function () {
       renderCF(spaceCFs);
     } else if (spaceId) {
       cfContainer.innerHTML = '';
-      api('/api/data?space_id=' + spaceId).then(function (data) {
-        if (data && data.custom_fields && data.custom_fields.length) {
-          S.data.custom_fields = (S.data.custom_fields || []).filter(function (f) { return f.space_id !== spaceId; }).concat(data.custom_fields);
-          renderCF(data.custom_fields);
+      api('/api/custom-fields?space_id=' + encodeURIComponent(spaceId), 'GET', null, { silent: true }).then(function (data) {
+        if (data && data.length) {
+          S.data.custom_fields = (S.data.custom_fields || []).filter(function (f) { return f.space_id !== spaceId; }).concat(data);
+          renderCF(data);
         } else {
           cfContainer.innerHTML = '';
         }
@@ -10960,8 +11548,7 @@ document.addEventListener('DOMContentLoaded', function () {
     row.className = 'filter-condition-row';
     row.innerHTML = '<select class="input input-sm fc-field">' +
       '<option value="status">Status</option><option value="priority">Priority</option>' +
-      '<option value="type">Type</option><option value="assignee_id">Assignee</option>' +
-      '<option value="labels">Labels</option></select>' +
+      '<option value="type">Type</option><option value="assignee_id">Assignee</option></select>' +
       '<select class="input input-sm fc-op">' +
       '<option value="equals">equals</option><option value="not_equals">not equals</option>' +
       '<option value="contains">contains</option></select>' +
@@ -11139,127 +11726,17 @@ document.addEventListener('DOMContentLoaded', function () {
   document.addEventListener('click', function(e) {
     var btn = e.target.closest('.sidebar-collapse-toggle');
     if (!btn) return;
-    var content = btn.closest('.sidebar-section').querySelector('.sidebar-section-content');
+    e.preventDefault();
+    e.stopPropagation();
+    var section = btn.closest('.sidebar-section');
+    var content = section && section.querySelector('.sidebar-section-content');
     if (content) {
-      content.classList.toggle('collapsed');
-      btn.textContent = content.classList.contains('collapsed') ? '\u25B8' : '\u25BE';
+      var collapsed = content.classList.toggle('collapsed');
+      btn.textContent = collapsed ? '\u25B8' : '\u25BE';
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
   });
 });
-
-// ═══════════════════════════════════════════════════════════
-// USER MANAGEMENT VIEW
-// ═══════════════════════════════════════════════════════════
-async function renderUserManagement() {
-  var view = $('view-user-management');
-  if (!view) return;
-  var me = S.currentUserObj || {};
-  var isAdmin = me.role === 'admin' || me.role === 'owner';
-  if (!isAdmin) {
-    view.innerHTML = '<div class="view-empty"><h2>Access Denied</h2><p>Only admins can manage users.</p></div>';
-    return;
-  }
-
-  view.innerHTML = '<div class="settings-loading">Loading users...</div>';
-
-  var users = [];
-  try { users = await api('/api/users'); } catch (e) { return; }
-  var totalActive = users.filter(function(u){ return u.is_active !== false; }).length;
-  var pendingInvites = [];
-  try { var allInvites = await api('/api/auth/invitations'); var regEmails = users.map(function(u){ return u.email.toLowerCase(); }); pendingInvites = (allInvites||[]).filter(function(inv){ return inv.status==='pending' && !regEmails.includes(inv.email.toLowerCase()); }); } catch(e) {}
-
-  var rows = users.map(function (u) {
-    var statusBadge = u.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-muted">Inactive</span>';
-    var lastLogin = u.last_login ? relativeTime(u.last_login) : 'Never';
-    return '<tr data-um-status="' + (u.is_active !== false ? 'active' : 'inactive') + '" style="border-bottom:1px solid #f4f5f7" onmouseover="this.style.background=\'#f8f9fa\'" onmouseout="this.style.background=\'\'">' +
-      '<td style="padding:12px 20px;min-width:250px;max-width:300px"><div style="display:flex;align-items:center;gap:12px">' +
-      '<div class="user-avatar-sm" style="background:' + (u.color || '#6366f1') + ';flex-shrink:0">' + initials(u.name) + '</div>' +
-      '<div style="overflow:hidden"><div style="font-weight:600;color:#172b4d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.name) + '</div><div style="font-size:12px;color:#6b778c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.email) + '</div></div>' +
-      '</div></td>' +
-      '<td><select class="input input-sm um-role-sel" data-uid="' + u.id + '" ' + (u.id === me.id ? 'disabled' : '') + '>' +
-      ['owner','admin','member'].map(function(r){ return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+cap(r)+'</option>'; }).join('') +
-      '</select></td>' +
-      '<td style="padding:14px 16px">' + statusBadge + '</td>' +
-      '<td style="padding:14px 16px;font-size:13px;color:var(--text2)">' + lastLogin + '</td>' +
-      '<td>' +
-      (u.id !== me.id ? '<button class="btn btn-sm btn-outline um-toggle-btn" data-uid="' + u.id + '" data-active="' + u.is_active + '">' + (u.is_active ? 'Deactivate' : 'Activate') + '</button> ' : '') +
-      '<button class="btn btn-sm btn-outline um-pwd-btn" data-uid="' + u.id + '" data-uname="' + esc(u.name) + '">Reset PW</button>' +
-      '</td>' +
-      '</tr>';
-  }).join('');
-
-  view.innerHTML =
-    '<div style="padding:0">' +
-    '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px">' +
-    '<div>' +
-    '<h2 style="margin:0 0 6px;font-size:22px;font-weight:700;color:var(--text)">User Management</h2>' +
-    '<p style="margin:0 0 10px;color:var(--text2);font-size:14px">Manage all users, roles and access in your organization.</p>' +
-    '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
-    '<div class="um-filter-chip" data-filter="all" onclick="window._umFilter(\'all\')" style="display:flex;align-items:center;gap:6px;background:var(--bg3);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid #0129AC"><span style="font-weight:700;color:var(--text)">' + users.length + '</span><span style="color:var(--text3)">Registered</span></div>' +
-    '<div class="um-filter-chip" data-filter="active" onclick="window._umFilter(\'active\')" style="display:flex;align-items:center;gap:6px;background:#dcfce7;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid transparent"><span style="font-weight:700;color:#166534">' + totalActive + '</span><span style="color:#166534">Active</span></div>' +
-    '<div class="um-filter-chip" data-filter="inactive" onclick="window._umFilter(\'inactive\')" style="display:flex;align-items:center;gap:6px;background:#f1f5f9;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid transparent"><span style="font-weight:700;color:#64748b">' + (users.length - totalActive) + '</span><span style="color:#64748b">Inactive</span></div>' +
-    (pendingInvites.length ? '<div class="um-filter-chip" data-filter="pending" onclick="window._umFilter(\'pending\')" style="display:flex;align-items:center;gap:6px;background:#fef3c7;padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:2px solid transparent"><span style="font-weight:700;color:#92400e">' + pendingInvites.length + '</span><span style="color:#92400e">Pending Invites</span></div>' : '') +
-    '</div>' +
-    '</div>' +
-    '<button onclick="openInviteUserModal()" style="background:#0129AC;color:#fff;border:none;padding:9px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">+ Invite User</button>' +
-    '</div>' +
-    '<div style="margin-bottom:14px"><input type="text" id="userSearchInput" placeholder="Search by name or email..." oninput="window._filterUsers(this.value)" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text);font-size:14px;box-sizing:border-box;outline:none"></div>' +
-    '<div id="userTableWrap" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
-    '<table style="width:100%;border-collapse:collapse;table-layout:fixed"><thead><tr style="background:var(--bg3)">' +
-    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:30%">User</th>' +
-    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:15%">Role</th>' +
-    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:12%">Status</th>' +
-    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:15%">Last Login</th>' +
-    '<th style="padding:12px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);width:28%">Actions</th>' +
-    '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
-    '</div>';
-
-  // Filter chips
-  window._umFilter = function(filter) {
-    qsa('.um-filter-chip').forEach(function(chip) {
-      chip.style.border = chip.dataset.filter === filter ? '2px solid #0129AC' : '2px solid transparent';
-    });
-    qsa('tr[data-um-status]').forEach(function(row) {
-      row.style.display = (filter === 'all' || row.dataset.umStatus === filter) ? '' : 'none';
-    });
-    qsa('tr[data-um-invite]').forEach(function(row) {
-      row.style.display = (filter === 'all' || filter === 'pending') ? '' : 'none';
-    });
-  };
-
-  // Role change handlers
-  qsa('.um-role-sel').forEach(function (sel) {
-    sel.addEventListener('change', async function () {
-      var uid = sel.dataset.uid;
-      try {
-        await api('/api/users/' + uid, 'PUT', { role: sel.value });
-        toast('Role updated');
-      } catch (e) { /* shown by api */ }
-    });
-  });
-
-  // Activate/deactivate handlers
-  qsa('.um-toggle-btn').forEach(function (btn) {
-    btn.addEventListener('click', async function () {
-      var uid = btn.dataset.uid;
-      var isActive = btn.dataset.active === 'true';
-      var ok = await confirmDialog((isActive ? 'Deactivate' : 'Activate') + ' this user?');
-      if (!ok) return;
-      try {
-        await api('/api/users/' + uid, 'PUT', { is_active: !isActive });
-        toast('User ' + (isActive ? 'deactivated' : 'activated'));
-        renderUserManagement();
-      } catch (e) {}
-    });
-  });
-
-  // Reset password handlers
-  qsa('.um-pwd-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      openResetPasswordModal(btn.dataset.uid, btn.dataset.uname);
-    });
-  });
-}
 
 function openInviteUserModal() {
   var modal = $('modal-invite-user');
@@ -11424,15 +11901,6 @@ async function renderAdminOrgGeneral(el) {
     '<button type="submit" class="btn btn-primary btn-sm">Save Changes</button>' +
     '</div>' +
     '</form>' +
-    '</div>' +
-
-    '<div class="admin-card">' +
-    '<h3>Database Connection <span class="badge badge-success" style="margin-left:8px;font-size:11px">🟢 Live</span></h3>' +
-    '<div class="admin-field-row"><div class="admin-field-label">Host</div><code style="font-size:12px;background:var(--bg3);padding:3px 8px;border-radius:4px">localhost:5432</code></div>' +
-    '<div class="admin-field-row"><div class="admin-field-label">Database</div><code style="font-size:12px;background:var(--bg3);padding:3px 8px;border-radius:4px">sprintboard</code></div>' +
-    '<div class="admin-field-row"><div class="admin-field-label">User</div><code style="font-size:12px;background:var(--bg3);padding:3px 8px;border-radius:4px">postgres</code></div>' +
-    '<div class="admin-field-row"><div class="admin-field-label">Status</div><span class="badge badge-success">🟢 Active — All data persisted</span></div>' +
-    '<div class="admin-field-row"><div class="admin-field-label">Tables</div><span style="font-size:13px;color:var(--text)">18 tables · scrypt password hashing · session-based auth</span></div>' +
     '</div>';
 
   // Save org settings to DB
@@ -11482,25 +11950,17 @@ function renderAdminSecurity(el) {
     '<div><div class="admin-field-label">Minimum Length</div><div class="admin-field-desc">Minimum number of characters required</div></div>' +
     '<span style="font-size:13px;color:var(--text)">6 characters</span>' +
     '</div>' +
-    '<div class="admin-field-row">' +
-    '<div><div class="admin-field-label">Require Mixed Case</div></div>' +
-    '<label class="toggle-switch"><input type="checkbox" checked disabled><span class="toggle-slider"></span></label>' +
-    '</div>' +
-    '<div class="admin-field-row">' +
-    '<div><div class="admin-field-label">Require Special Characters</div></div>' +
-    '<label class="toggle-switch"><input type="checkbox" checked disabled><span class="toggle-slider"></span></label>' +
-    '</div>' +
     '</div>' +
 
     '<div class="admin-card">' +
     '<h3>Access Control</h3>' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Invite-Only Registration</div><div class="admin-field-desc">New users can only join via admin invite</div></div>' +
-    '<label class="toggle-switch"><input type="checkbox" checked disabled><span class="toggle-slider"></span></label>' +
+    '<span class="badge badge-success">Enabled</span>' +
     '</div>' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Admin User Creation</div><div class="admin-field-desc">Only admins and owners can create users</div></div>' +
-    '<label class="toggle-switch"><input type="checkbox" checked disabled><span class="toggle-slider"></span></label>' +
+    '<span class="badge badge-success">Enabled</span>' +
     '</div>' +
     '</div>';
 }
@@ -11637,7 +12097,11 @@ async function renderAdminUsers(el) {
     var ll = u.last_login ? relativeTime(u.last_login) : 'Never';
     var av = '<div style="width:38px;height:38px;border-radius:50%;background:' + (u.color||'#0129AC') + ';display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:13px;flex-shrink:0">' + initials(u.name) + '</div>';
     var info = '<div><div style="font-weight:600;font-size:14px;color:var(--text)">' + esc(u.name) + '</div><div style="font-size:12px;color:var(--text3);margin-top:2px">' + esc(u.email) + '</div></div>';
-    var rolesel = '<select class="input input-sm um-role-sel" data-uid="' + u.id + '" style="font-size:13px;height:30px;border-radius:6px;padding:0 8px;min-width:110px"' + (u.id===me.id?' disabled':'') + '>' + ['owner','admin','member'].map(function(r){ return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+cap(r)+'</option>'; }).join('') + '</select>';
+    var orgRole = (u.role === 'owner' || u.role === 'admin') ? 'admin' : 'member';
+    var rolesel = '<select class="input input-sm um-role-sel" data-uid="' + u.id + '" style="font-size:13px;height:30px;border-radius:6px;padding:0 8px;min-width:110px"' + (u.id===me.id?' disabled':'') + '>' +
+      '<option value="admin"' + (orgRole === 'admin' ? ' selected' : '') + '>Admin</option>' +
+      '<option value="member"' + (orgRole === 'member' ? ' selected' : '') + '>Member</option>' +
+      '</select>';
     var toggleBtn = u.id!==me.id ? '<button class="btn btn-sm um-toggle-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-active="'+u.is_active+'" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:#fff;border:none;background:'+(isActive?'#ef4444':'#22c55e')+'">'+(isActive?'Deactivate':'Activate')+'</button>' : '';
     var pwdBtn = '<button class="btn btn-sm um-pwd-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#0129AC;cursor:pointer;color:#fff">Reset PW</button>';
     var delBtn = u.id!==me.id ? '<button class="btn btn-sm um-delete-user-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-email="'+esc(u.email)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#dc2626;cursor:pointer;color:#fff">Delete</button>' : '';
@@ -11730,7 +12194,7 @@ async function renderAdminUsers(el) {
     sel.addEventListener('change', async function() {
       try {
         await api('/api/users/'+sel.dataset.uid, 'PUT', { role: sel.value });
-        popupAlert('Role Updated', 'User role changed to ' + cap(sel.value) + ' successfully.', 'success');
+        popupAlert('Role Updated', 'User role changed to ' + formatOrgRoleLabel(sel.value) + ' successfully.', 'success');
       } catch(e) {}
     });
   });
@@ -11858,52 +12322,51 @@ async function renderAdminUsers(el) {
 // ── Roles & Permissions ───────────────────────────────────
 function renderAdminRoles(el) {
   var perms = [
-    { action: 'Create Space',       owner: true,  admin: true,  member: false },
-    { action: 'Delete Space',       owner: true,  admin: true,  member: false },
-    { action: 'Manage Space Members', owner: true, admin: true, member: false },
-    { action: 'Invite Users',       owner: true,  admin: true,  member: false },
-    { action: 'Manage User Roles',  owner: true,  admin: true,  member: false },
-    { action: 'Create Issue',       owner: true,  admin: true,  member: true  },
-    { action: 'Edit Issue',         owner: true,  admin: true,  member: true  },
-    { action: 'Delete Issue',       owner: true,  admin: true,  member: false },
-    { action: 'Create Sprint',      owner: true,  admin: true,  member: false },
-    { action: 'Start/Complete Sprint', owner: true, admin: true, member: false },
-    { action: 'Add Comments',       owner: true,  admin: true,  member: true  },
-    { action: 'Log Work',           owner: true,  admin: true,  member: true  },
-    { action: 'Manage Custom Fields', owner: true, admin: true, member: false },
-    { action: 'View Admin Settings', owner: true, admin: true,  member: false },
-    { action: 'Deactivate Users',   owner: true,  admin: true,  member: false },
+    { action: 'Create Space',            orgAdmin: true,  spaceAdmin: false, member: false },
+    { action: 'Delete Space',            orgAdmin: true,  spaceAdmin: false, member: false },
+    { action: 'Assign Space Admin',      orgAdmin: true,  spaceAdmin: false, member: false },
+    { action: 'Manage Space Members',    orgAdmin: true,  spaceAdmin: true,  member: false },
+    { action: 'Invite Org Users',        orgAdmin: true,  spaceAdmin: false, member: false },
+    { action: 'Manage Org User Roles',   orgAdmin: true,  spaceAdmin: false, member: false },
+    { action: 'Create / Edit Issue',     orgAdmin: true,  spaceAdmin: true,  member: true  },
+    { action: 'Delete Issue',            orgAdmin: true,  spaceAdmin: true,  member: false },
+    { action: 'Create / Manage Sprint',  orgAdmin: true,  spaceAdmin: true,  member: false },
+    { action: 'View Space Reports',      orgAdmin: true,  spaceAdmin: true,  member: false },
+    { action: 'Space Settings',          orgAdmin: true,  spaceAdmin: true,  member: false },
+    { action: 'Manage Custom Fields',    orgAdmin: true,  spaceAdmin: true,  member: false },
+    { action: 'Add Comments & Log Work', orgAdmin: true,  spaceAdmin: true,  member: true  },
+    { action: 'Org Admin Settings',      orgAdmin: true,  spaceAdmin: false, member: false },
   ];
 
   var rows = perms.map(function(p) {
     return '<tr>' +
       '<td style="font-size:13px">' + p.action + '</td>' +
-      '<td class="' + (p.owner?'perm-check':'perm-cross') + '">' + (p.owner?'✓':'—') + '</td>' +
-      '<td class="' + (p.admin?'perm-check':'perm-cross') + '">' + (p.admin?'✓':'—') + '</td>' +
-      '<td class="' + (p.member?'perm-check':'perm-cross') + '">' + (p.member?'✓':'—') + '</td>' +
+      '<td class="' + (p.orgAdmin ? 'perm-check' : 'perm-cross') + '">' + (p.orgAdmin ? '✓' : '—') + '</td>' +
+      '<td class="' + (p.spaceAdmin ? 'perm-check' : 'perm-cross') + '">' + (p.spaceAdmin ? '✓' : '—') + '</td>' +
+      '<td class="' + (p.member ? 'perm-check' : 'perm-cross') + '">' + (p.member ? '✓' : '—') + '</td>' +
       '</tr>';
   }).join('');
 
   el.innerHTML =
     '<div class="admin-section-header">' +
     '<h2>🛡️ Roles &amp; Permissions</h2>' +
-    '<p>Overview of what each role can do in the workspace.</p>' +
+    '<p>Three-tier access: Org Admin, Space Admin (per space), and Member.</p>' +
     '</div>' +
 
     '<div class="admin-card" style="padding:0;overflow:hidden">' +
     '<table class="perm-table"><thead><tr>' +
     '<th style="width:55%">Permission</th>' +
-    '<th style="width:15%;text-align:center">Owner</th>' +
     '<th style="width:15%;text-align:center">Admin</th>' +
+    '<th style="width:15%;text-align:center">Space Admin</th>' +
     '<th style="width:15%;text-align:center">Member</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table>' +
     '</div>' +
 
     '<div class="admin-card" style="margin-top:16px">' +
     '<h3>Role Descriptions</h3>' +
-    '<div class="admin-field-row"><div><div class="admin-field-label">👑 Owner</div><div class="admin-field-desc">Full control — created the organization. Can manage billing, delete org, all permissions.</div></div></div>' +
-    '<div class="admin-field-row"><div><div class="admin-field-label">🛡️ Admin</div><div class="admin-field-desc">Can manage users, spaces, and all settings. Cannot delete the organization.</div></div></div>' +
-    '<div class="admin-field-row"><div><div class="admin-field-label">👤 Member</div><div class="admin-field-desc">Can create and edit issues, add comments and log work. No admin capabilities.</div></div></div>' +
+    '<div class="admin-field-row"><div><div class="admin-field-label">🛡️ Admin</div><div class="admin-field-desc">Full organization control — create spaces, assign org admins and space admins, manage all users and settings.</div></div></div>' +
+    '<div class="admin-field-row"><div><div class="admin-field-label">📁 Space Admin</div><div class="admin-field-desc">Manages assigned space(s): sprints, members (member role only), settings, reports, and custom fields. One user can be space admin on multiple spaces.</div></div></div>' +
+    '<div class="admin-field-row"><div><div class="admin-field-label">👤 Member</div><div class="admin-field-desc">Works on issues in assigned spaces — create/edit tickets, comments, and work logs. No sprints, reports, or settings access.</div></div></div>' +
     '</div>';
 }
 
@@ -12185,9 +12648,8 @@ document.addEventListener('paste', function(e) {
       } else {
         active.appendChild(img);
       }
-      // Autosave with innerHTML to preserve image
-      var field = active.id === 'drawerDesc' ? 'description' : 'fix_description';
-      autoSave(field, active.innerHTML.trim());
+      // Mark dirty — user must click Save (Jira-style)
+      markDrawerDescDirty(active.id);
     };
     reader.readAsDataURL(file);
     break;
@@ -12377,6 +12839,10 @@ function awInlineStatus(e, issueId, current) {
     return { value: s, html: '<span style="font-size:14px;color:#172b4d;flex:1">' + s + '</span>' + check };
   });
   _awShowMenu(e, items, function(val) {
+    if (val === 'Done') {
+      var cached = (S.data.issues || []).find(function (iss) { return iss.id === issueId; });
+      if (!canTransitionIssueToDone(cached || issueId, current)) return;
+    }
     api('/api/issues/' + issueId, 'PUT', { status: val }).then(function (updated) {
       afterIssueFieldUpdate(issueId, {
         status: val,
@@ -12617,7 +13083,10 @@ window._copyIssueUrl = function() {
     el.addEventListener("blur",function(){
       var h=el.innerHTML;
       var h2=h.replace(/(?<!href=")(https?:\/\/[^\s<"]+)/g,'<a href="$1" style="color:#0129AC;text-decoration:underline;cursor:pointer" target="_blank">$1</a>');
-      if(h2!==h){el.innerHTML=h2;autoSave(field,h2.trim());}
+      if(h2!==h){
+        el.innerHTML=h2;
+        markDrawerDescDirty(el.id);
+      }
     });
   }
   function init(){
@@ -12686,7 +13155,7 @@ window._copyIssueUrl = function() {
   function gsShowRecent() {
     var drop = $('globalSearchDrop');
     if (!drop) return;
-    var issues = (S.data && S.data.issues || [])
+    var issues = getVisibleIssues()
       .slice().sort(function(a,b){ return new Date(b.updated_at)-new Date(a.updated_at); })
       .slice(0, 8);
     if (!issues.length) { drop.setAttribute('hidden',''); return; }
@@ -12699,7 +13168,7 @@ window._copyIssueUrl = function() {
     var drop = $('globalSearchDrop');
     if (!drop) return;
     var lower = q.toLowerCase();
-    var issues = (S.data && S.data.issues || []).filter(function(i) {
+    var issues = getVisibleIssues().filter(function(i) {
       return (issueKeyStr(i) || '').toLowerCase().indexOf(lower) !== -1 ||
              (i.title || '').toLowerCase().indexOf(lower) !== -1 ||
              (i.status || '').toLowerCase().indexOf(lower) !== -1;
@@ -12834,6 +13303,11 @@ document.addEventListener("click",function(e){
 });
 
 async function renderDeletedTickets(el) {
+  var me = S.currentUserObj || {};
+  if (me.role !== 'admin' && me.role !== 'owner') {
+    el.innerHTML = '<div class="view-empty"><h2>Access Denied</h2><p>Only org admins can view deleted tickets.</p></div>';
+    return;
+  }
   el.innerHTML = '<div style="padding:20px;color:var(--text3)">Loading deleted tickets...</div>';
   try {
     var tickets = await api('/api/issues/deleted');
@@ -12851,7 +13325,7 @@ async function renderDeletedTickets(el) {
         '<td style="padding:10px 12px">' + esc(t.title||'No title') + '</td>' +
         '<td style="padding:10px 12px">' + esc(t.status||'') + '</td>' +
         '<td style="padding:10px 12px;color:var(--text3);font-size:12px">' + fmtDateTime(t.deleted_at) + '</td>' +
-        '<td style="padding:10px 12px"><button class="btn btn-sm btn-outline" onclick="window._restoreTicket(\'' + t.id + '\',this)">∩ Restore</button></td>' +
+        '<td style="padding:10px 12px"><button class="btn btn-sm btn-outline" onclick="window._restoreTicket(\'' + t.id + '\',this)">Restore</button></td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';

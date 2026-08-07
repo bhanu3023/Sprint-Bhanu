@@ -77,7 +77,7 @@
         <div class="sidebar-section">
           <div class="sidebar-section-header">
             <span class="sidebar-section-label">STARRED</span>
-            <button class="btn-icon sidebar-collapse-toggle" aria-label="Toggle starred issues">▾</button>
+            <button type="button" class="btn-icon sidebar-collapse-toggle" aria-label="Toggle starred issues" aria-expanded="true">▾</button>
           </div>
           <div id="favIssues" class="sidebar-section-content"></div>
         </div>
@@ -219,12 +219,12 @@
               <div id="myIssues" class="db-issue-list"></div>
             </div>
 
-            <!-- Recent Activity -->
+            <!-- Team activity in your spaces -->
             <div class="db-panel">
-              <div class="db-panel-header" style="cursor:pointer" onclick="navigateToYourWorkRecent()" title="Open Recently Viewed">
+              <div class="db-panel-header">
                 <span class="db-panel-title">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/></svg>
-                  Recent Activity (24h)
+                  Team Activity (24h)
                 </span>
               </div>
               <div id="recentActivity" class="db-activity-list"></div>
@@ -510,6 +510,7 @@
                 <div class="admin-nav-label">SYSTEM</div>
                 <a class="admin-nav-item" data-section="email-settings">✉️ Email / SMTP</a>
                 <a class="admin-nav-item" data-section="audit-log">📋 Audit Log</a>
+                <a class="admin-nav-item" data-section="deleted-tickets">🗑️ Deleted Tickets</a>
               </div>
             </aside>
             <!-- Right content -->
@@ -646,6 +647,16 @@
           <div id="allWorkTable" class="table-container"></div>
         </div>
 
+        <!-- Space: Calendar -->
+        <div class="view" id="view-calendar" hidden>
+          <div class="view-toolbar" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <button type="button" class="calendar-nav-btn" id="calendarPrev" aria-label="Previous month">&#8592;</button>
+            <span id="calendarHeader" class="calendar-header-label"></span>
+            <button type="button" class="calendar-nav-btn" id="calendarNext" aria-label="Next month">&#8594;</button>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </div>
+
         <!-- Space: Filters -->
         <div class="view" id="view-filters" hidden>
           <div class="view-toolbar">
@@ -666,9 +677,6 @@
           </div>
           <div id="settingsTabContent"></div>
         </div>
-
-        <!-- User Management View -->
-        <div class="view" id="view-user-management" hidden></div>
 
       </div>
     </div>
@@ -743,6 +751,10 @@
                     </div>
                     <div id="drawerDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a description..."></div>
                   </div>
+                  <div id="drawerDescBtns" class="drawer-editor-actions" style="display:none">
+                    <button type="button" id="drawerDescSave" class="btn btn-primary btn-sm">Save</button>
+                    <button type="button" id="drawerDescCancel" class="btn btn-secondary btn-sm">Cancel</button>
+                  </div>
                 </div>
                 <div class="drawer-detail-row">
                   <span class="drawer-detail-label">Fix Description</span>
@@ -765,6 +777,10 @@
                       <button class="jira-tb-btn" onmousedown="event.preventDefault();richInsertCode('drawerFixDesc')" title="Inline code"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
                     </div>
                     <div id="drawerFixDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a fix description..."></div>
+                  </div>
+                  <div id="drawerFixDescBtns" class="drawer-editor-actions" style="display:none">
+                    <button type="button" id="drawerFixDescSave" class="btn btn-primary btn-sm">Save</button>
+                    <button type="button" id="drawerFixDescCancel" class="btn btn-secondary btn-sm">Cancel</button>
                   </div>
                 </div>
               </div>
@@ -873,7 +889,7 @@
           <!-- RIGHT: Details sidebar -->
           <div class="drawer-sidebar">
             <div class="drawer-sidebar-section">
-              <h4 class="drawer-sidebar-heading">Details</h4>
+              <h4 class="drawer-sidebar-heading drawer-sidebar-heading-highlight">Details</h4>
               <table class="drawer-fields-table">
                 <tbody>
                   <tr><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
@@ -881,7 +897,6 @@
                   <tr><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
                   <tr><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>
                   <tr><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select"></select></td></tr>
-                  <tr><td class="dfl">Labels</td><td class="dfv"><input type="text" id="drawerLabels" class="drawer-input" placeholder="Add labels..."></td></tr>
                   <tr><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—"></td></tr>
                   <tr><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option><option value="Dev">Dev</option><option value="QA">QA</option><option value="Infra">Infra</option><option value="Manage">Manage</option></select></td></tr>
                   <tr id="drawerProductTypeRow"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option><option value="Message">Message Type</option><option value="Email">Mail Type</option><option value="Content">Content Type</option><option value="Manage">Manage</option><option value="Infra">Infra</option></select></td></tr>
@@ -1242,9 +1257,7 @@
             <label class="form-label" for="inviteMemberRole">Role</label>
             <select id="inviteMemberRole" class="input">
               <option value="member">Member</option>
-              <option value="site_admin">Site Admin</option>
-              <option value="manager">Manager</option>
-              <option value="viewer">Viewer</option>
+              <option value="site_admin">Space Admin</option>
             </select>
           </div>
         </form>
