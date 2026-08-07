@@ -21,6 +21,14 @@ const RESERVED_FIELD_NAMES = new Set([
 function normalizeFieldName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 function isReservedFieldName(name) { return RESERVED_FIELD_NAMES.has(normalizeFieldName(name)); }
 
+/** Reserved names are OK when updating an existing built-in registry row (not renaming). */
+function reservedNameBlockedForUpdate(name, existing) {
+  if (!isReservedFieldName(name)) return false;
+  if (!existing) return true;
+  if (existing.is_builtin) return false;
+  return normalizeFieldName(existing.name) !== normalizeFieldName(name);
+}
+
 // Install nodemailer if not present
 let nodemailer;
 try {
@@ -84,7 +92,7 @@ const {
   getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId,
   getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed
 } = require('./lib/permissions');
-const { seedDefaultCustomFields, ensureDefaultCustomFields } = require('./lib/default-space-fields');
+const { seedBuiltinIssueFields } = require('./lib/builtin-issue-fields');
 const https = require('https');
 
 // ── Microsoft OAuth2 state store (CSRF) ───────────────────
@@ -292,9 +300,9 @@ app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
     [id, name, key, description, icon, color, space_type, visibility, owner_id]);
   await q(`INSERT INTO space_members(id,space_id,user_id,role) VALUES($1,$2,$3,'site_admin')`, [uid(), id, owner_id]);
   try {
-    await seedDefaultCustomFields(q, uid, id);
+    await seedBuiltinIssueFields(q, uid, id, r.rows[0]);
   } catch (e) {
-    console.error('[spaces] Default custom fields seed failed:', e.message);
+    console.error('[spaces] Built-in field seed failed:', e.message);
   }
   res.status(201).json(r.rows[0]);
 }));
@@ -1085,11 +1093,15 @@ app.get('/api/custom-fields', requireAuth, wrap(async (req, res) => {
   if (sid && !(await denyUnlessCanAct(q, req.user, res, sid, 'custom_field.read'))) return;
   if (sid) {
     try {
-      await ensureDefaultCustomFields(q, uid, sid);
+      const sp = (await q('SELECT id, name, key FROM spaces WHERE id=$1', [sid])).rows[0];
+      if (sp) await seedBuiltinIssueFields(q, uid, sid, sp);
     } catch (e) {
-      console.error('[custom-fields] Default field seed failed for space', sid, e.message);
+      console.warn('[custom-fields] Built-in seed skipped:', e.message);
     }
-    const r = await q('SELECT * FROM custom_fields WHERE space_id=$1 ORDER BY position', [sid]);
+    const r = await q(
+      'SELECT * FROM custom_fields WHERE space_id=$1 ORDER BY is_builtin DESC, position, name',
+      [sid]
+    );
     return res.json(r.rows);
   }
   const r = isOrgAdmin(req.user.role)
@@ -1148,13 +1160,27 @@ app.post('/api/custom-fields/create-for-all', requireAuth, wrap(async (req, res)
 }));
 
 app.put('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
-  const spaceId = await getCustomFieldSpaceId(q, req.params.id);
-  if (!spaceId) return res.status(404).json({ error: 'Field not found' });
-  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'custom_field.manage'))) return;
+  const existing = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
+  if (!existing) return res.status(404).json({ error: 'Field not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, existing.space_id, 'custom_field.manage'))) return;
+
   const body = { ...req.body };
-  if (body.name !== undefined && isReservedFieldName(body.name)) {
+  delete body.space_id;
+
+  if (existing.is_builtin) {
+    // Built-in registry: config only (required, options, show_in, position)
+    delete body.name;
+    delete body.field_type;
+    delete body.field_key;
+    delete body.is_builtin;
+  } else if (body.name !== undefined && reservedNameBlockedForUpdate(body.name, existing)) {
     return res.status(400).json({ error: `"${body.name}" is a built-in field name — choose a different name for this custom field` });
   }
+
+  if (body.options != null && typeof body.options === 'object') {
+    body.options = JSON.stringify(body.options);
+  }
+
   const upd = buildDynamicUpdate('custom_fields', body, 2);
   if (!upd) return res.status(400).json({ error: 'Nothing to update' });
   const r = await q(`UPDATE custom_fields SET ${upd.set} WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
@@ -1219,9 +1245,12 @@ app.put('/api/issues/:id/field-values/:fieldId', requireAuth, wrap(async (req, r
 }));
 
 app.delete('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
-  const spaceId = await getCustomFieldSpaceId(q, req.params.id);
-  if (!spaceId) return res.status(404).json({ error: 'Field not found' });
-  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'custom_field.manage'))) return;
+  const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
+  if (!field) return res.status(404).json({ error: 'Field not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, field.space_id, 'custom_field.manage'))) return;
+  if (field.is_builtin && field.field_key === 'title') {
+    return res.status(400).json({ error: 'Title is a required built-in field and cannot be removed' });
+  }
   await q('DELETE FROM issue_field_values WHERE field_id=$1', [req.params.id]);
   await q('DELETE FROM custom_fields WHERE id=$1', [req.params.id]);
   res.json({ ok: true });

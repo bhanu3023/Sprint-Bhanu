@@ -179,7 +179,7 @@ function validateIssueForDone(issueOrId) {
       missing.push('Product Type');
     } else {
       var needsCombo = sel.productTypes.some(function (t) {
-        return getPtComboTypesNeedingCombination().indexOf(t) >= 0;
+        return productTypeHasCombinations(t) || productTypeUsesAllCombinations(t);
       });
       if (needsCombo && (!sel.combinations || !sel.combinations.length)) missing.push('Combination');
     }
@@ -905,6 +905,45 @@ function getSpaceIssues(spaceId) {
 
 function getSpaceSprints(spaceId) {
   return (S.data.sprints || []).filter(function (sp) { return sp.space_id == spaceId; });
+}
+
+/** True if user is on the sprint's Developer or QA roster. */
+function isUserInSprint(sp, userId) {
+  if (!sp || !userId) return false;
+  var devs = sp.developer_ids || [];
+  var qas = sp.qa_ids || [];
+  return devs.indexOf(userId) >= 0 || qas.indexOf(userId) >= 0;
+}
+
+/** Non-completed sprints the user may assign when creating an issue. */
+function getIssueFormSprints(spaceId, opts) {
+  opts = opts || {};
+  if (!spaceId) return [];
+  var includeSprintId = opts.includeSprintId;
+  var userId = S.currentUser;
+  var adminForSpace = isOrgAdminUser() || canManageSpace(spaceId);
+  return getSpaceSprints(spaceId).filter(function (sp) {
+    if (sp.status === 'completed') return false;
+    if (includeSprintId && sp.id === includeSprintId) return true;
+    if (adminForSpace) return true;
+    return isUserInSprint(sp, userId);
+  });
+}
+
+/** Set create-issue start/due dates from the selected sprint. */
+function applySprintDatesToIssueForm(sprintId) {
+  var startEl = $('issueStartDate');
+  var dueEl = $('issueDueDate');
+  if (!startEl || !dueEl) return;
+  if (!sprintId) {
+    startEl.value = fmtDateISO(new Date());
+    dueEl.value = '';
+    return;
+  }
+  var sprint = (S.data.sprints || []).find(function (sp) { return sp.id === sprintId; });
+  if (!sprint) return;
+  if (sprint.start_date) startEl.value = fmtDateISO(sprint.start_date);
+  if (sprint.end_date) dueEl.value = fmtDateISO(sprint.end_date);
 }
 
 function isIssueStarred(issueId) {
@@ -4660,9 +4699,12 @@ window._addIssueToSprint = function (sprintId) {
   resetIssueForm();
   $('issueSpaceId').value = S.currentSpace;
   $('issueModalTitle').textContent = 'Create Issue';
-  populateIssueFormSelects();
-  if (window._onIssueSpaceChange) window._onIssueSpaceChange(S.currentSpace || '');
-  if (sprintId) $('issueSprint').value = sprintId;
+  populateIssueFormSelects({ includeSprintId: sprintId });
+  if (window._onIssueSpaceChange) window._onIssueSpaceChange(S.currentSpace || '', sprintId);
+  if (sprintId) {
+    $('issueSprint').value = sprintId;
+    applySprintDatesToIssueForm(sprintId);
+  }
   openModal('modal-issue');
 };
 
@@ -7452,6 +7494,125 @@ function customFieldShowsIn(field, place) {
   return false;
 }
 
+function getSpaceFieldRows(spaceId) {
+  if (!spaceId) return [];
+  return (S.data.custom_fields || []).filter(function (f) { return String(f.space_id) === String(spaceId); });
+}
+
+function findSpaceFieldByKey(spaceId, fieldKey) {
+  return getSpaceFieldRows(spaceId).find(function (f) {
+    if (f.field_key === fieldKey) return true;
+    if (fieldKey === 'combination' && isCombinationField(f)) return true;
+    if (fieldKey === 'product_type' && (f.name || '').toLowerCase().trim() === 'product type') return true;
+    return false;
+  }) || null;
+}
+
+function ensureSpaceFieldsLoaded(spaceId) {
+  if (!spaceId) return Promise.resolve([]);
+  if (getSpaceFieldRows(spaceId).length) return Promise.resolve(getSpaceFieldRows(spaceId));
+  return api('/api/custom-fields?space_id=' + encodeURIComponent(spaceId), 'GET', null, { silent: true })
+    .then(function (data) {
+      if (Array.isArray(data) && data.length) {
+        S.data.custom_fields = (S.data.custom_fields || [])
+          .filter(function (f) { return String(f.space_id) !== String(spaceId); })
+          .concat(data);
+      }
+      return getSpaceFieldRows(spaceId);
+    })
+    .catch(function () { return []; });
+}
+
+function isSpaceBuiltinFieldEnabled(spaceId, fieldKey, place) {
+  if (fieldKey === 'title' || fieldKey === 'status') return true;
+  var field = findSpaceFieldByKey(spaceId, fieldKey);
+  if (!field) return false;
+  if (place && !customFieldShowsIn(field, place)) return false;
+  return true;
+}
+
+function applyBuiltinFieldVisibility(spaceId, rootEl, place) {
+  var root = rootEl || document;
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll('[data-builtin-field]').forEach(function (el) {
+    var key = el.getAttribute('data-builtin-field');
+    if (key === 'combination' || key === 'product_type') return;
+    var locked = el.getAttribute('data-builtin-locked') === 'true';
+    var show = locked || isSpaceBuiltinFieldEnabled(spaceId, key, place);
+    el.hidden = !show;
+  });
+}
+
+function formatFieldShowIn(field) {
+  var show = field && field.show_in;
+  if (!show || !show.length) return 'Drawer';
+  var labels = [];
+  if (show.indexOf('create') >= 0) labels.push('Create');
+  if (show.indexOf('drawer') >= 0) labels.push('Drawer');
+  return labels.join(', ') || 'Drawer';
+}
+
+function isLockedBuiltinField(field) {
+  return !!(field && field.is_builtin && field.field_key === 'title');
+}
+
+function isCombinationField(field) {
+  if (!field) return false;
+  if (field.field_key === 'combination') return true;
+  return (field.name || '').toLowerCase().trim() === 'combination';
+}
+
+function isBuiltinProductTypeField(field) {
+  return !!(field && (field.field_key === 'product_type' || ((field.name || '').toLowerCase().trim() === 'product type' && field.is_builtin)));
+}
+
+var BUILTIN_SELECT_DEFAULTS = {
+  type: ['epic', 'story', 'task', 'bug', 'subtask'],
+  priority: ['highest', 'high', 'medium', 'low', 'lowest'],
+  team: ['Dev', 'QA', 'Infra', 'Manage', 'Product_Team'],
+  product_type: ['Message', 'Email', 'Content', 'Manage', 'Infra']
+};
+
+function getBuiltinDefaultOptions(field) {
+  if (!field || !field.field_key) return [];
+  return (BUILTIN_SELECT_DEFAULTS[field.field_key] || []).slice();
+}
+
+function formatFieldOptionsForEditor(field) {
+  if (!field) return '';
+  var raw = field.options;
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw); } catch (_) {}
+  }
+  if (raw && raw.v === 2 && raw.groups) return '';
+  if (Array.isArray(raw) && raw.length) {
+    return raw.map(function (o) {
+      if (o && typeof o === 'object') return String(o.value != null ? o.value : (o.label != null ? o.label : o));
+      return String(o);
+    }).join(', ');
+  }
+  return getBuiltinDefaultOptions(field).join(', ');
+}
+
+function readShowInFromField(field) {
+  var show = field && field.show_in;
+  if (!show || !show.length) return { create: false, drawer: true };
+  return { create: show.indexOf('create') >= 0, drawer: show.indexOf('drawer') >= 0 };
+}
+
+function writeShowInToForm(field) {
+  var places = readShowInFromField(field);
+  if ($('customFieldShowInCreate')) $('customFieldShowInCreate').checked = places.create;
+  if ($('customFieldShowInDrawer')) $('customFieldShowInDrawer').checked = places.drawer;
+}
+
+function readShowInFromForm() {
+  var show = [];
+  if ($('customFieldShowInCreate') && $('customFieldShowInCreate').checked) show.push('create');
+  if ($('customFieldShowInDrawer') && $('customFieldShowInDrawer').checked) show.push('drawer');
+  return show.length ? show : ['drawer'];
+}
+
 function renderSettingsCustomFields(space) {
   $('settingsTabContent').innerHTML =
     '<div class="text-muted" style="padding:24px;text-align:center">Loading custom fields…</div>';
@@ -7470,7 +7631,10 @@ function renderSettingsCustomFields(space) {
 }
 
 function paintSettingsCustomFields(space) {
-  var fields = (S.data.custom_fields || []).filter(function (f) { return f.space_id == space.id; });
+  var fields = getSpaceFieldRows(space.id).slice().sort(function (a, b) {
+    if (!!a.is_builtin !== !!b.is_builtin) return a.is_builtin ? -1 : 1;
+    return (a.position || 0) - (b.position || 0) || String(a.name).localeCompare(String(b.name));
+  });
 
   var rowsHtml = '';
   for (var i = 0; i < fields.length; i++) {
@@ -7481,30 +7645,46 @@ function paintSettingsCustomFields(space) {
       optionsDisplay = 'Message: ' + (pg.groups.Message || []).length +
         ', Mail: ' + (pg.groups.Email || []).length +
         ', Content: ' + (pg.groups.Content || []).length;
+    } else if (f.is_builtin && (f.field_key === 'product_type' || f.field_key === 'team' || f.field_key === 'type' || f.field_key === 'priority')) {
+      var optVals = normalizeCFOptions(f.options);
+      optionsDisplay = optVals.length ? optVals.join(', ') : formatFieldOptionsForEditor(f);
+    } else if (f.is_builtin) {
+      optionsDisplay = 'Built-in issue column';
     } else if (f.options) {
       optionsDisplay = Array.isArray(f.options) ? f.options.join(', ') : String(f.options);
     }
+    var sourceBadge = f.is_builtin
+      ? '<span class="badge" style="background:var(--primary-light,#ede9fe);color:var(--primary,#5b21b6)">Built-in</span>'
+      : '<span class="badge badge-muted">Custom</span>';
+    var deleteBtn = isLockedBuiltinField(f)
+      ? '<span class="text-muted text-sm">Required</span>'
+      : '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '">Remove</button>';
+    var applyBtn = f.is_builtin
+      ? ''
+      : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
     rowsHtml += '<tr>' +
       '<td>' + esc(f.name) + '</td>' +
+      '<td>' + sourceBadge + '</td>' +
       '<td><span class="badge badge-muted">' + esc(f.field_type || f.type) + '</span></td>' +
       '<td>' + (f.is_required ? '\u2705 Yes' : 'No') + '</td>' +
+      '<td class="text-muted text-sm">' + esc(formatFieldShowIn(f)) + '</td>' +
       '<td class="text-muted text-sm">' + esc(optionsDisplay) + '</td>' +
       '<td>' +
         '<button class="btn btn-outline btn-sm cf-edit-btn" data-field-id="' + f.id + '">Edit</button> ' +
-        '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ' +
-        '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '">Delete</button>' +
+        applyBtn +
+        deleteBtn +
       '</td>' +
       '</tr>';
   }
 
   var html = '<div class="flex items-center justify-between mb-16">' +
-    '<h3 style="margin:0">Custom Fields</h3>' +
+    '<h3 style="margin:0">Issue Fields</h3>' +
     '<button class="btn btn-primary btn-sm" id="addCustomFieldBtnSettings">+ Add Field</button>' +
     '</div>' +
     '<div class="table-container"><table class="data-table" style="width:100%"><thead><tr>' +
-    '<th>Name</th><th>Type</th><th>Required</th><th>Options</th><th style="width:280px">Actions</th>' +
-    '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:24px">No custom fields yet — refresh the page</td></tr>') + '</tbody></table></div>' +
-    '<p class="text-muted text-sm" style="margin-top:12px">Default fields (Environment, Severity, etc.) are added automatically for every space. Edit, delete, or add more below.</p>';
+    '<th>Name</th><th>Source</th><th>Type</th><th>Required</th><th>Show in</th><th>Options</th><th style="width:300px">Actions</th>' +
+    '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:24px">No fields yet — refresh the page</td></tr>') + '</tbody></table></div>' +
+    '<p class="text-muted text-sm" style="margin-top:12px">Built-in fields (Title, Team, Sprint, etc.) are added automatically for each space. Remove a field to hide it on create/drawer forms. Use <strong>+ Add Field</strong> for extra custom fields (Environment, Severity, etc.).</p>';
 
   $('settingsTabContent').innerHTML = html;
 
@@ -7525,7 +7705,7 @@ function paintSettingsCustomFields(space) {
     btn.addEventListener('click', async function () {
       var fieldId = btn.dataset.fieldId;
       var fieldName = btn.dataset.fieldName;
-      var ok = await confirmDialog('Delete custom field "' + fieldName + '"?');
+      var ok = await confirmDialog('Remove "' + fieldName + '" from this space? It will be hidden on create and issue forms.');
       if (!ok) return;
       try {
         await api('/api/custom-fields/' + fieldId, 'DELETE');
@@ -7731,12 +7911,16 @@ $('inviteMemberForm').addEventListener('submit', async function (e) {
 
 function openCustomFieldModal(field) {
   var isCombo = field && isCombinationField(field);
+  var isBuiltin = !!(field && field.is_builtin);
+  var isProductTypeBuiltin = field && isBuiltinProductTypeField(field);
+  var canEditOptions = isCombo || isProductTypeBuiltin || (isBuiltin && field.field_type === 'select') || (!isBuiltin && field && (field.field_type === 'select' || field.field_type === 'multi_select'));
   if (field) {
-    $('customFieldModalTitle').textContent = isCombo ? 'Edit Combination (by Product Type)' : 'Edit Custom Field';
+    $('customFieldModalTitle').textContent = isCombo ? 'Edit Combination (by Product Type)' : (isProductTypeBuiltin ? 'Edit Product Type options' : (isBuiltin ? 'Edit Built-in Field' : 'Edit Custom Field'));
     $('customFieldId').value = field.id;
     $('customFieldName').value = field.name || '';
     $('customFieldType').value = field.field_type || field.type || 'text';
     $('customFieldRequired').checked = !!(field.is_required || field.required);
+    writeShowInToForm(field);
     if (isCombo) {
       var parsed = parseCombinationFieldOptions(field);
       $('cfComboMessage').value = (parsed.groups.Message || []).join('\n');
@@ -7744,8 +7928,10 @@ function openCustomFieldModal(field) {
       $('cfComboContent').value = (parsed.groups.Content || []).join('\n');
       $('customFieldOptions').value = '';
     } else {
-      var opts = field.options ? (Array.isArray(field.options) ? field.options.join(', ') : field.options) : '';
-      $('customFieldOptions').value = opts;
+      $('customFieldOptions').value = formatFieldOptionsForEditor(field);
+      $('cfComboMessage').value = '';
+      $('cfComboEmail').value = '';
+      $('cfComboContent').value = '';
     }
   } else {
     $('customFieldModalTitle').textContent = 'Add Custom Field';
@@ -7757,13 +7943,22 @@ function openCustomFieldModal(field) {
     $('cfComboMessage').value = '';
     $('cfComboEmail').value = '';
     $('cfComboContent').value = '';
+    if ($('customFieldShowInCreate')) $('customFieldShowInCreate').checked = true;
+    if ($('customFieldShowInDrawer')) $('customFieldShowInDrawer').checked = true;
+    if ($('customFieldName')) $('customFieldName').readOnly = false;
+    if ($('customFieldType')) $('customFieldType').disabled = false;
   }
-  // "Add to all boards" only makes sense when creating a brand-new field
   var applyAllGroup = $('customFieldApplyAllGroup');
   if (applyAllGroup) applyAllGroup.hidden = !!field;
   if ($('customFieldApplyAll')) $('customFieldApplyAll').checked = false;
-  if ($('customFieldName')) $('customFieldName').readOnly = !!isCombo;
-  toggleCustomFieldOptions(isCombo ? field : null);
+  if ($('customFieldName')) {
+    $('customFieldName').readOnly = !!isCombo || !!isBuiltin;
+  }
+  if ($('customFieldType')) {
+    $('customFieldType').disabled = !!isBuiltin;
+  }
+  if ($('customFieldShowInGroup')) $('customFieldShowInGroup').hidden = false;
+  toggleCustomFieldOptions(isCombo ? field : (canEditOptions ? field : null));
   openModal('modal-custom-field');
 }
 window.openCustomFieldModal = openCustomFieldModal;
@@ -7774,10 +7969,14 @@ function toggleCustomFieldOptions(editingField) {
   if (!isCombo && $('customFieldName') && ($('customFieldName').value || '').toLowerCase().trim() === 'combination') {
     isCombo = true;
   }
-  var show = (type === 'select' || type === 'multi_select') && !isCombo;
+  var isProductType = editingField && isBuiltinProductTypeField(editingField);
+  var show = ((type === 'select' || type === 'multi_select') && !isCombo) || isProductType;
   $('customFieldOptionsGroup').hidden = !show;
   if ($('customFieldCombinationGroups')) {
     $('customFieldCombinationGroups').hidden = !isCombo;
+  }
+  if ($('customFieldOptions') && isProductType) {
+    $('customFieldOptions').placeholder = 'Message, Email, Content, Manage, Infra';
   }
 }
 
@@ -7807,18 +8006,277 @@ if ($('customFieldName')) {
 
 // Selected files for Create Issue modal (allows individual removal)
 var _selectedFiles = [];
+var _attachmentThumbUrls = [];
+var ISSUE_MAX_FILE_BYTES = 500 * 1024 * 1024;
+var ISSUE_MAX_TOTAL_ATTACH_BYTES = 200 * 1024 * 1024;
+var ISSUE_MAX_ATTACHMENTS = 20;
+var ISSUE_MAX_DESC_CHARS = 500000;
+var _lastPasteFingerprint = '';
+var _lastPasteTime = 0;
+var _issuePasteBusy = false;
+
+function _fileFingerprint(file) {
+  if (!file) return '';
+  if (file.type && file.type.indexOf('image/') === 0) {
+    return 'img|' + file.size + '|' + file.type;
+  }
+  return (file.name || '') + '|' + file.size + '|' + (file.type || '') + '|' + (file.lastModified || 0);
+}
+
+function _isDuplicateAttachment(file) {
+  var fp = _fileFingerprint(file);
+  for (var i = 0; i < _selectedFiles.length; i++) {
+    if (_fileFingerprint(_selectedFiles[i]) === fp) return true;
+  }
+  return false;
+}
+
+/** One paste can expose the same screenshot multiple times in clipboard items — keep one. */
+function _dedupePasteFiles(items) {
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < items.length; i++) {
+    var file = null;
+    if (items[i].kind === 'file') file = items[i].getAsFile();
+    else if (items[i].type && items[i].type.indexOf('image/') === 0) file = items[i].getAsFile();
+    if (!file) continue;
+    var key = _fileFingerprint(file);
+    if (seen[key]) continue;
+    seen[key] = true;
+    out.push(file);
+  }
+  return out;
+}
+
+function _revokeAttachmentThumbUrls() {
+  _attachmentThumbUrls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
+  _attachmentThumbUrls = [];
+}
+
+function _formatFileSize(bytes) {
+  if (bytes > 1048576) return (bytes / 1048576).toFixed(1) + 'MB';
+  return Math.max(1, Math.round(bytes / 1024)) + 'KB';
+}
+
+function _addIssueAttachmentFile(file, sourceLabel) {
+  if (!file) return false;
+  if (_isDuplicateAttachment(file)) {
+    if (sourceLabel) toast('This screenshot is already attached', 'warning');
+    return false;
+  }
+  var fp = _fileFingerprint(file);
+  var now = Date.now();
+  if (fp === _lastPasteFingerprint && now - _lastPasteTime < 1500) return false;
+  _lastPasteFingerprint = fp;
+  _lastPasteTime = now;
+  if (file.size > ISSUE_MAX_FILE_BYTES) {
+    toast('File too large (max 500 MB): ' + (file.name || 'file'), 'error');
+    return false;
+  }
+  if (_selectedFiles.length >= ISSUE_MAX_ATTACHMENTS) {
+    toast('Maximum ' + ISSUE_MAX_ATTACHMENTS + ' attachments per issue', 'error');
+    return false;
+  }
+  var total = file.size;
+  for (var i = 0; i < _selectedFiles.length; i++) total += _selectedFiles[i].size;
+  if (total > ISSUE_MAX_TOTAL_ATTACH_BYTES) {
+    toast('Total attachment size too large (max 200 MB). Remove some files or use smaller screenshots.', 'error');
+    return false;
+  }
+  _selectedFiles.push(file);
+  _renderAttachmentFileList();
+  if (sourceLabel) toast(sourceLabel, 'success');
+  return true;
+}
+
+function _validateIssueAttachments() {
+  if (_selectedFiles.length > ISSUE_MAX_ATTACHMENTS) {
+    toast('Maximum ' + ISSUE_MAX_ATTACHMENTS + ' attachments per issue', 'error');
+    return false;
+  }
+  var total = 0;
+  for (var i = 0; i < _selectedFiles.length; i++) {
+    if (_selectedFiles[i].size > ISSUE_MAX_FILE_BYTES) {
+      toast('File too large (max 500 MB): ' + _selectedFiles[i].name, 'error');
+      return false;
+    }
+    total += _selectedFiles[i].size;
+  }
+  if (total > ISSUE_MAX_TOTAL_ATTACH_BYTES) {
+    toast('Total attachment size too large (max 200 MB)', 'error');
+    return false;
+  }
+  return true;
+}
+
+function stripInlineBase64Images(html) {
+  if (!html) return html;
+  return html.replace(/<img[^>]+src=["']data:image[^"']*["'][^>]*>/gi, '');
+}
+
+var DESC_EDITOR_IDS = ['issueDescContent', 'drawerDesc', 'drawerFixDesc'];
+
+function isDescEditor(el) {
+  return el && DESC_EDITOR_IDS.indexOf(el.id) >= 0;
+}
+
+function getOrCreateDescImageTray(editorEl) {
+  if (!editorEl) return null;
+  var tray = editorEl.querySelector(':scope > .desc-image-tray');
+  if (!tray) {
+    tray = document.createElement('div');
+    tray.className = 'desc-image-tray';
+    tray.setAttribute('contenteditable', 'false');
+    editorEl.appendChild(tray);
+  }
+  return tray;
+}
+
+function bindDescImageTray(root) {
+  if (!root || root._descTrayBound) return;
+  root._descTrayBound = true;
+  root.addEventListener('click', function (e) {
+    var chip = e.target.closest('.desc-image-chip');
+    if (!chip) return;
+    if (e.target.closest('.desc-image-remove')) {
+      e.preventDefault();
+      e.stopPropagation();
+      chip.remove();
+      var tray = root.querySelector(':scope > .desc-image-tray');
+      if (tray && !tray.querySelector('.desc-image-chip')) tray.remove();
+      if (root.id === 'drawerDesc' || root.id === 'drawerFixDesc') markDrawerDescDirty(root.id);
+      return;
+    }
+    var img = chip.querySelector('img');
+    if (img && img.src) window._openAttachmentPreviewFromDataUrl(img.src);
+  });
+}
+
+function addDescInlineImageChip(tray, url, alt, fp) {
+  if (!tray) return;
+  var chip = document.createElement('div');
+  chip.className = 'desc-image-chip';
+  chip.dataset.url = url;
+  if (fp) chip.dataset.fp = fp;
+  chip.innerHTML = '<img src="' + esc(url) + '" alt="' + esc(alt || 'Screenshot') + '">' +
+    '<button type="button" class="desc-image-remove" aria-label="Remove">×</button>';
+  tray.appendChild(chip);
+}
+
+async function uploadDescImageFile(file) {
+  var fd = new FormData();
+  fd.append('files', file, file.name || 'screenshot.png');
+  var res = await fetch('/api/comments/upload', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + getAuthToken() },
+    body: fd
+  });
+  if (!res.ok) {
+    var err = 'Upload failed';
+    try { var j = await res.json(); if (j.error) err = j.error; } catch (_) {}
+    throw new Error(err);
+  }
+  var data = await res.json();
+  if (!data.files || !data.files.length) throw new Error('Upload failed');
+  return data.files[0];
+}
+
+async function handleDescImagePaste(editorEl, file) {
+  if (!editorEl || !file) return;
+  var fp = _fileFingerprint(file);
+  var tray = getOrCreateDescImageTray(editorEl);
+  var chips = tray.querySelectorAll('.desc-image-chip');
+  for (var i = 0; i < chips.length; i++) {
+    if (chips[i].dataset.fp === fp) {
+      toast('This screenshot is already in the description', 'warning');
+      return;
+    }
+  }
+  try {
+    var uploaded = await uploadDescImageFile(file);
+    addDescInlineImageChip(tray, uploaded.url, file.name || 'Screenshot', fp);
+    bindDescImageTray(editorEl);
+    if (editorEl.id === 'drawerDesc' || editorEl.id === 'drawerFixDesc') markDrawerDescDirty(editorEl.id);
+    toast('Screenshot added to description', 'success');
+  } catch (e) {
+    toast(e.message || 'Could not upload screenshot', 'error');
+  }
+}
+
+function getDescriptionHtmlForSave(editorEl) {
+  if (!editorEl) return '';
+  var clone = editorEl.cloneNode(true);
+  var tray = clone.querySelector('.desc-image-tray');
+  if (tray && !tray.querySelector('.desc-image-chip')) tray.remove();
+  var html = clone.innerHTML.trim();
+  html = stripInlineBase64Images(html);
+  return (html === '' || html === '<br>') ? '' : html;
+}
+
+function initDescEditorImageTrays() {
+  DESC_EDITOR_IDS.forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) bindDescImageTray(el);
+  });
+}
+
+window._openAttachmentPreview = function (idx) {
+  var file = _selectedFiles[idx];
+  if (!file || !file.type || file.type.indexOf('image/') !== 0) return;
+  var url = URL.createObjectURL(file);
+  var lb = document.createElement('div');
+  lb.className = 'image-lightbox';
+  lb.innerHTML = '<button type="button" class="image-lightbox-close" aria-label="Close">×</button>' +
+    '<img src="' + url + '" alt="' + esc(file.name || 'Preview') + '">';
+  function closeLb() {
+    document.removeEventListener('keydown', onKey);
+    URL.revokeObjectURL(url);
+    if (lb.parentNode) lb.parentNode.removeChild(lb);
+  }
+  function onKey(ev) { if (ev.key === 'Escape') closeLb(); }
+  lb.querySelector('.image-lightbox-close').onclick = function (ev) { ev.stopPropagation(); closeLb(); };
+  lb.querySelector('img').onclick = function (ev) { ev.stopPropagation(); };
+  lb.onclick = closeLb;
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(lb);
+};
 
 function _renderAttachmentFileList() {
   var list = $('attachmentFileList');
   if (!list) return;
+  _revokeAttachmentThumbUrls();
   if (!_selectedFiles.length) { list.innerHTML = ''; return; }
-  list.innerHTML = _selectedFiles.map(function(f, i) {
-    return '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px 8px;">' +
-      '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ' + f.name + '</span>' +
-      '<span style="color:var(--text3);flex-shrink:0">' + (f.size > 1048576 ? (f.size/1048576).toFixed(1)+'MB' : (f.size/1024).toFixed(0)+'KB') + '</span>' +
-      '<button type="button" onclick="_removeAttachmentFile('+i+')" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;line-height:1;padding:0 2px" title="Remove">×</button>' +
-      '</div>';
-  }).join('');
+
+  var imageItems = [];
+  var otherItems = [];
+  _selectedFiles.forEach(function (f, i) {
+    if (f.type && f.type.indexOf('image/') === 0) imageItems.push({ file: f, idx: i });
+    else otherItems.push({ file: f, idx: i });
+  });
+
+  var html = '';
+  if (imageItems.length) {
+    html += '<div class="issue-attachment-thumbs">';
+    imageItems.forEach(function (item) {
+      var thumbUrl = URL.createObjectURL(item.file);
+      _attachmentThumbUrls.push(thumbUrl);
+      html += '<div class="issue-attachment-thumb" title="' + esc(item.file.name) + '">' +
+        '<img src="' + thumbUrl + '" alt="' + esc(item.file.name) + '" onclick="window._openAttachmentPreview(' + item.idx + ')">' +
+        '<button type="button" class="issue-attachment-thumb-remove" onclick="event.stopPropagation();_removeAttachmentFile(' + item.idx + ')" title="Remove">×</button>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+  if (otherItems.length) {
+    html += otherItems.map(function (item) {
+      return '<div class="issue-attachment-file-row">' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ' + esc(item.file.name) + '</span>' +
+        '<span style="color:var(--text3);flex-shrink:0">' + _formatFileSize(item.file.size) + '</span>' +
+        '<button type="button" onclick="_removeAttachmentFile(' + item.idx + ')" title="Remove">×</button>' +
+        '</div>';
+    }).join('');
+  }
+  list.innerHTML = html;
 }
 
 window._removeAttachmentFile = function(idx) {
@@ -7830,30 +8288,60 @@ window._removeAttachmentFile = function(idx) {
 document.addEventListener('change', function(e) {
   if (e.target.id === 'issueAttachments') {
     var files = e.target.files;
-    for (var i = 0; i < files.length; i++) _selectedFiles.push(files[i]);
-    e.target.value = ''; // reset input so same file can be re-added
-    _renderAttachmentFileList();
+    for (var i = 0; i < files.length; i++) _addIssueAttachmentFile(files[i]);
+    e.target.value = '';
   }
 });
 
-// Paste screenshot support for Create Issue modal (Ctrl+V)
-document.addEventListener('paste', function(e) {
+// Create Issue modal — single capture-phase paste handler (prevents duplicate screenshot uploads)
+document.addEventListener('paste', function (e) {
   var modal = document.getElementById('modal-issue');
   if (!modal || modal.hidden) return;
-  // Don't intercept pastes inside the description editor — let them go inline
+  var items = e.clipboardData && e.clipboardData.items;
+  if (!items || !items.length) return;
+  var files = _dedupePasteFiles(items);
+  if (!files.length) return;
+
+  var imageFiles = files.filter(function (f) { return f.type && f.type.indexOf('image/') === 0; });
+  if (imageFiles.length) {
+    var active = document.activeElement;
+    if (active && isDescEditor(active)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (_issuePasteBusy) return;
+    _issuePasteBusy = true;
+    setTimeout(function () { _issuePasteBusy = false; }, 500);
+    _addIssueAttachmentFile(imageFiles[0], 'Screenshot added as attachment');
+    return;
+  }
+
   var active = document.activeElement;
   if (active && active.id === 'issueDescContent') return;
-  var items = e.clipboardData && e.clipboardData.items;
-  if (!items) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
   var added = 0;
-  for (var i = 0; i < items.length; i++) {
-    if (items[i].kind === 'file') {
-      var file = items[i].getAsFile();
-      if (file) { _selectedFiles.push(file); added++; }
-    }
+  for (var i = 0; i < files.length; i++) {
+    if (_addIssueAttachmentFile(files[i])) added++;
   }
-  if (added) { _renderAttachmentFileList(); toast(added + ' file' + (added > 1 ? 's' : '') + ' pasted', 'success'); }
-});
+  if (added) toast(added + ' file' + (added > 1 ? 's' : '') + ' pasted', 'success');
+}, true);
+
+// Description editors — paste screenshot as bottom-left thumbnail inside description
+document.addEventListener('paste', function (e) {
+  var active = document.activeElement;
+  if (!isDescEditor(active)) return;
+  var items = e.clipboardData && e.clipboardData.items;
+  if (!items || !items.length) return;
+  var imageFiles = _dedupePasteFiles(items).filter(function (f) { return f.type && f.type.indexOf('image/') === 0; });
+  if (!imageFiles.length) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (_issuePasteBusy) return;
+  _issuePasteBusy = true;
+  handleDescImagePaste(active, imageFiles[0]).finally(function () {
+    setTimeout(function () { _issuePasteBusy = false; }, 500);
+  });
+}, true);
 
 // ── Comment file attachment helpers ──────────────────────
 var _commentFiles = [];
@@ -7918,10 +8406,11 @@ $('customFieldForm').addEventListener('submit', async function (e) {
   var applyAll = $('customFieldApplyAll') && $('customFieldApplyAll').checked;
   var optionsRaw = $('customFieldOptions').value.trim();
   var isComboField = (name || '').toLowerCase().trim() === 'combination' || ($('customFieldCombinationGroups') && !$('customFieldCombinationGroups').hidden);
+  var showIn = readShowInFromForm();
   var options;
   if (isComboField) {
     options = buildCombinationOptionsFromEditor();
-    type = 'select';
+    type = 'multi_select';
   } else {
     options = (type === 'select' || type === 'multi_select') && optionsRaw
       ? optionsRaw.split(',').map(function (o) { return o.trim(); }).filter(Boolean)
@@ -7932,9 +8421,16 @@ $('customFieldForm').addEventListener('submit', async function (e) {
 
   try {
     if (id) {
-      var payload = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options };
+      var editingField = (S.data.custom_fields || []).find(function (f) { return String(f.id) === String(id); });
+      var payload;
+      if (editingField && editingField.is_builtin) {
+        payload = { is_required: required, options: options, show_in: showIn };
+      } else {
+        payload = { name: name, field_type: type, is_required: required, options: options, show_in: showIn };
+      }
       await api('/api/custom-fields/' + id, 'PUT', payload);
       await refreshData();
+      await refreshAllCustomFields();
       closeModal('modal-custom-field');
       if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
         renderSettingsCustomFields(getSpace(S.currentSpace));
@@ -7952,7 +8448,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
         ? 'Added "' + name + '" to: ' + result.addedTo.join(', ')
         : 'Every board already has a field named "' + name + '"', result.added > 0 ? 'success' : 'warning');
     } else {
-      var payload2 = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options };
+      var payload2 = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options, show_in: showIn };
       await api('/api/custom-fields', 'POST', payload2);
       await refreshData();
       closeModal('modal-custom-field');
@@ -8126,6 +8622,8 @@ async function openDrawer(issueId) {
   }
   $('drawerDesc').innerHTML = renderDesc(descText);
   $('drawerFixDesc').innerHTML = renderDesc(fixDescText);
+  bindDescImageTray($('drawerDesc'));
+  bindDescImageTray($('drawerFixDesc'));
   var descBtns = $('drawerDescBtns'); if (descBtns) descBtns.style.display = 'none';
   var fixBtns = $('drawerFixDescBtns'); if (fixBtns) fixBtns.style.display = 'none';
 
@@ -8209,8 +8707,10 @@ async function openDrawer(issueId) {
   var actBody = $('activitySectionBody');
   if (actBody) actBody.dataset.activeTab = 'comments';
   renderDrawerActivity(issue);
+  await ensureSpaceFieldsLoaded(issue.space_id || S.currentSpace);
   await renderDrawerCustomFields(issue.custom_field_values || [], issue.id, issue.space_id || S.currentSpace);
   await renderDrawerCombinationField(issue.id, issue.space_id || S.currentSpace, issue.custom_field_values || [], issue.product_type || '');
+  applyBuiltinFieldVisibility(issue.space_id || S.currentSpace, $('issueDrawer'), 'drawer');
   renderDrawerAttachments(issue.attachments || []);
 
   $('drawerCreated').textContent = fmtDateTime(issue.created_at);
@@ -8404,7 +8904,19 @@ function bindDrawerEdits(issue) {
   $('drawerPoints').oninput     = function () {
     autoSave('story_points', $('drawerPoints').value ? parseInt($('drawerPoints').value, 10) : null);
   };
-  if ($('drawerTeam'))        $('drawerTeam').onchange        = function () { autoSave('team',         $('drawerTeam').value || null); };
+  if ($('drawerTeam')) {
+    $('drawerTeam').onchange = function () {
+      autoSave('team', $('drawerTeam').value || null);
+      if (window._drawerIssueData) {
+        renderDrawerProductTypeSets(
+          window._drawerIssueData.id,
+          window._drawerIssueData.space_id || S.currentSpace,
+          window._drawerIssueData.custom_field_values || [],
+          window._drawerIssueData.product_type || ''
+        );
+      }
+    };
+  }
   if ($('drawerProductType')) {
     $('drawerProductType').onchange = function () {
       var dSpace = (_drawerIssueData && _drawerIssueData.space_id) || S.currentSpace;
@@ -9036,11 +9548,15 @@ window._showSubtaskInput = function() {
   $('issueType').value = 'subtask';
   $('issuePriority').value = 'medium';
   $('issueModalTitle').textContent = 'Create Subtask' + (parentIssue ? ' — linked to ' + (parentIssue.key || parentIssue.id) : '');
-  populateIssueFormSelects();
-  if (window._onIssueSpaceChange) window._onIssueSpaceChange(spaceId || '');
+  var parentSprintId = parentIssue && parentIssue.sprint_id;
+  populateIssueFormSelects({ includeSprintId: parentSprintId });
+  if (window._onIssueSpaceChange) window._onIssueSpaceChange(spaceId || '', parentSprintId);
   // Pre-fill sprint and assignee from parent
   if (parentIssue) {
-    if (parentIssue.sprint_id) $('issueSprint').value = parentIssue.sprint_id;
+    if (parentSprintId) {
+      $('issueSprint').value = parentSprintId;
+      applySprintDatesToIssueForm(parentSprintId);
+    }
     if (parentIssue.assignee_id) $('issueAssignee').value = parentIssue.assignee_id;
   }
   openModal('modal-issue');
@@ -9721,6 +10237,16 @@ function getProductTeamSpaceId() {
   return sp ? sp.id : null;
 }
 
+function shouldShowProductTeamFields(spaceId) {
+  var ptId = getProductTeamSpaceId();
+  if (!ptId || !spaceId) return false;
+  return String(spaceId) === String(ptId);
+}
+
+function getIssueFormTeam() {
+  return $('issueTeam') ? $('issueTeam').value : '';
+}
+
 function findCombinationFieldMeta(spaceId) {
   if (!spaceId) return null;
   return (S.data.custom_fields || []).find(function (f) {
@@ -9755,44 +10281,37 @@ async function ensureCombinationFieldMeta(spaceId) {
 function renderIssueProductTypeSets(spaceId) {
   var group = $('issueCombinationGroup');
   var container = $('issueCombinationField');
-  var productTypeGroup = $('issueProductType') && $('issueProductType').closest('.form-group');
+  var productTypeGroup = $('issueProductTypeGroup');
   var groupLabel = group && group.querySelector('.form-label');
   if (!group || !container) return Promise.resolve();
 
-  var ptId = getProductTeamSpaceId();
-  if (!ptId) {
-    if (productTypeGroup) productTypeGroup.hidden = false;
-    container.innerHTML = '<p class="combo-type-hint">Product_Team space not found — run seed or ask admin to add it.</p>';
-    return Promise.resolve();
-  }
+  var team = getIssueFormTeam();
+  var showCombo = shouldShowProductTeamFields(spaceId)
+    && isSpaceBuiltinFieldEnabled(spaceId, 'product_type', 'create')
+    && isSpaceBuiltinFieldEnabled(spaceId, 'combination', 'create');
 
-  if (!spaceId || spaceId !== ptId) {
-    if (productTypeGroup) productTypeGroup.hidden = false;
-    if (groupLabel) {
-      groupLabel.innerHTML = 'Combination <span style="font-size:11px;color:var(--text3);font-weight:400">(Product_Team only)</span>';
-    }
+  if (productTypeGroup) productTypeGroup.hidden = true;
+
+  if (!showCombo) {
     group.hidden = true;
     container.innerHTML = '';
     _issuePtComboSel = null;
+    if ($('issueProductType')) $('issueProductType').value = '';
     return Promise.resolve();
   }
 
-  if (productTypeGroup) productTypeGroup.hidden = true;
   group.hidden = false;
-  if (groupLabel) {
-    groupLabel.innerHTML = 'Product Type &amp; Combinations <span style="font-size:11px;color:var(--text3);font-weight:400">(Product_Team)</span>';
-  }
+  if (groupLabel) groupLabel.textContent = 'Product Type & Combinations';
 
-  if (!_issuePtComboSel) {
-    _issuePtComboSel = emptyPtComboSelection();
-  }
+  var ptId = getProductTeamSpaceId();
+  if (!_issuePtComboSel) _issuePtComboSel = emptyPtComboSelection();
 
   return ensureCombinationFieldMeta(ptId).then(function (meta) {
     if (!meta || !meta.id) {
-      container.innerHTML = '<p class="combo-type-hint">Combination field loading… restart server if this persists.</p>';
+      container.innerHTML = '<p class="combo-type-hint">Combination field is not set up for Product_Team — add it in Space Settings → Custom Fields.</p>';
       return;
     }
-    container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta);
+    container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta, spaceId);
     bindProductTypeComboPicker(container, meta, { stateKey: '_issuePtComboSel' });
   });
 }
@@ -9808,17 +10327,26 @@ async function renderDrawerProductTypeSets(issueId, spaceId, cfValues, productTy
   var comboLabel = row && row.querySelector('.dfl');
   if (!row || !container) return;
 
-  var ptId = getProductTeamSpaceId();
-  if (!ptId || String(spaceId) !== String(ptId)) {
+  var team = $('drawerTeam') ? $('drawerTeam').value : '';
+  if (!shouldShowProductTeamFields(spaceId)
+    || !isSpaceBuiltinFieldEnabled(spaceId, 'product_type', 'drawer')
+    || !isSpaceBuiltinFieldEnabled(spaceId, 'combination', 'drawer')) {
     row.hidden = true;
     container.innerHTML = '';
-    if (ptRow) ptRow.hidden = false;
+    if (ptRow) ptRow.hidden = true;
+    return;
+  }
+
+  var ptId = getProductTeamSpaceId();
+  if (!ptId) {
+    row.hidden = true;
+    if (ptRow) ptRow.hidden = true;
     return;
   }
 
   if (ptRow) ptRow.hidden = true;
   row.hidden = false;
-  if (comboLabel) comboLabel.textContent = 'Product Type';
+  if (comboLabel) comboLabel.textContent = 'Product Type & Combinations';
 
   var meta = await ensureCombinationFieldMeta(ptId);
   if (!meta || !meta.id) {
@@ -9839,7 +10367,7 @@ async function renderDrawerProductTypeSets(issueId, spaceId, cfValues, productTy
   }
 
   _drawerPtComboSel = parsePtComboSelection(productType, combinationVal);
-  container.innerHTML = buildProductTypeComboPickerHtml(_drawerPtComboSel, meta);
+  container.innerHTML = buildProductTypeComboPickerHtml(_drawerPtComboSel, meta, spaceId);
   bindProductTypeComboPicker(container, meta, {
     stateKey: '_drawerPtComboSel',
     onChange: function (sel) {
@@ -10115,7 +10643,13 @@ function serializePtComboSelection(sel) {
 }
 
 function getComboTypesFromSelection(types) {
-  return (types || []).filter(function (t) { return productTypeHasCombinations(t); });
+  return (types || []).filter(function (t) {
+    return productTypeHasCombinations(t) || t === 'Manage' || t === 'Infra';
+  });
+}
+
+function productTypeUsesAllCombinations(productType) {
+  return productType === 'Manage' || productType === 'Infra';
 }
 
 function pruneCombinationsForTypes(sel, meta) {
@@ -10126,20 +10660,32 @@ function pruneCombinationsForTypes(sel, meta) {
   sel.combinations = (sel.combinations || []).filter(function (c) { return allowed[c]; });
 }
 
-function buildProductTypeCheckboxListHtml(selectedTypes) {
-  return PRODUCT_TYPE_CHECKBOX_OPTIONS.map(function (t) {
-    var checked = selectedTypes.indexOf(t.v) >= 0;
+function buildProductTypeCheckboxListHtml(selectedTypes, ptOptions) {
+  ptOptions = ptOptions || PRODUCT_TYPE_CHECKBOX_OPTIONS;
+  return ptOptions.map(function (t) {
+    var val = t.v != null ? t.v : t;
+    var label = t.l != null ? t.l : getProductTypeLabel(val);
+    var checked = selectedTypes.indexOf(val) >= 0;
     return '<label class="pt-combo-check">' +
-      '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + esc(t.v) + '"' + (checked ? ' checked' : '') + '>' +
-      '<span class="pt-combo-check-label">' + esc(t.l) + '</span></label>';
+      '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + esc(val) + '"' + (checked ? ' checked' : '') + '>' +
+      '<span class="pt-combo-check-label">' + esc(label) + '</span></label>';
   }).join('');
+}
+
+function getProductTypeOptionsForSpace(spaceId) {
+  var field = spaceId ? findSpaceFieldByKey(spaceId, 'product_type') : null;
+  var vals = field ? normalizeCFOptions(field.options) : [];
+  if (!vals.length) vals = PRODUCT_TYPE_CHECKBOX_OPTIONS.map(function (o) { return o.v; });
+  return vals.map(function (v) {
+    return { v: v, l: getProductTypeLabel(v) };
+  });
 }
 
 function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, filter) {
   filter = (filter || '').trim();
   var comboTypes = getComboTypesFromSelection(selectedTypes);
   if (!comboTypes.length) {
-    return '<p class="pt-combo-hint">Select Message, Mail, or Content type above to see combinations.</p>';
+    return '<p class="pt-combo-hint">Select a product type above to see combinations.</p>';
   }
   var html = '';
   comboTypes.forEach(function (type) {
@@ -10148,7 +10694,7 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
     });
     if (!combos.length) return;
     html += '<div class="pt-combo-group" data-type="' + esc(type) + '">' +
-      '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
+      '<div class="pt-combo-group-title">' + esc(productTypeUsesAllCombinations(type) ? getProductTypeLabel(type) + ' — all combinations' : getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
       return '<label class="pt-combo-check">' +
@@ -10163,14 +10709,15 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
   return html;
 }
 
-function buildProductTypeComboPickerHtml(sel, meta) {
+function buildProductTypeComboPickerHtml(sel, meta, spaceId) {
   var fieldId = meta && meta.id ? meta.id : '';
   sel = sel || emptyPtComboSelection();
+  var ptOptions = getProductTypeOptionsForSpace(spaceId || (meta && meta.space_id));
   return '<div class="pt-combo-picker" data-field-id="' + esc(fieldId) + '">' +
     '<div class="pt-combo-section">' +
       '<div class="pt-combo-section-title">Product Type</div>' +
       '<div class="pt-combo-panel pt-combo-panel-types">' +
-        '<div class="pt-combo-checklist pt-type-list">' + buildProductTypeCheckboxListHtml(sel.productTypes) + '</div>' +
+        '<div class="pt-combo-checklist pt-type-list">' + buildProductTypeCheckboxListHtml(sel.productTypes, ptOptions) + '</div>' +
       '</div>' +
     '</div>' +
     '<div class="pt-combo-section">' +
@@ -10278,7 +10825,7 @@ function readPtComboSelectionFromContainer(container) {
 function getProductTypeSetsFieldValue() {
   var ptId = getProductTeamSpaceId();
   var spaceId = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || '';
-  if (ptId && spaceId === ptId) {
+  if (ptId && String(spaceId) === String(ptId)) {
     var container = $('issueCombinationField');
     var sel = _issuePtComboSel || readPtComboSelectionFromContainer(container);
     if (!sel.productTypes.length && !sel.combinations.length && container) {
@@ -10339,10 +10886,6 @@ function normalizeCFOptions(opts) {
   });
 }
 
-function isCombinationField(field) {
-  return field && (field.name || '').toLowerCase().trim() === 'combination';
-}
-
 function getProductTypeLabel(value) {
   if (!value) return '';
   var labels = (typeof PRODUCT_TYPE_LABELS !== 'undefined' ? PRODUCT_TYPE_LABELS : window.PRODUCT_TYPE_LABELS) || {};
@@ -10392,14 +10935,21 @@ function parseCombinationFieldOptions(field) {
 }
 
 function getCombinationsForProductType(productType, fieldMeta) {
-  if (!productTypeHasCombinations(productType)) return [];
   var parsed = fieldMeta ? parseCombinationFieldOptions(fieldMeta) : null;
+  var allFlat = parsed && parsed.flat && parsed.flat.length
+    ? parsed.flat.slice()
+    : getCombinationOptionsList(fieldMeta);
+
+  if (productTypeUsesAllCombinations(productType)) {
+    return allFlat.slice();
+  }
+  if (!productTypeHasCombinations(productType)) return [];
   if (parsed && parsed.groups && parsed.groups[productType]) {
     return parsed.groups[productType].slice();
   }
   var groups = (typeof COMBINATION_GROUPS !== 'undefined' ? COMBINATION_GROUPS : window.COMBINATION_GROUPS);
   if (groups && groups[productType]) return groups[productType].slice();
-  return getCombinationOptionsList().filter(function (o) {
+  return allFlat.filter(function (o) {
     return typeof classifyCombination === 'function' && classifyCombination(o) === productType;
   });
 }
@@ -10702,6 +11252,7 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   var _builtinFields = ['team', 'product type', 'story points', 'story_points', 'storypoints', 'points', 'sp'];
   var html = '';
   spaceFields.forEach(function(field) {
+    if (field.is_builtin) return;
     if (_builtinFields.indexOf((field.name || '').toLowerCase().trim()) !== -1) return;
     if (isCombinationField(field)) return;
     if (!customFieldShowsIn(field, 'drawer')) return;
@@ -10973,6 +11524,10 @@ function resetIssueForm() {
   if ($('assigneeDropdown')) $('assigneeDropdown').style.display = 'none';
   if ($('reporterDropdown')) $('reporterDropdown').style.display = 'none';
   _selectedFiles = [];
+  _revokeAttachmentThumbUrls();
+  _lastPasteFingerprint = '';
+  _lastPasteTime = 0;
+  _issuePasteBusy = false;
   _renderAttachmentFileList();
   var fi = $('issueAttachments');
   if (fi) fi.value = '';
@@ -10982,17 +11537,20 @@ function resetIssueForm() {
   if (cfContainer) cfContainer.innerHTML = '';
   var comboContainer = $('issueCombinationField');
   if (comboContainer) comboContainer.innerHTML = '';
+  var comboGroup = $('issueCombinationGroup');
+  if (comboGroup) comboGroup.hidden = true;
 }
 
-function populateIssueFormSelects() {
+function populateIssueFormSelects(opts) {
+  opts = opts || {};
   var spaceId = $('issueSpaceId').value || S.currentSpace;
   var members = spaceId ? getSpaceMembers(spaceId) : (S.data.users || []);
   if (!members.length) members = S.data.users || [];
-  var sprints = spaceId ? getSpaceSprints(spaceId) : [];
+  var sprints = spaceId ? getIssueFormSprints(spaceId, opts) : [];
 
   initUserSearchDropdown('issueAssigneeSearch', 'issueAssignee', 'assigneeDropdown', members, null);
   initUserSearchDropdown('issueReporterSearch', 'issueReporter', 'reporterDropdown', members, S.currentUser);
-  populateSprintSelect($('issueSprint'), sprints, null);
+  populateSprintSelect($('issueSprint'), sprints, opts.includeSprintId || null);
 }
 
 async function handleIssueSubmit(e) {
@@ -11013,6 +11571,13 @@ async function handleIssueSubmit(e) {
   var teamVal = $('issueTeam') ? $('issueTeam').value : '';
   var productVal = $('issueProductType') ? $('issueProductType').value : '';
   var startVal = $('issueStartDate').value;
+  if (!_validateIssueAttachments()) return;
+  var descEl = document.getElementById('issueDescContent');
+  var rawDesc = getDescriptionHtmlForSave(descEl);
+  if (rawDesc.length > ISSUE_MAX_DESC_CHARS) {
+    toast('Description is too large — remove extra content or use attachments for files', 'error');
+    return;
+  }
   // Validate due date does not exceed sprint end date
   var dueVal = $('issueDueDate').value;
   if (dueVal) {
@@ -11048,7 +11613,7 @@ async function handleIssueSubmit(e) {
     product_type: ptPayload ? ptPayload.product_type : ($('issueProductType') ? ($('issueProductType').value || null) : null),
     start_date: $('issueStartDate').value || null,
     due_date:   $('issueDueDate').value   || null,
-    description: (function() { var el = document.getElementById('issueDescContent'); if (!el) return ''; var h = el.innerHTML.trim(); return (h === '' || h === '<br>') ? '' : h; })(),
+    description: rawDesc,
     original_estimate: $('issueEstimate') ? parseEstimate($('issueEstimate').value) : 0,
     status: 'To Do',
     _customFields: getCreateModalCustomFieldValues()
@@ -11100,11 +11665,16 @@ async function handleIssueSubmit(e) {
       var fd = new FormData();
       for (var i = 0; i < _selectedFiles.length; i++) fd.append('files', _selectedFiles[i]);
       try {
-        await fetch('/api/issues/' + created.id + '/attachments', {
+        var uploadRes = await fetch('/api/issues/' + created.id + '/attachments', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + getAuthToken() },
           body: fd
         });
+        if (!uploadRes.ok) {
+          var uploadErr = 'Attachment upload failed';
+          try { var ej = await uploadRes.json(); if (ej.error) uploadErr = ej.error; } catch (_) {}
+          toast('Issue created but ' + uploadErr, 'warning');
+        }
       } catch(e) { toast('Issue created but attachments failed to upload', 'warning'); }
     }
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save'; }
@@ -11454,6 +12024,7 @@ document.addEventListener('click', function(e) {
 
 document.addEventListener('DOMContentLoaded', function () {
   initTheme();
+  initDescEditorImageTrays();
   init();
 
   // Sidebar global nav
@@ -11521,14 +12092,13 @@ document.addEventListener('DOMContentLoaded', function () {
     if (selectedSpaceId) sel.value = selectedSpaceId;
   };
   // Standalone space-change handler — always defined, called from every create-issue entry point
-  window._onIssueSpaceChange = function(spaceId) {
+  window._onIssueSpaceChange = function (spaceId, includeSprintId) {
     if ($('issueSpaceId')) $('issueSpaceId').value = spaceId || '';
-    // Update sprint dropdown
-    var sprints = (S.data.sprints || []).filter(function(sp){ return sp.space_id === spaceId; });
     var sprintSel = $('issueSprint');
     if (sprintSel) {
-      sprintSel.innerHTML = '<option value="">None</option>' +
-        sprints.map(function(sp){ return '<option value="' + sp.id + '">' + esc(sp.name) + '</option>'; }).join('');
+      var sprints = getIssueFormSprints(spaceId, { includeSprintId: includeSprintId });
+      populateSprintSelect(sprintSel, sprints, includeSprintId || null);
+      if (!includeSprintId) applySprintDatesToIssueForm('');
     }
     // Render custom fields — always show ALL unique custom fields across all spaces
     var cfContainer = $('issueCustomFieldsContainer');
@@ -11540,6 +12110,7 @@ document.addEventListener('DOMContentLoaded', function () {
       var seen = {};
       cfs.forEach(function (f) {
         var key = (f.name || '').toLowerCase().trim();
+        if (f.is_builtin) return;
         if (excluded.indexOf(key) !== -1) return;
         if (isCombinationField(f)) return;
         if (!customFieldShowsIn(f, 'create')) return;
@@ -11600,31 +12171,31 @@ document.addEventListener('DOMContentLoaded', function () {
       bindCreateModalCustomFields(cfContainer);
     }
 
+    function finishSpaceFieldRender(cfs) {
+      if (cfs && cfs.length) renderCF(cfs);
+      else if (cfContainer) cfContainer.innerHTML = '';
+      renderIssueProductTypeSets(spaceId);
+      applyBuiltinFieldVisibility(spaceId, $('modal-issue'), 'create');
+    }
+
     var allCFs = S.data.custom_fields || [];
     var spaceCFs = spaceId ? allCFs.filter(function (f) { return f.space_id === spaceId; }) : [];
     if (spaceCFs.length) {
-      renderCF(spaceCFs);
+      finishSpaceFieldRender(spaceCFs);
     } else if (spaceId) {
-      cfContainer.innerHTML = '';
-      api('/api/custom-fields?space_id=' + encodeURIComponent(spaceId), 'GET', null, { silent: true }).then(function (data) {
-        if (data && data.length) {
-          S.data.custom_fields = (S.data.custom_fields || []).filter(function (f) { return f.space_id !== spaceId; }).concat(data);
-          renderCF(data);
-        } else {
-          cfContainer.innerHTML = '';
-        }
-      }).catch(function () { cfContainer.innerHTML = ''; });
+      if (cfContainer) cfContainer.innerHTML = '';
+      ensureSpaceFieldsLoaded(spaceId).then(function (data) {
+        finishSpaceFieldRender(data);
+      });
     } else {
-      cfContainer.innerHTML = '';
+      if (cfContainer) cfContainer.innerHTML = '';
+      finishSpaceFieldRender([]);
     }
-    renderIssueProductTypeSets(spaceId);
   };
 
-  if ($('issueProductType')) {
-    $('issueProductType').addEventListener('change', function () {
+  if ($('issueTeam')) {
+    $('issueTeam').addEventListener('change', function () {
       var spaceId = ($('issueSpaceSelect') && $('issueSpaceSelect').value) || ($('issueSpaceId') && $('issueSpaceId').value) || '';
-      var ptId = getProductTeamSpaceId();
-      if (ptId && spaceId === ptId) return;
       renderIssueProductTypeSets(spaceId);
     });
   }
@@ -11642,6 +12213,12 @@ document.addEventListener('DOMContentLoaded', function () {
   };
 
   $('createIssueBtn').addEventListener('click', window.openCreateIssueModal);
+
+  if ($('issueSprint')) {
+    $('issueSprint').addEventListener('change', function () {
+      applySprintDatesToIssueForm(this.value || null);
+    });
+  }
 
   // Create sprint
   $('createSprintBtn').addEventListener('click', function () { window._openSprintModal(null); });
@@ -12778,7 +13355,7 @@ document.addEventListener('paste', function(e) {
   var cd = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
   if (!cd) return;
   var items = cd.items || [];
-  for (var i = 0; i < items.length; i++) { if (items[i].type.indexOf('image') !== -1) return; } // let the image-paste handler below take it
+  for (var i = 0; i < items.length; i++) { if (items[i].type.indexOf('image') !== -1) return; } // image handler above
   var text = cd.getData('text/plain');
   if (text === '' || text == null) return;
   e.preventDefault();
@@ -12791,46 +13368,22 @@ document.addEventListener('paste', function(e) {
   document.execCommand('insertHTML', false, html);
 });
 
-// ── Image paste in description (base64 inline) ─────────────
-document.addEventListener('paste', function(e) {
-  var active = document.activeElement;
-  if (!active || (active.id !== 'drawerDesc' && active.id !== 'drawerFixDesc' && active.id !== 'issueDescContent')) return;
-  var items = (e.clipboardData || e.originalEvent.clipboardData).items;
-  for (var i = 0; i < items.length; i++) {
-    if (items[i].type.indexOf('image') === -1) continue;
-    e.preventDefault();
-    var file = items[i].getAsFile();
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function(ev) {
-      var base64 = ev.target.result;
-      var img = document.createElement('img');
-      img.src = base64;
-      img.style.maxWidth = '100%';
-      img.style.borderRadius = '4px';
-      img.style.margin = '8px 0';
-      img.style.display = 'block';
-      // Insert at cursor position
-      var sel = window.getSelection();
-      if (sel.rangeCount) {
-        var range = sel.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(img);
-        // Move cursor after image
-        range.setStartAfter(img);
-        range.setEndAfter(img);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } else {
-        active.appendChild(img);
-      }
-      // Mark dirty — user must click Save (Jira-style)
-      markDrawerDescDirty(active.id);
-    };
-    reader.readAsDataURL(file);
-    break;
+window._openAttachmentPreviewFromDataUrl = function (dataUrl) {
+  var lb = document.createElement('div');
+  lb.className = 'image-lightbox';
+  lb.innerHTML = '<button type="button" class="image-lightbox-close" aria-label="Close">×</button>' +
+    '<img src="' + dataUrl + '" alt="Preview">';
+  function closeLb() {
+    document.removeEventListener('keydown', onKey);
+    if (lb.parentNode) lb.parentNode.removeChild(lb);
   }
-});
+  function onKey(ev) { if (ev.key === 'Escape') closeLb(); }
+  lb.querySelector('.image-lightbox-close').onclick = function (ev) { ev.stopPropagation(); closeLb(); };
+  lb.querySelector('img').onclick = function (ev) { ev.stopPropagation(); };
+  lb.onclick = closeLb;
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(lb);
+};
 
 // ── Clickable issue type badge (like Jira) ─────────────────
 document.addEventListener('click', function(e) {

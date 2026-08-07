@@ -710,7 +710,7 @@
         <div class="drawer-body">
           <!-- LEFT: Main content -->
           <div class="drawer-main">
-            <textarea id="drawerTitle" class="drawer-title" rows="1" spellcheck="true" placeholder="Add a summary…" aria-label="Issue summary"></textarea>
+            <textarea id="drawerTitle" class="drawer-title" rows="1" spellcheck="true" placeholder="Add a summary…" aria-label="Issue summary" data-builtin-field="title" data-builtin-locked="true"></textarea>
 
             <!-- Key Details section (collapsible) -->
             <div class="drawer-section">
@@ -719,7 +719,7 @@
                 <h3 class="drawer-section-title">Key details</h3>
               </div>
               <div class="drawer-section-body">
-                <div class="drawer-detail-row">
+                <div class="drawer-detail-row" data-builtin-field="description">
                   <span class="drawer-detail-label">Description</span>
                   <div id="drawerDescEditor" class="jira-editor-wrap">
                     <div id="drawerDescToolbar" class="jira-editor-toolbar">
@@ -756,7 +756,7 @@
                     <button type="button" id="drawerDescCancel" class="btn btn-secondary btn-sm">Cancel</button>
                   </div>
                 </div>
-                <div class="drawer-detail-row">
+                <div class="drawer-detail-row" data-builtin-field="fix_description">
                   <span class="drawer-detail-label">Fix Description</span>
                   <div id="drawerFixDescEditor" class="jira-editor-wrap">
                     <div id="drawerFixDescToolbar" class="jira-editor-toolbar">
@@ -892,15 +892,15 @@
               <h4 class="drawer-sidebar-heading drawer-sidebar-heading-highlight">Details</h4>
               <table class="drawer-fields-table">
                 <tbody>
-                  <tr><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
-                  <tr><td class="dfl">Priority</td><td class="dfv"><select id="drawerPriority" class="drawer-select" size="1"><option value="highest">Highest</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></td></tr>
-                  <tr><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
-                  <tr><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>
-                  <tr><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select"></select></td></tr>
-                  <tr><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—"></td></tr>
-                  <tr><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option><option value="Dev">Dev</option><option value="QA">QA</option><option value="Infra">Infra</option><option value="Manage">Manage</option></select></td></tr>
-                  <tr id="drawerProductTypeRow"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option><option value="Message">Message Type</option><option value="Email">Mail Type</option><option value="Content">Content Type</option><option value="Manage">Manage</option><option value="Infra">Infra</option></select></td></tr>
-                  <tr id="drawerCombinationRow" hidden>
+                  <tr data-builtin-field="status" data-builtin-locked="true"><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
+                  <tr data-builtin-field="priority"><td class="dfl">Priority</td><td class="dfv"><select id="drawerPriority" class="drawer-select" size="1"><option value="highest">Highest</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></td></tr>
+                  <tr data-builtin-field="assignee"><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
+                  <tr data-builtin-field="reporter"><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>
+                  <tr data-builtin-field="sprint"><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select"></select></td></tr>
+                  <tr data-builtin-field="story_points"><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—"></td></tr>
+                  <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option><option value="Dev">Dev</option><option value="QA">QA</option><option value="Infra">Infra</option><option value="Manage">Manage</option><option value="Product_Team">Product Team</option></select></td></tr>
+                  <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option><option value="Message">Message Type</option><option value="Email">Mail Type</option><option value="Content">Content Type</option><option value="Manage">Manage</option><option value="Infra">Infra</option></select></td></tr>
+                  <tr id="drawerCombinationRow" hidden data-builtin-field="combination">
                     <td class="dfl">Product Type</td>
                     <td class="dfv"><div id="drawerCombinationField"></div></td>
                   </tr>
@@ -913,8 +913,8 @@
               <h4 class="drawer-sidebar-heading">Dates</h4>
               <table class="drawer-fields-table">
                 <tbody>
-                  <tr><td class="dfl">Start Date</td><td class="dfv"><input type="date" id="drawerStartDate" class="drawer-input"></td></tr>
-                  <tr><td class="dfl">Due Date</td><td class="dfv"><input type="date" id="drawerDueDate" class="drawer-input"></td></tr>
+                  <tr data-builtin-field="start_date"><td class="dfl">Start Date</td><td class="dfv"><input type="date" id="drawerStartDate" class="drawer-input"></td></tr>
+                  <tr data-builtin-field="due_date"><td class="dfl">Due Date</td><td class="dfv"><input type="date" id="drawerDueDate" class="drawer-input"></td></tr>
                 </tbody>
               </table>
             </div>
@@ -1077,12 +1077,12 @@
               <option value="">— Select a space —</option>
             </select>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-builtin-field="title" data-builtin-locked="true">
             <label class="form-label" for="issueTitleInput">Title</label>
             <input type="text" id="issueTitleInput" class="input" required>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="type">
               <label class="form-label" for="issueType">Type</label>
               <select id="issueType" class="input">
                 <option value="epic">Epic</option>
@@ -1092,7 +1092,7 @@
                 <option value="subtask">Subtask</option>
               </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="priority">
               <label class="form-label" for="issuePriority">Priority</label>
               <select id="issuePriority" class="input">
                 <option value="highest">Highest</option>
@@ -1104,7 +1104,7 @@
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="assignee">
               <label class="form-label">Assignee</label>
               <div class="user-search-wrap" id="assigneeWrap">
                 <input type="text" id="issueAssigneeSearch" class="input" placeholder="Search assignee…" autocomplete="off">
@@ -1112,7 +1112,7 @@
                 <div class="user-search-dropdown" id="assigneeDropdown" style="display:none"></div>
               </div>
             </div>
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="reporter">
               <label class="form-label">Reporter</label>
               <div class="user-search-wrap" id="reporterWrap">
                 <input type="text" id="issueReporterSearch" class="input" placeholder="Search reporter…" autocomplete="off">
@@ -1122,27 +1122,27 @@
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="sprint">
               <label class="form-label" for="issueSprint">Sprint</label>
               <select id="issueSprint" class="input"></select>
             </div>
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="story_points">
               <label class="form-label" for="issuePoints">Story Points</label>
               <input type="number" id="issuePoints" class="input" min="0" step="1">
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="start_date">
               <label class="form-label" for="issueStartDate">Start Date</label>
               <input type="date" id="issueStartDate" class="input">
             </div>
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="due_date">
               <label class="form-label" for="issueDueDate">Due Date</label>
               <input type="date" id="issueDueDate" class="input">
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" data-builtin-field="team">
               <label class="form-label" for="issueTeam">Team</label>
               <select id="issueTeam" class="input">
                 <option value="">— None —</option>
@@ -1150,9 +1150,10 @@
                 <option value="QA">QA</option>
                 <option value="Infra">Infra</option>
                 <option value="Manage">Manage</option>
+                <option value="Product_Team">Product Team</option>
               </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="issueProductTypeGroup" hidden>
               <label class="form-label" for="issueProductType">Product Type</label>
               <select id="issueProductType" class="input">
                 <option value="">— Select type —</option>
@@ -1164,11 +1165,11 @@
               </select>
             </div>
           </div>
-          <div class="form-group" id="issueCombinationGroup">
+          <div class="form-group" id="issueCombinationGroup" hidden data-builtin-field="combination">
             <label class="form-label">Product Type &amp; Combinations</label>
             <div id="issueCombinationField"></div>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-builtin-field="description">
             <label class="form-label">Description</label>
             <div class="rte-wrap">
               <div class="rte-toolbar">
@@ -1188,12 +1189,12 @@
           <div id="issueCustomFieldsContainer"></div>
           <div class="form-group">
             <label class="form-label">Attachments <span style="font-size:11px;color:var(--text3);font-weight:400">(max 500 MB per file)</span></label>
-            <label class="attachment-upload-label" id="attachmentUploadLabel" style="display:flex;align-items:center;gap:8px;border:2px dashed var(--border);border-radius:8px;padding:12px 16px;cursor:pointer;transition:border-color .2s,background .2s" ondragover="event.preventDefault();this.style.borderColor='#0052cc';this.style.background='var(--bg3)'" ondragleave="this.style.borderColor='';this.style.background=''" ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';(function(files){for(var i=0;i<files.length;i++)_selectedFiles.push(files[i]);_renderAttachmentFileList();})(event.dataTransfer.files)">
-              <input type="file" id="issueAttachments" multiple style="display:none">
+            <label class="attachment-upload-label" id="attachmentUploadLabel" style="display:flex;align-items:center;gap:8px;border:2px dashed var(--border);border-radius:8px;padding:12px 16px;cursor:pointer;transition:border-color .2s,background .2s" ondragover="event.preventDefault();this.style.borderColor='#0052cc';this.style.background='var(--bg3)'" ondragleave="this.style.borderColor='';this.style.background=''" ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';(function(files){for(var i=0;i<files.length;i++)_addIssueAttachmentFile(files[i]);})(event.dataTransfer.files)">
+              <input type="file" id="issueAttachments" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" style="display:none">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text3);flex-shrink:0"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-              <span style="font-size:13px;color:var(--text2)">Choose files, drag &amp; drop, or <strong>Ctrl+V</strong> to paste screenshot</span>
+              <span style="font-size:13px;color:var(--text2)">Choose files or drag &amp; drop — paste screenshots in the <strong>description</strong> field above</span>
             </label>
-            <div id="attachmentFileList" style="margin-top:6px;display:flex;flex-direction:column;gap:4px"></div>
+            <div id="attachmentFileList" style="margin-top:6px"></div>
           </div>
         </form>
       </div>
@@ -1316,6 +1317,13 @@
           </div>
           <div class="form-group form-check">
             <label><input type="checkbox" id="customFieldRequired"> Required</label>
+          </div>
+          <div class="form-group" id="customFieldShowInGroup">
+            <label class="form-label">Show in</label>
+            <div style="display:flex;gap:16px;flex-wrap:wrap">
+              <label><input type="checkbox" id="customFieldShowInCreate"> Create issue</label>
+              <label><input type="checkbox" id="customFieldShowInDrawer"> Issue drawer</label>
+            </div>
           </div>
           <div class="form-group form-check" id="customFieldApplyAllGroup">
             <label><input type="checkbox" id="customFieldApplyAll"> Add to all boards (not just this one)</label>
