@@ -3636,8 +3636,10 @@ window._deleteSprint = async function (id) {
 };
 
 // Renders a scrollable checkbox list of a space's members into `containerId`,
-// pre-checking any ids already in `selectedIds`.
-function renderMemberCheckboxList(containerId, spaceId, selectedIds) {
+// pre-checking any ids already in `selectedIds`. `onChangeJs`, if given, is
+// raw JS wired to each checkbox's onchange (e.g. to refresh a dependent list
+// like per-developer leave inputs whenever the developer selection changes).
+function renderMemberCheckboxList(containerId, spaceId, selectedIds, onChangeJs) {
   var el = $(containerId);
   if (!el) return;
   var members = getSpaceMembers(spaceId);
@@ -3650,7 +3652,8 @@ function renderMemberCheckboxList(containerId, spaceId, selectedIds) {
         // fix as the custom-field multi-select checkboxes: force it back to
         // a normal checkbox size and stop it growing as a flex item.
         return '<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer;font-size:13px;color:var(--text)">' +
-          '<input type="checkbox" class="cf-sel-opt-checkbox" value="' + esc(u.id) + '"' + (selSet[u.id] ? ' checked' : '') + '>' +
+          '<input type="checkbox" class="cf-sel-opt-checkbox" value="' + esc(u.id) + '"' + (selSet[u.id] ? ' checked' : '') +
+          (onChangeJs ? ' onchange="' + esc(onChangeJs) + '"' : '') + '>' +
           '<span>' + esc(u.name) + '</span></label>';
       }).join('')
     : '<div style="font-size:12px;color:var(--text3);padding:4px 2px">No members in this board yet</div>';
@@ -3662,6 +3665,41 @@ function collectCheckedIds(containerId) {
   if (!el) return [];
   return Array.from(el.querySelectorAll('input[type="checkbox"]:checked')).map(function (cb) { return cb.value; });
 }
+
+// Per-developer leave-day inputs — one row per currently-checked Developer,
+// each with its own number input. Selections live in
+// window._sprintDeveloperLeaves ({userId: days}) for the modal's lifetime;
+// _openSprintModal seeds it from the sprint being edited (or empty for a
+// new one). Only Developers get a leave input (QA isn't part of the
+// capacity formula), and unchecking a developer drops their leave entry.
+function renderDeveloperLeavesList() {
+  var el = $('sprintDeveloperLeaves');
+  if (!el) return;
+  var checkedIds = collectCheckedIds('sprintDeveloperList');
+  var leaves = window._sprintDeveloperLeaves || (window._sprintDeveloperLeaves = {});
+  Object.keys(leaves).forEach(function (id) { if (checkedIds.indexOf(id) === -1) delete leaves[id]; });
+  if (!checkedIds.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:4px 2px">Select developers above to set their leave days</div>';
+    return;
+  }
+  var members = getSpaceMembers($('sprintSpaceId').value || S.currentSpace);
+  el.innerHTML = checkedIds.map(function (id) {
+    var u = members.find(function (m) { return m.id === id; });
+    var name = u ? u.name : id;
+    var val = leaves[id] || 0;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 2px">' +
+      '<span style="flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(name) + '</span>' +
+      '<input type="number" min="0" step="1" class="input" style="width:70px" value="' + val + '" data-dev-id="' + esc(id) + '" onchange="window._setDevLeave(this)">' +
+      '</div>';
+  }).join('');
+}
+
+window._setDevLeave = function (input) {
+  var leaves = window._sprintDeveloperLeaves || (window._sprintDeveloperLeaves = {});
+  var val = parseInt(input.value, 10) || 0;
+  if (val > 0) leaves[input.dataset.devId] = val;
+  else delete leaves[input.dataset.devId];
+};
 
 // Public Holidays calendar for the sprint's date range — only days inside
 // [start, end] are clickable (to mark/unmark as a holiday); everything
@@ -3754,10 +3792,10 @@ window._openSprintModal = function (id) {
     $('sprintStartDate').value = fmtDateISO(sp.start_date);
     $('sprintEndDate').value = fmtDateISO(sp.end_date);
     $('sprintModalTitle').textContent = 'Edit Sprint';
-    renderMemberCheckboxList('sprintDeveloperList', sp.space_id, sp.developer_ids);
+    window._sprintDeveloperLeaves = Object.assign({}, sp.developer_leaves || {});
+    renderMemberCheckboxList('sprintDeveloperList', sp.space_id, sp.developer_ids, 'renderDeveloperLeavesList()');
     renderMemberCheckboxList('sprintQaList', sp.space_id, sp.qa_ids);
     window._sprintHolidaySet = new Set(sp.public_holidays || []);
-    $('sprintLeaveDays').value = sp.leave_days || 0;
   } else {
     $('sprintIdInput').value = '';
     $('sprintSpaceId').value = S.currentSpace;
@@ -3766,11 +3804,12 @@ window._openSprintModal = function (id) {
     $('sprintStartDate').value = '';
     $('sprintEndDate').value = '';
     $('sprintModalTitle').textContent = 'Create Sprint';
-    renderMemberCheckboxList('sprintDeveloperList', S.currentSpace, []);
+    window._sprintDeveloperLeaves = {};
+    renderMemberCheckboxList('sprintDeveloperList', S.currentSpace, [], 'renderDeveloperLeavesList()');
     renderMemberCheckboxList('sprintQaList', S.currentSpace, []);
     window._sprintHolidaySet = new Set();
-    $('sprintLeaveDays').value = '';
   }
+  renderDeveloperLeavesList();
   renderSprintPublicHolidaysCalendar();
   $('sprintStartDate').onchange = renderSprintPublicHolidaysCalendar;
   $('sprintEndDate').onchange = renderSprintPublicHolidaysCalendar;
@@ -4342,21 +4381,15 @@ function renderBurndownReport(c, data, allSprints, sprintSelectorHtml) {
 }
 
 // ── Sprint Summary ──────────────────────────────────────────
-// Team capacity (in story points) for a sprint, per the agreed formula:
-//   workingDaysPerDeveloper = workingDays - holidaysOnWorkingDays
-//   grossPersonDays         = developers * workingDaysPerDeveloper
-//   netPersonDays           = max(0, grossPersonDays - leaveDays)
-//   availableHours          = netPersonDays * 7 * 0.80
-//   capacitySP              = round(availableHours / 6.5)
-// workingDays excludes Saturday/Sunday; a public holiday only reduces
-// working days if it actually falls on one (a holiday on a weekend
-// wouldn't remove any capacity that wasn't already excluded).
-function computeSprintCapacity(sprint) {
+// Working days (Mon-Fri) and on-working-day public holidays for a sprint's
+// own date range — shared by the team-wide capacity calc below and by the
+// per-person capacity shown in Team Workload. Builds local-midnight dates
+// from the LOCAL calendar date the timestamp falls on (matching
+// fmtDateShort's display) — NOT fmtDateISO, which reads the UTC calendar
+// date and can land a day earlier than what's actually shown as the
+// sprint's start/end date.
+function computeSprintWorkDays(sprint) {
   if (!sprint || !sprint.start_date || !sprint.end_date) return null;
-  // Build local-midnight dates from the LOCAL calendar date the timestamp
-  // falls on (matching fmtDateShort's display) — NOT fmtDateISO, which
-  // reads the UTC calendar date and can land a day earlier than what's
-  // actually shown as the sprint's start/end date.
   var startRaw = new Date(sprint.start_date);
   var endRaw = new Date(sprint.end_date);
   if (isNaN(startRaw) || isNaN(endRaw)) return null;
@@ -4370,6 +4403,9 @@ function computeSprintCapacity(sprint) {
     if (dow !== 0 && dow !== 6) workingDays++;
   }
 
+  // A public holiday only reduces working days if it actually falls on one
+  // (a holiday on a weekend wouldn't remove capacity that wasn't already
+  // excluded).
   var holidays = (sprint.public_holidays || []).filter(function (ds) {
     var hd = new Date(ds + 'T00:00:00');
     if (isNaN(hd) || hd < start || hd > end) return false;
@@ -4377,17 +4413,62 @@ function computeSprintCapacity(sprint) {
     return dow !== 0 && dow !== 6;
   }).length;
 
-  var developers = (sprint.developer_ids || []).length;
-  var leaveDays = Number(sprint.leave_days) || 0;
+  return { workingDays: workingDays, holidays: holidays };
+}
 
-  var workingDaysPerDeveloper = Math.max(0, workingDays - holidays);
+// Avatar chips for a list of user ids (Developers/QA on a sprint). If
+// `leavesMap` is given, a chip shows "-Nd" when that user has leave days.
+function memberChipsHtml(userIds, leavesMap) {
+  if (!userIds || !userIds.length) return '<div style="font-size:12px;color:var(--text3)">None assigned</div>';
+  return '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+    userIds.map(function (uid) {
+      var u = findUser(uid);
+      var name = u ? u.name : uid;
+      var leave = leavesMap && leavesMap[uid] ? Number(leavesMap[uid]) : 0;
+      var avatar = u ? avatarHtml(u, 22) : '<span class="avatar" style="width:22px;height:22px;font-size:9px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#94a3b8;color:#fff;font-weight:700;flex-shrink:0">?</span>';
+      return '<div style="display:flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);border-radius:20px;padding:4px 10px 4px 4px">' +
+        avatar + '<span style="font-size:12px;color:var(--text)">' + esc(name) + '</span>' +
+        (leave ? '<span style="font-size:10px;font-weight:700;color:#f59e0b">−' + leave + 'd</span>' : '') +
+        '</div>';
+    }).join('') +
+    '</div>';
+}
+
+// Story points a single person can deliver given the sprint's working days,
+// on-working-day holidays, and their own leave days: 7 hours/day at 80%
+// utilization, 6.5 hours per story point.
+function personCapacitySP(workDays, personLeaveDays) {
+  if (!workDays) return null;
+  var days = Math.max(0, workDays.workingDays - workDays.holidays - (Number(personLeaveDays) || 0));
+  return Math.round(days * 7 * 0.80 / 6.5);
+}
+
+// Team capacity (in story points) for a sprint, per the agreed formula:
+//   workingDaysPerDeveloper = workingDays - holidaysOnWorkingDays
+//   grossPersonDays         = developers * workingDaysPerDeveloper
+//   netPersonDays           = max(0, grossPersonDays - totalLeaveDays)
+//   availableHours          = netPersonDays * 7 * 0.80
+//   capacitySP              = round(availableHours / 6.5)
+// developer_leaves is {userId: days}; sprints saved before that field
+// existed fall back to the old aggregate leave_days count.
+function computeSprintCapacity(sprint) {
+  var workDays = computeSprintWorkDays(sprint);
+  if (!workDays) return null;
+
+  var developers = (sprint.developer_ids || []).length;
+  var devLeaves = sprint.developer_leaves || {};
+  var leaveDays = Object.keys(devLeaves).length
+    ? Object.values(devLeaves).reduce(function (s, v) { return s + (Number(v) || 0); }, 0)
+    : (Number(sprint.leave_days) || 0);
+
+  var workingDaysPerDeveloper = Math.max(0, workDays.workingDays - workDays.holidays);
   var grossPersonDays = developers * workingDaysPerDeveloper;
   var netPersonDays = Math.max(0, grossPersonDays - leaveDays);
   var availableHours = netPersonDays * 7 * 0.80;
   var capacitySP = Math.round(availableHours / 6.5);
 
   return {
-    workingDays: workingDays, holidays: holidays, developers: developers,
+    workingDays: workDays.workingDays, holidays: workDays.holidays, developers: developers,
     leaveDays: leaveDays, netPersonDays: netPersonDays,
     availableHours: availableHours, capacitySP: capacitySP
   };
@@ -4620,6 +4701,20 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     kpiTile('Blocked Stories', blocked, total || 1, 'of total stories', '#dc2626', 'ss_blocked') +
     '</div></div>' +
 
+    // ── Row 1.5: Team — Developers | QA ──
+    (((sprint.developer_ids && sprint.developer_ids.length) || (sprint.qa_ids && sprint.qa_ids.length))
+      ? '<div style="display:flex;gap:14px;flex-wrap:wrap">' +
+        '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;flex:1;min-width:240px">' +
+        '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Developers</div>' +
+        memberChipsHtml(sprint.developer_ids, sprint.developer_leaves) +
+        '</div>' +
+        '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;flex:1;min-width:240px">' +
+        '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">QA</div>' +
+        memberChipsHtml(sprint.qa_ids, null) +
+        '</div>' +
+        '</div>'
+      : '') +
+
     // ── Row 2: Story Status donut | Story Points horizontal bars ──
     '<div style="display:flex;gap:14px;flex-wrap:wrap">' +
 
@@ -4682,42 +4777,60 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
 }
 
 // ── Team Workload ───────────────────────────────────────────
-function renderTeamWorkloadReport(c, rows, sprint, allSprints, sprintSelectorHtml) {
+function renderTeamWorkloadReport(c, data, sprintArg, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
-  if (!rows || !rows.length) {
-    c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml + '<p class="placeholder-text">No assigned issues in this sprint.</p></div>';
+  var rows = (data && Array.isArray(data.rows)) ? data.rows : (Array.isArray(data) ? data : []);
+  var sprint = (data && data.sprint) || sprintArg || {};
+  if (!rows.length) {
+    c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml + '<p class="placeholder-text">No Developers/QA assigned to this sprint yet, and no issues assigned either.</p></div>';
     return;
   }
-  var maxAssigned = Math.max.apply(null, rows.map(function(r){ return r.assigned; })) || 1;
+
+  // Capacity per person = their share of the sprint's working days (minus
+  // on-working-day holidays and their own leave days), converted to story
+  // points the same way the team-wide capacity figure is — this is what
+  // "workload" is measured against, not just a raw assigned-issue count.
+  var workDays = computeSprintWorkDays(sprint);
+  var roleColor = { 'Developer': '#0052cc', 'QA': '#7c3aed', 'Dev + QA': '#10b981', 'Other': '#6b7280' };
+
   var tableRows = rows.map(function(r) {
-    var utilPct = r.assigned_sp ? Math.round((r.completed_sp / r.assigned_sp) * 100) : 0;
-    var utilColor = utilPct >= 80 ? '#10b981' : utilPct >= 50 ? '#f59e0b' : '#42526e';
-    var barW = Math.round((r.assigned / maxAssigned) * 100);
+    var capacity = personCapacitySP(workDays, r.leave_days);
+    var utilPct = capacity ? Math.round((r.assigned_sp / capacity) * 100) : (r.assigned_sp ? null : 0);
+    var utilColor = utilPct === null ? '#6b7280' : utilPct > 100 ? '#dc2626' : utilPct >= 80 ? '#10b981' : utilPct >= 50 ? '#f59e0b' : '#42526e';
+    var completionPct = r.assigned_sp ? Math.round((r.completed_sp / r.assigned_sp) * 100) : 0;
     return '<tr>' +
       '<td style="padding:10px 12px;font-weight:600;white-space:nowrap">' +
       '<div style="display:inline-flex;align-items:center;gap:8px">' +
       '<span style="width:28px;height:28px;border-radius:50%;background:' + (r.color||'#0052cc') + ';display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">' +
-      esc((r.name||'?').charAt(0).toUpperCase()) + '</span>' + esc(r.name||'Unknown') + '</div></td>' +
-      '<td style="padding:10px 12px;text-align:center">' + r.assigned + '</td>' +
+      esc((r.name||'?').charAt(0).toUpperCase()) + '</span>' +
+      '<span>' + esc(r.name||'Unknown') +
+      '<span style="display:block;font-size:10px;font-weight:700;color:' + (roleColor[r.role]||'#6b7280') + '">' + esc(r.role) + '</span></span>' +
+      '</div></td>' +
+      '<td style="padding:10px 12px;text-align:center;color:' + (r.leave_days ? '#f59e0b' : 'var(--text3)') + ';font-weight:600">' + (r.leave_days || 0) + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;font-weight:700;color:var(--text)">' + (capacity !== null ? capacity : '—') + '</td>' +
+      '<td style="padding:10px 12px;text-align:center">' + r.assigned_sp + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + utilColor + '">' + (utilPct !== null ? utilPct + '%' : '—') + '</td>' +
       '<td style="padding:10px 12px;text-align:center;color:#10b981;font-weight:600">' + r.completed + '</td>' +
       '<td style="padding:10px 12px;text-align:center;color:#f59e0b;font-weight:600">' + r.remaining + '</td>' +
-      '<td style="padding:10px 12px">' +
-      '<div style="background:var(--bg3);border-radius:4px;height:8px;width:120px">' +
-      '<div style="height:100%;width:' + barW + '%;background:#0052cc;border-radius:4px"></div></div></td>' +
-      '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + utilColor + '">' + utilPct + '%</td>' +
+      '<td style="padding:10px 12px;text-align:center;color:var(--text2)">' + completionPct + '%</td>' +
       '</tr>';
   }).join('');
   var thStyle = 'padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)';
   c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
-    '<h4 style="margin:0 0 16px">Team Workload — ' + esc((sprint||{}).name||'Sprint') + '</h4>' +
+    '<h4 style="margin:0 0 4px">Team Workload — ' + esc(sprint.name||'Sprint') + '</h4>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">' +
+    (workDays ? 'Capacity is each person\'s share of ' + workDays.workingDays + ' working days' + (workDays.holidays ? ' minus ' + workDays.holidays + ' holiday' + (workDays.holidays !== 1 ? 's' : '') : '') + ', adjusted for their own leave days' : 'Set Start/End Date on this sprint to see capacity') +
+    '</p>' +
     '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
     '<thead><tr>' +
-    '<th style="' + thStyle + '">Developer</th>' +
-    '<th style="' + thStyle + ';text-align:center">Assigned</th>' +
+    '<th style="' + thStyle + '">Team Member</th>' +
+    '<th style="' + thStyle + ';text-align:center">Leave Days</th>' +
+    '<th style="' + thStyle + ';text-align:center">Capacity (pts)</th>' +
+    '<th style="' + thStyle + ';text-align:center">Assigned (pts)</th>' +
+    '<th style="' + thStyle + ';text-align:center">Utilization</th>' +
     '<th style="' + thStyle + ';text-align:center">Completed</th>' +
     '<th style="' + thStyle + ';text-align:center">Remaining</th>' +
-    '<th style="' + thStyle + '">Workload</th>' +
-    '<th style="' + thStyle + ';text-align:center">Utilization</th>' +
+    '<th style="' + thStyle + ';text-align:center">Completion</th>' +
     '</tr></thead><tbody>' + tableRows + '</tbody></table></div></div>';
 }
 
@@ -8477,7 +8590,7 @@ async function handleSprintSubmit(e) {
     developer_ids: collectCheckedIds('sprintDeveloperList'),
     qa_ids: collectCheckedIds('sprintQaList'),
     public_holidays: Array.from(window._sprintHolidaySet || []).sort(),
-    leave_days: parseInt($('sprintLeaveDays').value, 10) || 0
+    developer_leaves: Object.assign({}, window._sprintDeveloperLeaves || {})
   };
 
   if (id) {

@@ -287,15 +287,21 @@ app.get('/api/sprints', wrap(async (req, res) => {
 }));
 
 app.post('/api/sprints', wrap(async (req, res) => {
-  const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids, public_holidays, leave_days } = req.body;
-  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids,public_holidays,leave_days) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-    [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || [], public_holidays || [], leave_days || 0]);
+  const { space_id, name, goal, start_date, end_date, developer_ids, qa_ids, public_holidays, developer_leaves } = req.body;
+  const r = await q('INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,developer_ids,qa_ids,public_holidays,developer_leaves) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb) RETURNING *',
+    [uid(), space_id, name, goal, start_date || null, end_date || null, developer_ids || [], qa_ids || [], public_holidays || [], JSON.stringify(developer_leaves || {})]);
   res.status(201).json(r.rows[0]);
 }));
 
 app.put('/api/sprints/:id', wrap(async (req, res) => {
-  const keys = Object.keys(req.body), vals = Object.values(req.body);
-  const set = keys.map((k, i) => `${k}=$${i + 2}`).join(',');
+  const body = { ...req.body };
+  // developer_leaves is jsonb — stringify on the JS side and cast in SQL,
+  // rather than relying on the driver to serialize a plain object.
+  if (body.developer_leaves !== undefined) {
+    body.developer_leaves = JSON.stringify(body.developer_leaves || {});
+  }
+  const keys = Object.keys(body), vals = Object.values(body);
+  const set = keys.map((k, i) => k === 'developer_leaves' ? `developer_leaves=$${i + 2}::jsonb` : `${k}=$${i + 2}`).join(',');
   const r = await q(`UPDATE sprints SET ${set} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
   res.json(r.rows[0]);
 }));
@@ -1176,20 +1182,56 @@ app.get('/api/reports/control-chart/:sprintId', requireAuth, wrap(async (req, re
 // Sprint-specific team workload
 app.get('/api/reports/team-workload/:sprintId', requireAuth, wrap(async (req, res) => {
   const sid = req.params.sprintId;
-  const r = await q(`
+  const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+
+  const devIds = sprint.developer_ids || [];
+  const qaIds = sprint.qa_ids || [];
+  const teamIds = Array.from(new Set([...devIds, ...qaIds]));
+
+  // Everyone assigned to this sprint's Developer/QA lists shows up even
+  // with zero assigned issues yet — the old query only ever showed people
+  // who already had at least one issue, hiding team members who hadn't
+  // been assigned anything.
+  const rows = (await q(`
+    WITH assignee_stats AS (
+      SELECT i.assignee_id AS id,
+        COUNT(i.id)::int AS assigned,
+        COUNT(i.id) FILTER (WHERE i.status='Done')::int AS completed,
+        COUNT(i.id) FILTER (WHERE i.status!='Done')::int AS remaining,
+        COALESCE(SUM(i.story_points),0)::int AS assigned_sp,
+        COALESCE(SUM(i.story_points) FILTER (WHERE i.status='Done'),0)::int AS completed_sp
+      FROM issues i
+      WHERE i.sprint_id=$1 AND i.deleted_at IS NULL AND i.assignee_id IS NOT NULL
+      GROUP BY i.assignee_id
+    ),
+    all_ids AS (
+      SELECT unnest($2::text[]) AS id
+      UNION
+      SELECT id FROM assignee_stats
+    )
     SELECT u.id, u.name, u.color, u.avatar_url,
-      COUNT(i.id)::int AS assigned,
-      COUNT(i.id) FILTER (WHERE i.status='Done')::int AS completed,
-      COUNT(i.id) FILTER (WHERE i.status!='Done')::int AS remaining,
-      COALESCE(SUM(i.story_points),0)::int AS assigned_sp,
-      COALESCE(SUM(i.story_points) FILTER (WHERE i.status='Done'),0)::int AS completed_sp
-    FROM issues i
-    JOIN users u ON u.id = i.assignee_id
-    WHERE i.sprint_id=$1 AND i.deleted_at IS NULL
-    GROUP BY u.id, u.name, u.color, u.avatar_url
-    ORDER BY assigned DESC
-  `, [sid]);
-  res.json(r.rows);
+      COALESCE(s.assigned,0)::int AS assigned,
+      COALESCE(s.completed,0)::int AS completed,
+      COALESCE(s.remaining,0)::int AS remaining,
+      COALESCE(s.assigned_sp,0)::int AS assigned_sp,
+      COALESCE(s.completed_sp,0)::int AS completed_sp
+    FROM all_ids a
+    JOIN users u ON u.id = a.id
+    LEFT JOIN assignee_stats s ON s.id = a.id
+    ORDER BY assigned_sp DESC, u.name ASC
+  `, [sid, teamIds])).rows;
+
+  const devSet = new Set(devIds);
+  const qaSet = new Set(qaIds);
+  const leaves = sprint.developer_leaves || {};
+  const decorated = rows.map(r => ({
+    ...r,
+    role: devSet.has(r.id) && qaSet.has(r.id) ? 'Dev + QA' : devSet.has(r.id) ? 'Developer' : qaSet.has(r.id) ? 'QA' : 'Other',
+    leave_days: leaves[r.id] || 0
+  }));
+
+  res.json({ sprint, rows: decorated });
 }));
 
 // Scope change for a sprint (committed vs added/removed after start)
@@ -2183,6 +2225,13 @@ app.post('/api/admin/sync-db', async (req, res) => {
     try {
       await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS leave_days INTEGER DEFAULT 0`);
     } catch(e) { console.error('Migration warning (sprint leave_days):', e.message); }
+
+    // Migration: replace the single aggregate leave_days count with a
+    // per-developer breakdown ({userId: days}) so Sprint Summary and Team
+    // Workload can show whose leave is whose, not just a total.
+    try {
+      await pool.query(`ALTER TABLE sprints ADD COLUMN IF NOT EXISTS developer_leaves JSONB DEFAULT '{}'`);
+    } catch(e) { console.error('Migration warning (sprint developer_leaves):', e.message); }
 
     // Fix duplicate issue keys on startup
     try {
