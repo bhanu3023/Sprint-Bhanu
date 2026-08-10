@@ -21,6 +21,25 @@ const RESERVED_FIELD_NAMES = new Set([
 function normalizeFieldName(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 function isReservedFieldName(name) { return RESERVED_FIELD_NAMES.has(normalizeFieldName(name)); }
 
+// Issue-link types come in inverse pairs: storing A "blocks" B is the same
+// relationship as storing B "is blocked by" A. POST /api/links uses this to
+// treat a pair's whole family as one link, so contradictory duplicates can't
+// be created. Mirrors LINK_TYPES in app.js — keep the two in sync.
+// `is_child_of`/`is_parent_of` are still accepted so pre-existing rows can be
+// edited/removed, but app.js no longer offers them for new links (issue
+// hierarchy belongs to issues.parent_id).
+const LINK_TYPE_INVERSE = {
+  blocks: 'is_blocked_by',
+  is_blocked_by: 'blocks',
+  clones: 'is_cloned_by',
+  is_cloned_by: 'clones',
+  duplicates: 'is_duplicated_by',
+  is_duplicated_by: 'duplicates',
+  relates_to: 'relates_to',
+  is_child_of: 'is_parent_of',
+  is_parent_of: 'is_child_of'
+};
+
 /** Reserved names are OK when updating an existing built-in registry row (not renaming). */
 function reservedNameBlockedForUpdate(name, existing) {
   if (!isReservedFieldName(name)) return false;
@@ -65,11 +84,77 @@ app.use(express.static(__dirname, {
   }
 }));
 
-// Serve uploaded files
+// Serve uploaded files (auth + space membership required)
 const fs = require('fs');
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-app.use('/uploads', express.static(uploadsDir));
+
+async function getFileLinkedSpaceIds(fileId) {
+  const spaces = new Set();
+  const attach = await q(
+    `SELECT DISTINCT i.space_id FROM issue_attachments a
+     JOIN issues i ON i.id = a.issue_id AND i.deleted_at IS NULL
+     WHERE a.filename = $1`, [fileId]
+  );
+  attach.rows.forEach(function (row) { if (row.space_id) spaces.add(row.space_id); });
+  const pattern = '%/api/files/' + fileId + '%';
+  const fromIssues = await q(
+    `SELECT DISTINCT space_id FROM issues
+     WHERE deleted_at IS NULL AND (description LIKE $1 OR fix_description LIKE $1)`, [pattern]
+  );
+  fromIssues.rows.forEach(function (row) { if (row.space_id) spaces.add(row.space_id); });
+  const fromComments = await q(
+    `SELECT DISTINCT i.space_id FROM comments c
+     JOIN issues i ON i.id = c.issue_id AND i.deleted_at IS NULL
+     WHERE c.body LIKE $1`, [pattern]
+  );
+  fromComments.rows.forEach(function (row) { if (row.space_id) spaces.add(row.space_id); });
+  return Array.from(spaces);
+}
+
+async function denyUnlessCanAccessFile(user, res, fileId) {
+  const spaceIds = await getFileLinkedSpaceIds(fileId);
+  if (spaceIds.length) {
+    for (let i = 0; i < spaceIds.length; i++) {
+      if (await canActInSpace(q, user, spaceIds[i], 'attachment.read')) return true;
+    }
+    res.status(403).json({ error: 'Forbidden' });
+    return false;
+  }
+  const fr = await q('SELECT uploaded_by FROM file_storage WHERE id=$1', [fileId]);
+  if (!fr.rows.length) {
+    res.status(404).json({ error: 'File not found' });
+    return false;
+  }
+  const userId = user.id || user.user_id;
+  if (fr.rows[0].uploaded_by === userId || isOrgAdmin(user.role)) return true;
+  res.status(403).json({ error: 'Forbidden' });
+  return false;
+}
+
+function sanitizeOrgRow(orgRow, admin) {
+  if (!orgRow) return null;
+  if (admin) return orgRow;
+  const safe = Object.assign({}, orgRow);
+  delete safe.email_settings;
+  return safe;
+}
+
+app.use('/uploads', requireAuthFile, wrap(async (req, res, next) => {
+  const filename = path.basename(decodeURIComponent(req.path || ''));
+  if (!filename || filename === '/') return res.status(404).end();
+  const attach = await q(
+    `SELECT i.space_id FROM issue_attachments a
+     JOIN issues i ON i.id = a.issue_id AND i.deleted_at IS NULL
+     WHERE a.filename = $1 LIMIT 1`, [filename]
+  );
+  if (attach.rows[0]) {
+    if (!(await denyUnlessCanAct(q, req.user, res, attach.rows[0].space_id, 'attachment.read'))) return;
+    return next();
+  }
+  if (!isOrgAdmin(req.user.role)) return res.status(403).json({ error: 'Forbidden' });
+  next();
+}), express.static(uploadsDir));
 
 // Multer storage config — max 500 MB
 const storage = multer ? multer.diskStorage({
@@ -125,6 +210,14 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
   // Admins see all space_members; members only see memberships for their spaces
   const space_members = isAdmin ? allSm.rows : allSm.rows.filter(function(m) { return mySpaceIds.includes(m.space_id); });
 
+  // Members only see users in their visible spaces (admins unchanged)
+  let scopedUsers = users.rows;
+  if (!isAdmin) {
+    const visibleUserIds = new Set([userId]);
+    space_members.forEach(function (m) { visibleUserIds.add(m.user_id); });
+    scopedUsers = users.rows.filter(function (u) { return visibleUserIds.has(u.id); });
+  }
+
   // Determine which space IDs to load issues/sprints for
   const visibleSpaceIds = spaces.map(function(s) { return s.id; });
 
@@ -167,7 +260,7 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
   }
 
   res.json({
-    org: org.rows[0] || null, users: users.rows, spaces: spaces,
+    org: sanitizeOrgRow(org.rows[0] || null, isAdmin), users: scopedUsers, spaces: spaces,
     space_members: space_members, space_favorites: sf.rows,
     issue_favorites: issueFavs.rows,
     sprints: filteredSprints,
@@ -261,7 +354,7 @@ app.get('/api/dashboard/activity', requireAuth, wrap(async (req, res) => {
 // ── Organization ─────────────────────────────────────────
 app.get('/api/org', requireAuth, wrap(async (req, res) => {
   const r = await q('SELECT * FROM organizations LIMIT 1');
-  res.json(r.rows[0] || null);
+  res.json(sanitizeOrgRow(r.rows[0] || null, isOrgAdmin(req.user.role)));
 }));
 
 app.put('/api/org', requireAuth, wrap(async (req, res) => {
@@ -602,10 +695,14 @@ app.get('/api/issues/:id', requireAuth, wrap(async (req, res) => {
       LEFT JOIN users u ON u.id=w.user_id WHERE w.issue_id=$1 ORDER BY w.created_at DESC`, [issueId]),
     q(`SELECT c.*, u.name AS user_name, u.avatar_url, u.color AS user_color
       FROM comments c LEFT JOIN users u ON u.id=c.user_id WHERE c.issue_id=$1 ORDER BY c.created_at`, [issueId]),
+    // Inner join, not LEFT: a link whose counterpart is soft-deleted (or gone)
+    // used to still render as a row that 404s when clicked, because
+    // GET /api/issues/:id filters deleted_at but this query didn't. Links are
+    // intentionally left in the table so restoring the issue restores them.
     q(`SELECT l.*, t.key AS target_key, t.title AS target_title, t.status AS target_status, t.type AS target_type
       FROM issue_links l
-      LEFT JOIN issues t ON (t.id=CASE WHEN l.source_id=$1 THEN l.target_id ELSE l.source_id END)
-      WHERE l.source_id=$1 OR l.target_id=$1`, [issueId]),
+      JOIN issues t ON t.id = CASE WHEN l.source_id=$1 THEN l.target_id ELSE l.source_id END
+      WHERE (l.source_id=$1 OR l.target_id=$1) AND t.deleted_at IS NULL`, [issueId]),
     q(`SELECT id, key, title, status, type, priority, assignee_id, story_points
       FROM issues WHERE parent_id=$1 ORDER BY position, created_at`, [issueId]),
     q(`SELECT v.*, f.name AS field_name, f.field_type
@@ -727,9 +824,12 @@ app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
   const picked = pickAllowed(updates || {}, UPDATE_WHITELIST.issues);
   const keys = Object.keys(picked);
   if (!keys.length) return res.json({ ok: true, updated: 0 });
-  const firstIssue = (await q('SELECT space_id FROM issues WHERE id=$1', [ids[0]])).rows[0];
-  if (!firstIssue) return res.status(404).json({ error: 'Issue not found' });
-  if (!(await denyUnlessCanAct(q, req.user, res, firstIssue.space_id, 'issue.bulk'))) return;
+  const issueRows = (await q('SELECT id, space_id FROM issues WHERE id = ANY($1) AND deleted_at IS NULL', [ids])).rows;
+  if (issueRows.length !== ids.length) return res.status(404).json({ error: 'Issue not found' });
+  const bulkSpaceIds = Array.from(new Set(issueRows.map(function (row) { return row.space_id; })));
+  for (let i = 0; i < bulkSpaceIds.length; i++) {
+    if (!(await denyUnlessCanAct(q, req.user, res, bulkSpaceIds[i], 'issue.bulk'))) return;
+  }
   const upd = buildDynamicUpdate('issues', picked, 2);
   const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=ANY($1) RETURNING *`, [ids, ...upd.vals]);
   res.json({ ok: true, updated: r.rowCount, issues: r.rows });
@@ -796,7 +896,7 @@ app.post('/api/comments/upload', requireAuth, (req, res) => {
   const memStorage = multer.memoryStorage();
   const memUpload = multer({ storage: memStorage, limits: { fileSize: Infinity, files: 20 } });
   memUpload.array('files', 20)(req, res, async (err) => {
-    if (err) return res.status(400).json({ error: err.message });
+    if (err) { console.error('[comments/upload]', err); return res.status(400).json({ error: 'Upload failed' }); }
     if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files' });
     const files = [];
     for (const f of req.files) {
@@ -811,20 +911,16 @@ app.post('/api/comments/upload', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/files/:id', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT original_name, mime_type, data FROM file_storage WHERE id=$1', [req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'File not found' });
-    const { original_name, mime_type, data } = r.rows[0];
-    res.setHeader('Content-Type', mime_type);
-    res.setHeader('Content-Disposition', 'inline; filename="' + original_name.replace(/"/g, '') + '"');
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
-    res.send(data);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+app.get('/api/files/:id', requireAuthFile, wrap(async (req, res) => {
+  if (!(await denyUnlessCanAccessFile(req.user, res, req.params.id))) return;
+  const r = await pool.query('SELECT original_name, mime_type, data FROM file_storage WHERE id=$1', [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'File not found' });
+  const { original_name, mime_type, data } = r.rows[0];
+  res.setHeader('Content-Type', mime_type);
+  res.setHeader('Content-Disposition', 'inline; filename="' + original_name.replace(/"/g, '') + '"');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.send(data);
+}));
 
 // ── Worklogs ──────────────────────────────────────────────
 app.get('/api/worklogs', requireAuth, wrap(async (req, res) => {
@@ -911,8 +1007,10 @@ app.get('/api/roadmap', requireAuth, wrap(async (req, res) => {
              LEFT JOIN users cb ON cb.id = r.created_by
              WHERE 1=1`;
   const params = [];
-  if (space_id) { params.push(space_id); sql += ` AND r.space_id=$${params.length}`; }
-  else if (!isOrgAdmin(req.user.role)) {
+  if (space_id) {
+    if (!(await denyUnlessCanAct(q, req.user, res, space_id, 'roadmap.manage'))) return;
+    params.push(space_id); sql += ` AND r.space_id=$${params.length}`;
+  } else if (!isOrgAdmin(req.user.role)) {
     params.push(req.user.user_id || req.user.id);
     sql += ` AND r.space_id IN (SELECT space_id FROM space_members WHERE user_id=$${params.length})`;
   }
@@ -924,6 +1022,7 @@ app.get('/api/roadmap', requireAuth, wrap(async (req, res) => {
 app.post('/api/roadmap', requireAuth, wrap(async (req, res) => {
   const { title, description, status, start_date, end_date, space_id, issue_id, color, priority, assigned_to, group_name, category, milestone } = req.body;
   if (!title) return res.status(400).json({ error: 'Title required' });
+  if (space_id && !(await denyUnlessCanAct(q, req.user, res, space_id, 'roadmap.manage'))) return;
 
   // Auto-create a backlog issue in the linked space (sprint_id=null = backlog)
   let linkedIssueId = issue_id || null;
@@ -959,6 +1058,10 @@ app.post('/api/roadmap', requireAuth, wrap(async (req, res) => {
 
 app.put('/api/roadmap/:id', requireAuth, wrap(async (req, res) => {
   const { title, description, status, start_date, end_date, space_id, issue_id, color, priority, assigned_to, group_name, category, milestone } = req.body;
+  const existing = (await q('SELECT space_id FROM roadmap_items WHERE id=$1', [req.params.id])).rows[0];
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (existing.space_id && !(await denyUnlessCanAct(q, req.user, res, existing.space_id, 'roadmap.manage'))) return;
+  if (space_id && space_id !== existing.space_id && !(await denyUnlessCanAct(q, req.user, res, space_id, 'roadmap.manage'))) return;
   const row = (await q(
     `UPDATE roadmap_items SET title=$2,description=$3,status=$4,start_date=$5,end_date=$6,
      space_id=$7,issue_id=$8,color=$9,priority=$10,assigned_to=$11,
@@ -973,6 +1076,9 @@ app.put('/api/roadmap/:id', requireAuth, wrap(async (req, res) => {
 }));
 
 app.delete('/api/roadmap/:id', requireAuth, wrap(async (req, res) => {
+  const existing = (await q('SELECT space_id FROM roadmap_items WHERE id=$1', [req.params.id])).rows[0];
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (existing.space_id && !(await denyUnlessCanAct(q, req.user, res, existing.space_id, 'roadmap.manage'))) return;
   await q('DELETE FROM roadmap_items WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
@@ -1000,16 +1106,35 @@ app.post('/api/roadmap/colors', requireAuth, wrap(async (req, res) => {
 app.post('/api/links', requireAuth, wrap(async (req, res) => {
   const { source_id, target_id, link_type } = req.body;
   if (!source_id || !target_id || !link_type) return res.status(400).json({ error: 'source_id, target_id and link_type are required' });
+  if (source_id === target_id) return res.status(400).json({ error: 'An issue cannot be linked to itself' });
+  if (!LINK_TYPE_INVERSE[link_type]) return res.status(400).json({ error: 'Unknown link type' });
   const sourceSpace = await getIssueSpaceId(q, source_id);
   const targetSpace = await getIssueSpaceId(q, target_id);
   if (!sourceSpace || !targetSpace || sourceSpace !== targetSpace) return res.status(400).json({ error: 'Invalid issue link' });
   if (!(await denyUnlessCanAct(q, req.user, res, sourceSpace, 'link.manage'))) return;
-  // Check for existing link in either direction to avoid duplicate constraint error
+  // Reject one link family per pair. Checking only the exact (pair, link_type)
+  // let contradictions through, because a family's two names are different
+  // strings: A "blocks" B could coexist with A "is blocked by" B, and with
+  // B "blocks" A. Comparing against the whole family (type + its inverse) in
+  // both directions collapses all four of those into one check, while still
+  // allowing genuinely different relationships on the same pair (e.g. both
+  // "blocks" and "relates to"), which is how Jira behaves.
+  const family = [link_type, LINK_TYPE_INVERSE[link_type]].filter(Boolean);
   const existing = await q(
-    'SELECT id FROM issue_links WHERE (source_id=$1 AND target_id=$2 AND link_type=$3) OR (source_id=$2 AND target_id=$1 AND link_type=$3)',
-    [source_id, target_id, link_type]
+    `SELECT id, source_id, link_type FROM issue_links
+     WHERE ((source_id=$1 AND target_id=$2) OR (source_id=$2 AND target_id=$1))
+       AND link_type = ANY($3::varchar[])`,
+    [source_id, target_id, family]
   );
-  if (existing.rows.length) return res.status(409).json({ error: 'This link already exists between these two issues' });
+  if (existing.rows.length) {
+    const clash = existing.rows[0];
+    const same = clash.source_id === source_id && clash.link_type === link_type;
+    return res.status(409).json({
+      error: same
+        ? 'These two issues are already linked that way'
+        : 'These two issues already have a conflicting link (' + clash.link_type.replace(/_/g, ' ') + ') — remove it first'
+    });
+  }
   const r = await q('INSERT INTO issue_links(id,source_id,target_id,link_type) VALUES($1,$2,$3,$4) RETURNING *',
     [uid(), source_id, target_id, link_type]);
   res.status(201).json(r.rows[0]);
@@ -1038,7 +1163,7 @@ app.post('/api/issues/:id/attachments', requireAuth, (req, res, next) => {
   if (!multer) return res.status(503).json({ error: 'File upload not available' });
   const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Infinity, files: 20 } });
   memUpload.array('files', 20)(req, res, async (err) => {
-    if (err) return res.status(400).json({ error: err.message });
+    if (err) { console.error('[attachments/upload]', err); return res.status(400).json({ error: 'Upload failed' }); }
     try {
       const spaceId = await getIssueSpaceId(q, req.params.id);
       if (!spaceId) return res.status(404).json({ error: 'Issue not found' });
@@ -1752,17 +1877,39 @@ function verifyPassword(password, stored) {
 function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 
 // ── Auth Middleware ────────────────────────────────────────
+async function resolveSessionFromToken(token) {
+  const r = await q(`SELECT s.user_id, u.name, u.email, u.role, u.is_active
+    FROM sessions s JOIN users u ON u.id=s.user_id
+    WHERE s.token=$1 AND s.expires_at>NOW()`, [token]);
+  if (!r.rows[0] || !r.rows[0].is_active) return null;
+  const user = r.rows[0];
+  user.id = user.user_id;
+  return user;
+}
+
+/** Bearer header or ?t= session token (for img/a tags that cannot send Authorization). */
+async function requireAuthFile(req, res, next) {
+  let token = null;
+  const auth = req.headers['authorization'];
+  if (auth && auth.startsWith('Bearer ')) token = auth.slice(7);
+  else if (req.query && req.query.t) token = String(req.query.t);
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const user = await resolveSessionFromToken(token);
+    if (!user) return res.status(401).json({ error: 'Session expired' });
+    req.user = user;
+    next();
+  } catch (e) { return res.status(401).json({ error: 'Auth error' }); }
+}
+
 async function requireAuth(req, res, next) {
   const auth = req.headers['authorization'];
   if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   const token = auth.slice(7);
   try {
-    const r = await q(`SELECT s.user_id, u.name, u.email, u.role, u.is_active
-      FROM sessions s JOIN users u ON u.id=s.user_id
-      WHERE s.token=$1 AND s.expires_at>NOW()`, [token]);
-    if (!r.rows[0] || !r.rows[0].is_active) return res.status(401).json({ error: 'Session expired' });
-    req.user = r.rows[0];
-    req.user.id = req.user.user_id;
+    const user = await resolveSessionFromToken(token);
+    if (!user) return res.status(401).json({ error: 'Session expired' });
+    req.user = user;
     next();
   } catch (e) { return res.status(401).json({ error: 'Auth error' }); }
 }

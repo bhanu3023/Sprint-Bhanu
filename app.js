@@ -18,7 +18,7 @@ const S = {
   allWorkPage: 1,
   allWorkSelected: new Set(),
   yourWorkTab: 'assigned',
-  ywFilters: { type: [], status: [], priority: [], space: [] },
+  ywFilters: { key: [], type: [], status: [], priority: [], space: [] },
   ywExcludeDone: false,
   awFilters: {
     type: [], status: [], priority: [], assignee: [], sprint: [],
@@ -43,6 +43,12 @@ const esc = (str) => {
   d.textContent = String(str);
   return d.innerHTML;
 };
+
+// esc() goes through textContent -> innerHTML, which escapes & < > but NOT
+// quotes — safe for element text, NOT safe inside an HTML attribute. Use this
+// whenever a value is interpolated into attr="..." or attr='...', or a title
+// containing a quote silently terminates the attribute.
+const escAttr = (str) => esc(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 function stripHtmlForDisplay(html) {
   if (!html) return '';
@@ -328,6 +334,30 @@ function parseEstimate(str) {
 // ═══════════════════════════════════════════════════════════
 function getAuthToken() { return localStorage.getItem('sb-token') || ''; }
 
+/** Authenticated file URL for img/a tags (session token as query param). */
+function fileApiUrl(fileIdOrPath) {
+  var id = fileIdOrPath;
+  if (typeof id === 'string' && id.indexOf('/api/files/') === 0) {
+    id = id.replace(/^\/api\/files\//, '').split('?')[0];
+  }
+  var t = getAuthToken();
+  return '/api/files/' + encodeURIComponent(id) + (t ? '?t=' + encodeURIComponent(t) : '');
+}
+
+function augmentFileUrlsInHtml(html) {
+  if (!html || html.indexOf('/api/files/') === -1) return html;
+  var t = getAuthToken();
+  if (!t) return html;
+  return html.replace(/\/api\/files\/([^"'\s?]+)/g, function (_m, id) {
+    return '/api/files/' + id + '?t=' + encodeURIComponent(t);
+  });
+}
+
+function stripFileAuthTokensFromHtml(html) {
+  if (!html || html.indexOf('/api/files/') === -1) return html;
+  return html.replace(/\/api\/files\/([^"'\s?]+)\?t=[^"'\s&]+/g, '/api/files/$1');
+}
+
 async function api(url, method, body, opts) {
   opts = opts || {};
   method = method || 'GET';
@@ -491,14 +521,14 @@ function refreshRecentViewedUI() {
 
 function clearYourWorkFilters() {
   S.ywExcludeDone = false;
-  S.ywFilters = { type: [], status: [], priority: [], space: [] };
+  S.ywFilters = { key: [], type: [], status: [], priority: [], space: [] };
   var srch = $('ywSearch');
   if (srch) srch.value = '';
 }
 
 function applyYourWorkOpenFilter() {
   S.ywExcludeDone = true;
-  S.ywFilters = { type: [], status: [], priority: [], space: [] };
+  S.ywFilters = { key: [], type: [], status: [], priority: [], space: [] };
   var srch = $('ywSearch');
   if (srch) srch.value = '';
 }
@@ -539,7 +569,7 @@ function refreshHomeMyIssuesPanel() {
     html += '<div class="db-issue-row" onclick="openIssuePage(\'' + issue.id + '\')">' +
       '<span class="db-issue-row-key">' + esc(issueKeyStr(issue)) + '</span>' +
       '<span class="db-issue-row-title">' + esc(issue.title) + '</span>' +
-      statusBadge(issue.status) + priorityBadge(issue.priority) + '</div>';
+      statusBadge(issue.status, true) + priorityBadge(issue.priority, true) + '</div>';
   });
   panel.innerHTML = html;
 }
@@ -788,7 +818,7 @@ var SPRINT_STATUS_COLORS = {
 // ═══════════════════════════════════════════════════════════
 // HTML BADGE / AVATAR HELPERS
 // ═══════════════════════════════════════════════════════════
-function statusBadge(status) {
+function statusBadge(status, noCaret) {
   var styles = {
     'To Do':      'background:#dfe1e6;color:#42526e',
     'In Progress':'background:#deebff;color:#0052cc',
@@ -796,17 +826,23 @@ function statusBadge(status) {
     'Done':       'background:#e3fcef;color:#006644'
   };
   var style = styles[status] || 'background:#dfe1e6;color:#42526e';
-  return '<span style="' + style + ';border-radius:3px;text-transform:uppercase;font-size:11px;font-weight:700;letter-spacing:0.04em;padding:2px 8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;cursor:pointer">' + esc(status) + '<span style="font-size:11px;margin-left:2px">&#9662;</span></span>';
+  // noCaret: read-only contexts that have no inline status editor wired up, so
+  // the ▾ would advertise a dropdown that never opens.
+  var caret = noCaret ? '' : '<span style="font-size:11px;margin-left:2px">&#9662;</span>';
+  var cursor = noCaret ? 'default' : 'pointer';
+  return '<span style="' + style + ';border-radius:3px;text-transform:uppercase;font-size:11px;font-weight:700;letter-spacing:0.04em;padding:2px 8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;cursor:' + cursor + '">' + esc(status) + caret + '</span>';
 }
 
-function priorityBadge(priority) {
+function priorityBadge(priority, noCaret) {
   var colors = {
     highest: '#dc2626', high: '#ef4444', medium: '#f59e0b', low: '#3b82f6', lowest: '#6b7280'
   };
   var color = colors[priority] || '#6b7280';
-  return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;white-space:nowrap;cursor:pointer">' +
+  var caret = noCaret ? ''
+    : '<span style="color:#6b778c;font-size:12px;line-height:1;vertical-align:middle;margin-top:3px">&#9662;</span>';
+  return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;white-space:nowrap;cursor:' + (noCaret ? 'default' : 'pointer') + '">' +
     '<span style="color:#172b4d;font-weight:500">' + cap(priority) + '</span>' +
-    '<span style="color:#6b778c;font-size:12px;line-height:1;vertical-align:middle;margin-top:3px">&#9662;</span>' +
+    caret +
     '</span>';
 }
 
@@ -1016,6 +1052,7 @@ function initUserSearchDropdown(searchInputId, hiddenInputId, dropdownId, member
     return (a.name || '').localeCompare(b.name || '');
   });
   var allOptions = [{ id: '', name: 'Unassigned', color: '#6b7280' }].concat(sorted);
+  searchEl._userSearchOptions = allOptions;
 
   // Set initial display value
   var preselected = selectedId ? allOptions.find(function(u){ return String(u.id) === String(selectedId); }) : null;
@@ -1023,8 +1060,9 @@ function initUserSearchDropdown(searchInputId, hiddenInputId, dropdownId, member
   searchEl.value = preselected ? preselected.name : '';
 
   function renderDropdown(filter) {
+    var opts = searchEl._userSearchOptions || allOptions;
     var q = (filter || '').toLowerCase();
-    var filtered = allOptions.filter(function(u){ return !q || u.name.toLowerCase().indexOf(q) >= 0; });
+    var filtered = opts.filter(function(u){ return !q || u.name.toLowerCase().indexOf(q) >= 0; });
     if (!filtered.length) {
       dropEl.innerHTML = '<div class="user-search-none">No results</div>';
     } else {
@@ -1047,6 +1085,9 @@ function initUserSearchDropdown(searchInputId, hiddenInputId, dropdownId, member
     });
   }
 
+  if (searchEl._userSearchBound) return;
+  searchEl._userSearchBound = true;
+
   searchEl.addEventListener('focus', function() { renderDropdown(searchEl.value); });
   searchEl.addEventListener('input', function() { renderDropdown(searchEl.value); });
   searchEl.addEventListener('blur', function() { setTimeout(function(){ dropEl.style.display = 'none'; }, 150); });
@@ -1054,10 +1095,18 @@ function initUserSearchDropdown(searchInputId, hiddenInputId, dropdownId, member
     if (e.key === 'Escape') { dropEl.style.display = 'none'; searchEl.blur(); }
   });
 
-  // Close on outside click
-  document.addEventListener('click', function(e) {
-    if (!searchEl.contains(e.target) && !dropEl.contains(e.target)) dropEl.style.display = 'none';
-  });
+  if (!window._userSearchOutsideBound) {
+    window._userSearchOutsideBound = true;
+    document.addEventListener('click', function(e) {
+      document.querySelectorAll('[data-user-search-input]').forEach(function(input) {
+        var dropId = input.getAttribute('data-user-search-drop');
+        var drop = dropId ? $(dropId) : null;
+        if (drop && !input.contains(e.target) && !drop.contains(e.target)) drop.style.display = 'none';
+      });
+    });
+  }
+  searchEl.setAttribute('data-user-search-input', '1');
+  searchEl.setAttribute('data-user-search-drop', dropdownId.charAt(0) === '#' ? dropdownId.slice(1) : dropdownId);
 }
 
 function populateSprintSelect(sel, sprints, selectedId) {
@@ -1288,18 +1337,21 @@ function renderTopbarProfile(user) {
   var adminBtn = $('topbarAdminSettingsBtn');
   if (adminBtn) adminBtn.style.display = isAdmin ? '' : 'none';
 
-  // Toggle dropdown
+  // Toggle dropdown (onclick replaced each render — no stack)
   btn.onclick = function(e) {
     e.stopPropagation();
     var menu = $('topbarProfileMenu');
     if (menu) menu.hidden = !menu.hidden;
   };
 
-  // Close on outside click
-  document.addEventListener('click', function(e) {
-    var menu = $('topbarProfileMenu');
-    if (menu && !menu.hidden && !$('topbarProfileWrap').contains(e.target)) menu.hidden = true;
-  });
+  if (!window._topbarProfileOutsideBound) {
+    window._topbarProfileOutsideBound = true;
+    document.addEventListener('click', function(e) {
+      var menu = $('topbarProfileMenu');
+      var wrap = $('topbarProfileWrap');
+      if (menu && !menu.hidden && wrap && !wrap.contains(e.target)) menu.hidden = true;
+    });
+  }
 
   window._topbarProfileAction = function(action) {
     var menu = $('topbarProfileMenu');
@@ -2056,8 +2108,6 @@ function renderSpaceHeader(space) {
   var membersHtml = shown.map(function (u) { return avatarHtml(u, 28); }).join('');
   if (overflow > 0) membersHtml += '<span class="avatar-overflow" style="cursor:pointer" title="View all members" onclick="_settingsActiveTab=\'people\';navigateToSpace(S.currentSpace,\'space-settings\')">+' + overflow + '</span>';
   $('spaceMembers').innerHTML = membersHtml;
-
-  $('spaceActionsBtn').onclick = function () { openSpaceModal(space); };
 }
 
 function countAssignedPlusReported(data) {
@@ -2169,8 +2219,8 @@ function renderHome() {
       myHtml += '<div class="db-issue-row" onclick="openIssuePage(\'' + issue.id + '\')">' +
         '<span class="db-issue-row-key">' + esc(issueKeyStr(issue)) + '</span>' +
         '<span class="db-issue-row-title">' + esc(issue.title) + '</span>' +
-        statusBadge(issue.status) +
-        priorityBadge(issue.priority) +
+        statusBadge(issue.status, true) +
+        priorityBadge(issue.priority, true) +
         '</div>';
     }
   } else {
@@ -2332,8 +2382,43 @@ function _ywGetSpaceOpts(issues) {
   return opts;
 }
 
+// The project-key prefix of an issue key ("ENG-13" → "ENG"). Prefers the
+// project_key the API joins in; falls back to trimming the trailing -N off the
+// key itself for rows that don't carry it (e.g. locally-enriched
+// recently-viewed entries).
+function _ywIssueKeyPrefix(iss) {
+  if (iss && iss.project_key) return String(iss.project_key).toUpperCase();
+  var k = String(issueKeyStr(iss) || '');
+  var m = k.match(/^(.+)-\d+$/);
+  return (m ? m[1] : k).toUpperCase();
+}
+
+// Every space the user belongs to gets an option, whether or not they
+// currently have a ticket in it — a member of 3 spaces with tickets in only 2
+// still sees all 3 keys. Prefixes found on the issues themselves are unioned
+// in afterwards so a visible row can never end up unfilterable (e.g. an
+// admin assigned a ticket in a space they aren't a member of).
+function _ywGetKeyOpts(issues) {
+  var seen = {};
+  var opts = [];
+  var add = function (prefix, label) {
+    if (!prefix || seen[prefix]) return;
+    seen[prefix] = true;
+    opts.push({ v: prefix, l: label || prefix });
+  };
+  getMyVisibleSpaceIds().forEach(function (sid) {
+    var sp = getSpace(sid);
+    if (!sp || sp.is_archived || !sp.key) return;
+    add(String(sp.key).toUpperCase(), String(sp.key).toUpperCase());
+  });
+  (issues || []).forEach(function (iss) { add(_ywIssueKeyPrefix(iss)); });
+  opts.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return opts;
+}
+
 function _ywGetFilterOpts(key, issues) {
   if (key === 'space') return _ywGetSpaceOpts(issues);
+  if (key === 'key') return _ywGetKeyOpts(issues);
   return (YW_FILTER_DEFS[key] && YW_FILTER_DEFS[key].opts) || [];
 }
 
@@ -2343,8 +2428,12 @@ function _ywApplyFilters(issues) {
   var out = (issues || []).slice();
   if (search) {
     out = out.filter(function (i) {
-      return (i.title || '').toLowerCase().indexOf(search) >= 0;
+      return (i.title || '').toLowerCase().indexOf(search) >= 0 ||
+        String(issueKeyStr(i) || '').toLowerCase().indexOf(search) >= 0;
     });
+  }
+  if (f.key && f.key.length) {
+    out = out.filter(function (i) { return f.key.indexOf(_ywIssueKeyPrefix(i)) >= 0; });
   }
   if (f.type && f.type.length) {
     out = out.filter(function (i) { return f.type.indexOf(i.type) >= 0; });
@@ -2369,6 +2458,7 @@ function _ywAnyFilterActive() {
   return !!(
     S.ywExcludeDone ||
     ($('ywSearch') && $('ywSearch').value.trim()) ||
+    (f.key && f.key.length) ||
     (f.type && f.type.length) || (f.status && f.status.length) ||
     (f.priority && f.priority.length) || (f.space && f.space.length)
   );
@@ -2388,7 +2478,7 @@ function _ywBuildFilterTh(key, label, issues) {
     '<div class="yw-th-filter-wrap">' +
       '<span>' + esc(label) + '</span>' +
       '<button type="button" class="yw-filter-trigger' + (active ? ' active' : '') + '" onclick="window._ywToggleFilter(\'' + key + '\',event)" aria-label="Filter ' + esc(label) + '">' +
-        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>' +
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>' +
       '</button>' +
       '<div class="yw-filter-panel" id="yw-filter-' + key + '" hidden onclick="event.stopPropagation()">' + panel + '</div>' +
     '</div></th>';
@@ -2429,7 +2519,8 @@ function _renderYourWorkTable(issues, rawIssues, lastColLabel) {
     : '';
   var html = '<div class="yw-table-wrap">' + toolbarHtml +
     '<table class="yw-table"><thead><tr>' +
-    '<th>Key</th><th>Title</th>' +
+    _ywBuildFilterTh('key', 'Key', rawIssues) +
+    '<th>Title</th>' +
     _ywBuildFilterTh('type', 'Type', rawIssues) +
     _ywBuildFilterTh('status', 'Status', rawIssues) +
     _ywBuildFilterTh('priority', 'Priority', rawIssues) +
@@ -4646,8 +4737,8 @@ function backlogRow(iss) {
     '<span class="issue-key">' + esc(issueKeyStr(iss)) + '</span>' +
     parentInfo +
     '<span class="backlog-issue-title">' + esc(iss.title) + '</span>' +
-    priorityBadge(iss.priority) +
-    statusBadge(iss.status) +
+    priorityBadge(iss.priority, true) +
+    statusBadge(iss.status, true) +
     (iss.story_points != null ? '<span class="badge badge-points">' + iss.story_points + '</span>' : '') +
     avatarHtml(assignee, 24) +
     '</div>';
@@ -7543,6 +7634,133 @@ function applyBuiltinFieldVisibility(spaceId, rootEl, place) {
   });
 }
 
+// ── Required-field validation (create form) ───────────────
+// Maps a built-in field_key to its control in the Create Issue modal so the
+// "Required" flag set per space in Settings → Custom Fields can actually be
+// enforced, instead of only rendering a red asterisk. Keys deliberately
+// absent: `combination` (bespoke picker with its own validation) and
+// `fix_description`/`status` (not on the create form at all) — a key with no
+// entry here is skipped rather than blocking submit on a control that
+// doesn't exist.
+var CREATE_BUILTIN_INPUTS = {
+  title:        { id: 'issueTitleInput',  label: 'Title' },
+  type:         { id: 'issueType',        label: 'Type' },
+  priority:     { id: 'issuePriority',    label: 'Priority' },
+  assignee:     { id: 'issueAssignee',    label: 'Assignee', focusId: 'issueAssigneeSearch' },
+  reporter:     { id: 'issueReporter',    label: 'Reporter', focusId: 'issueReporterSearch' },
+  sprint:       { id: 'issueSprint',      label: 'Sprint' },
+  story_points: { id: 'issuePoints',      label: 'Story Points' },
+  start_date:   { id: 'issueStartDate',   label: 'Start Date' },
+  due_date:     { id: 'issueDueDate',     label: 'Due Date' },
+  team:         { id: 'issueTeam',        label: 'Team' },
+  product_type: { id: 'issueProductType', label: 'Product Type', wrapId: 'issueProductTypeGroup' },
+  description:  { id: 'issueDescContent', label: 'Description', rich: true }
+};
+
+// A control the user can't see must never block submit — Product Type and any
+// built-in switched off for this space are hidden via the `hidden` attribute
+// by applyBuiltinFieldVisibility, so walk ancestors looking for that.
+function isCreateFieldHidden(el) {
+  for (var node = el; node && node !== document.body; node = node.parentElement) {
+    if (node.hidden) return true;
+  }
+  return false;
+}
+
+function createFieldIsEmpty(el, opts) {
+  if (opts && opts.rich) return htmlFieldIsEmpty(el.innerHTML);
+  if (el.type === 'checkbox') return !el.checked;
+  if (el.tagName === 'SELECT' && el.multiple) return !el.selectedOptions.length;
+  return !String(el.value == null ? '' : el.value).trim();
+}
+
+// Every required field on the create form that the user left empty, in the
+// order they appear, so the first one can be focused.
+function getCreateRequiredErrors(spaceId) {
+  var errors = [];
+  var rows = getSpaceFieldRows(spaceId);
+  var checkedTitle = false;
+
+  rows.forEach(function (field) {
+    if (!field.is_required) return;
+    if (!customFieldShowsIn(field, 'create')) return;
+
+    var el, opts = null, label = field.name;
+    if (field.is_builtin) {
+      if (isCombinationField(field)) return;
+      var desc = CREATE_BUILTIN_INPUTS[field.field_key];
+      if (!desc) return;
+      el = $(desc.id);
+      if (!el) return;
+      var wrap = desc.wrapId ? $(desc.wrapId) : el;
+      if (wrap && isCreateFieldHidden(wrap)) return;
+      opts = desc;
+      label = field.name || desc.label;
+      if (field.field_key === 'title') checkedTitle = true;
+    } else {
+      var container = $('issueCustomFieldsContainer');
+      el = container && container.querySelector('[data-cf-id="' + field.id + '"]');
+      if (!el || isCreateFieldHidden(el)) return;
+    }
+
+    if (createFieldIsEmpty(el, opts)) {
+      errors.push({ label: label, el: el, focusEl: (opts && opts.focusId && $(opts.focusId)) || el });
+    }
+  });
+
+  // Title is required regardless of the stored flag (it's the locked built-in,
+  // and NOT NULL in the DB). Covers spaces whose built-in rows predate the
+  // registry and so have no Title row to iterate.
+  if (!checkedTitle) {
+    var titleEl = $('issueTitleInput');
+    if (titleEl && createFieldIsEmpty(titleEl)) {
+      errors.unshift({ label: 'Title', el: titleEl, focusEl: titleEl });
+    }
+  }
+  return errors;
+}
+
+function validateCreateRequiredFields(spaceId) {
+  var errors = getCreateRequiredErrors(spaceId);
+  if (!errors.length) return true;
+  var first = errors[0];
+  var names = errors.map(function (e) { return e.label; });
+  toast(errors.length === 1
+    ? 'Please fill in the required field: ' + names[0]
+    : 'Please fill in the required fields: ' + names.join(', '), 'error');
+  // Flash the control the user can actually see — for Assignee/Reporter the
+  // value lives on a hidden input, so highlighting that would show nothing.
+  errors.forEach(function (e) {
+    var target = e.focusEl || e.el;
+    target.style.border = '2px solid #e53e3e';
+    setTimeout(function () { target.style.border = ''; }, 3000);
+  });
+  if (first.focusEl && first.focusEl.focus) first.focusEl.focus();
+  return false;
+}
+
+// Show a red asterisk on built-in create-form labels whose field is required
+// for this space, so required built-ins are as visible as required customs.
+function markCreateRequiredLabels(spaceId) {
+  var modal = $('modal-issue');
+  if (!modal) return;
+  modal.querySelectorAll('.cf-req-star').forEach(function (s) { s.remove(); });
+  getSpaceFieldRows(spaceId).forEach(function (field) {
+    if (!field.is_builtin || !field.is_required) return;
+    if (!customFieldShowsIn(field, 'create')) return;
+    var desc = CREATE_BUILTIN_INPUTS[field.field_key];
+    if (!desc) return;
+    var wrap = desc.wrapId ? $(desc.wrapId) : ($(desc.id) && $(desc.id).closest('.form-group'));
+    var label = wrap && wrap.querySelector('.form-label');
+    if (!label || label.querySelector('.cf-req-star')) return;
+    var star = document.createElement('span');
+    star.className = 'cf-req-star';
+    star.style.color = 'var(--red)';
+    star.textContent = ' *';
+    label.appendChild(star);
+  });
+}
+
 function formatFieldShowIn(field) {
   var show = field && field.show_in;
   if (!show || !show.length) return 'Drawer';
@@ -8158,7 +8376,7 @@ function addDescInlineImageChip(tray, url, alt, fp) {
   chip.className = 'desc-image-chip';
   chip.dataset.url = url;
   if (fp) chip.dataset.fp = fp;
-  chip.innerHTML = '<img src="' + esc(url) + '" alt="' + esc(alt || 'Screenshot') + '">' +
+  chip.innerHTML = '<img src="' + esc(fileApiUrl(url)) + '" alt="' + esc(alt || 'Screenshot') + '">' +
     '<button type="button" class="desc-image-remove" aria-label="Remove">×</button>';
   tray.appendChild(chip);
 }
@@ -8210,6 +8428,7 @@ function getDescriptionHtmlForSave(editorEl) {
   if (tray && !tray.querySelector('.desc-image-chip')) tray.remove();
   var html = clone.innerHTML.trim();
   html = stripInlineBase64Images(html);
+  html = stripFileAuthTokensFromHtml(html);
   return (html === '' || html === '<br>') ? '' : html;
 }
 
@@ -8610,11 +8829,11 @@ async function openDrawer(issueId) {
         if (anchor) return anchor;
         return '<a href="' + url + '" style="' + linkStyle + '" target="_blank">' + url + '</a>';
       });
-      return fixed
+      return augmentFileUrlsInHtml(fixed
         .replace(/<p>\s*<\/p>/gi, '')
         .replace(/(<br\s*\/?>){3,}/gi, '<br>')
         .replace(/&nbsp;/gi, ' ')
-        .trim();
+        .trim());
     }
     var p = text.replace(/\n{3,}/g,'\n\n').replace(/\n/g,'<br>');
     var d = p.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
@@ -9621,6 +9840,12 @@ window._deleteSubtask = async function(subtaskId) {
 // ═══════════════════════════════════════════════════════════
 // LINKED ITEMS (Jira-style)
 // ═══════════════════════════════════════════════════════════
+// `selectable: false` = still rendered and removable for rows that already
+// exist, but not offered for new links. Issue hierarchy lives on
+// issues.parent_id (the Subtasks panel); a parallel is_child_of link was a
+// second, unsynchronised source of truth — such a "child" never showed under
+// Subtasks, never blocked the parent from going Done and never rolled up in
+// reports. Keep in sync with LINK_TYPE_INVERSE in server.js.
 var LINK_TYPES = [
   { value: 'blocks', label: 'blocks', inverse: 'is blocked by' },
   { value: 'is_blocked_by', label: 'is blocked by', inverse: 'blocks' },
@@ -9629,13 +9854,35 @@ var LINK_TYPES = [
   { value: 'duplicates', label: 'duplicates', inverse: 'is duplicated by' },
   { value: 'is_duplicated_by', label: 'is duplicated by', inverse: 'duplicates' },
   { value: 'relates_to', label: 'relates to', inverse: 'relates to' },
-  { value: 'is_child_of', label: 'is child of', inverse: 'is parent of' },
-  { value: 'is_parent_of', label: 'is parent of', inverse: 'is child of' },
+  { value: 'is_child_of', label: 'is child of', inverse: 'is parent of', selectable: false },
+  { value: 'is_parent_of', label: 'is parent of', inverse: 'is child of', selectable: false },
 ];
 
 function linkTypeLabel(type) {
   var found = LINK_TYPES.find(function(t){ return t.value === type; });
-  return found ? found.label : type.replace(/_/g, ' ');
+  return found ? found.label : String(type || '').replace(/_/g, ' ');
+}
+
+// space_id of the issue whose drawer is open — links are space-local
+var _linkDialogSpaceId = null;
+
+function copyTextToClipboard(text) {
+  var fallback = function () {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    document.body.removeChild(ta);
+    toast('Link copied', 'success');
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(function () { toast('Link copied', 'success'); })
+      .catch(fallback);
+  } else {
+    fallback();
+  }
 }
 
 // Accept issue key, full URL, or partial URL (?issue=KEY) — same format as copy link
@@ -9664,25 +9911,38 @@ function renderLinkSearchResults(matches) {
     results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">No matching issues found</p>';
     return;
   }
+  // Identity travels in data-* attributes and the handler is attached in JS.
+  // Interpolating the title into an inline onclick meant any title containing
+  // a double quote terminated the attribute and broke the row.
   var html = '';
   for (var mi = 0; mi < matches.length; mi++) {
     var m = matches[mi];
     html += '<div class="link-search-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-radius:4px;font-size:12px" ' +
-      'onmouseenter="this.style.background=\'var(--bg4)\'" onmouseleave="this.style.background=\'\'" ' +
-      'onclick="window._selectLinkIssue(\'' + m.id + '\',\'' + esc(m.key) + '\',\'' + esc(m.title).replace(/'/g, "\\'") + '\')">' +
+      'data-link-pick-id="' + escAttr(m.id) + '" data-link-pick-key="' + escAttr(m.key) + '" data-link-pick-title="' + escAttr(m.title) + '">' +
       '<span style="font-size:11px">' + typeIcon(m.type) + '</span>' +
       '<span style="font-weight:700;color:var(--accent);min-width:48px">' + esc(m.key) + '</span>' +
       '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(m.title) + '</span>' +
-      statusBadge(m.status) +
+      statusBadge(m.status, true) +
       '</div>';
   }
   results.innerHTML = html;
+
+  results.querySelectorAll('[data-link-pick-id]').forEach(function (row) {
+    row.addEventListener('mouseenter', function () { row.style.background = 'var(--bg4)'; });
+    row.addEventListener('mouseleave', function () { row.style.background = ''; });
+    row.addEventListener('click', function () {
+      window._selectLinkIssue(row.dataset.linkPickId, row.dataset.linkPickKey, row.dataset.linkPickTitle);
+    });
+  });
 }
 
 function renderDrawerLinks(issue) {
   var c = $('drawerLinks');
   var links = issue.links || [];
   var html = '';
+  // The server only allows links within one space, so remember which space the
+  // open issue belongs to and offer nothing else in the picker.
+  _linkDialogSpaceId = issue.space_id || null;
 
   if (links.length) {
     // Group by link type
@@ -9708,14 +9968,14 @@ function renderDrawerLinks(issue) {
       var items = grouped[gtype];
       for (var gi = 0; gi < items.length; gi++) {
         var it = items[gi];
-        html += '<div class="link-item" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;border:1px solid var(--border);margin-bottom:4px;background:var(--bg3);cursor:pointer" ' +
-          'onmouseenter="this.style.borderColor=\'var(--accent)\'" onmouseleave="this.style.borderColor=\'var(--border)\'">' +
+        html += '<div class="link-item" data-link-row-id="' + escAttr(it.id) + '" data-link-row-key="' + escAttr(it.key) + '" data-link-row-link="' + escAttr(it.linkId) + '" ' +
+          'style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;border:1px solid var(--border);margin-bottom:4px;background:var(--bg3);cursor:pointer">' +
           '<span style="font-size:12px">' + typeIcon(it.type) + '</span>' +
-          '<span style="font-size:11px;font-weight:700;color:var(--accent);cursor:pointer" onclick="openIssuePage(\'' + it.id + '\')">' + esc(it.key) + '</span>' +
-          '<span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openIssuePage(\'' + it.id + '\')">' + esc(it.title) + '</span>' +
-          statusBadge(it.status) +
-          '<button class="btn-icon" style="width:22px;height:22px;flex-shrink:0;opacity:0.55;padding:2px" title="Copy link" onclick="event.stopPropagation();(function(){var url=window.location.origin+\'/?issue=\'+\'' + esc(it.key) + '\';navigator.clipboard.writeText(url).then(function(){toast(\'Link copied\',\'success\');}).catch(function(){var ta=document.createElement(\'textarea\');ta.value=url;document.body.appendChild(ta);ta.select();document.execCommand(\'copy\');document.body.removeChild(ta);toast(\'Link copied\',\'success\');});})()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>' +
-          '<button class="btn-icon" style="width:18px;height:18px;font-size:10px;opacity:0.4;flex-shrink:0" onclick="event.stopPropagation();window._removeLink(\'' + it.linkId + '\')" title="Remove link">\u2715</button>' +
+          '<span style="font-size:11px;font-weight:700;color:var(--accent)">' + esc(it.key) + '</span>' +
+          '<span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(it.title) + '</span>' +
+          statusBadge(it.status, true) +
+          '<button class="btn-icon link-copy-btn" style="width:22px;height:22px;flex-shrink:0;opacity:0.55;padding:2px" title="Copy link"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>' +
+          '<button class="btn-icon link-remove-btn" style="width:18px;height:18px;font-size:10px;opacity:0.4;flex-shrink:0" title="Remove link">\u2715</button>' +
           '</div>';
       }
       html += '</div>';
@@ -9734,7 +9994,8 @@ function renderDrawerLinks(issue) {
     '<label class="form-label">Link type</label>' +
     '<select id="linkTypeSelect" class="input input-sm" style="width:100%">';
   for (var lti = 0; lti < LINK_TYPES.length; lti++) {
-    html += '<option value="' + LINK_TYPES[lti].value + '">' + esc(LINK_TYPES[lti].label) + '</option>';
+    if (LINK_TYPES[lti].selectable === false) continue;
+    html += '<option value="' + escAttr(LINK_TYPES[lti].value) + '">' + esc(LINK_TYPES[lti].label) + '</option>';
   }
   html += '</select></div>' +
     '<div style="margin-bottom:8px">' +
@@ -9742,13 +10003,34 @@ function renderDrawerLinks(issue) {
     '<input type="text" id="linkSearchInput" class="input input-sm" placeholder="Paste issue URL or search by key (e.g. ENG-5)" oninput="window._searchLinkIssues(this.value)" style="width:100%">' +
     '</div>' +
     '<div id="linkSearchResults" style="max-height:160px;overflow-y:auto;margin-bottom:8px"></div>' +
-    '<div id="linkSelectedIssue" style="display:none;padding:6px 8px;border:1px solid var(--accent);border-radius:4px;background:var(--accent-bg);margin-bottom:8px;display:none;align-items:center;gap:6px"></div>' +
+    '<div id="linkSelectedIssue" style="display:none;padding:6px 8px;border:1px solid var(--accent);border-radius:4px;background:var(--accent-bg);margin-bottom:8px;align-items:center;gap:6px"></div>' +
     '<div style="display:flex;gap:6px;justify-content:flex-end">' +
     '<button class="btn btn-outline btn-sm" onclick="window._hideLinkDialog()">Cancel</button>' +
     '<button class="btn btn-primary btn-sm" id="linkSubmitBtn" disabled onclick="window._submitLink()">Link</button>' +
     '</div></div>';
 
   c.innerHTML = html;
+
+  // Row behaviour bound here rather than inline, so keys/titles never have to
+  // survive being interpolated into an attribute.
+  c.querySelectorAll('[data-link-row-id]').forEach(function (row) {
+    var issueId = row.dataset.linkRowId;
+    var issueKey = row.dataset.linkRowKey;
+    var linkId = row.dataset.linkRowLink;
+    row.addEventListener('mouseenter', function () { row.style.borderColor = 'var(--accent)'; });
+    row.addEventListener('mouseleave', function () { row.style.borderColor = 'var(--border)'; });
+    row.addEventListener('click', function () { openIssuePage(issueId); });
+    var copyBtn = row.querySelector('.link-copy-btn');
+    if (copyBtn) copyBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      copyTextToClipboard(window.location.origin + '/?issue=' + encodeURIComponent(issueKey));
+    });
+    var rmBtn = row.querySelector('.link-remove-btn');
+    if (rmBtn) rmBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      window._removeLink(linkId);
+    });
+  });
 }
 
 window._showLinkDialog = function() {
@@ -9759,7 +10041,11 @@ window._showLinkDialog = function() {
     var sel = $('linkSelectedIssue');
     sel.style.display = 'none';
     sel.dataset.issueId = '';
+    sel.innerHTML = '';
     $('linkSubmitBtn').disabled = true;
+    // Reset the type back to the default instead of keeping the last pick
+    var typeSel = $('linkTypeSelect');
+    if (typeSel) typeSel.value = 'relates_to';
     // Show recent issues immediately on open
     window._searchLinkIssues('');
     setTimeout(function(){ $('linkSearchInput').focus(); }, 50);
@@ -9775,47 +10061,53 @@ window._searchLinkIssues = function(term) {
   var results = $('linkSearchResults');
   if (!results) return;
   var currentIssueId = S.drawerIssueId;
+  var spaceId = _linkDialogSpaceId;
   var searchTerm = parseIssueLinkReference(term) || (term || '').trim();
   var lower = searchTerm.toLowerCase();
+  var msg = function (text) {
+    results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">' + esc(text) + '</p>';
+  };
 
-  var matches = (S.data.issues || []).filter(function(i) {
+  // Only same-space issues are linkable (POST /api/links enforces it). Offering
+  // other spaces meant picking one failed with a bare "Invalid issue link" —
+  // S.data.issues spans every space when the drawer is opened from Home or
+  // My Work, so this filter is what keeps the picker honest.
+  var candidates = (S.data.issues || []).filter(function (i) {
     if (i.id === currentIssueId) return false;
-    if (!searchTerm) return true;
-    return (i.key && i.key.toLowerCase().indexOf(lower) >= 0) ||
-           (i.title && i.title.toLowerCase().indexOf(lower) >= 0);
+    return !spaceId || i.space_id === spaceId;
   });
 
   if (searchTerm) {
-    var exact = (S.data.issues || []).find(function(i) {
-      return i.id !== currentIssueId && i.key && i.key.toLowerCase() === lower;
+    var exact = candidates.find(function (i) {
+      return i.key && i.key.toLowerCase() === lower;
     });
-    if (exact) matches = [exact];
+    if (exact) { renderLinkSearchResults([exact]); return; }
   }
 
-  matches = matches.slice(0, 10);
-  if (matches.length) {
-    renderLinkSearchResults(matches);
-    return;
-  }
+  var matches = candidates.filter(function (i) {
+    if (!searchTerm) return true;
+    return (i.key && i.key.toLowerCase().indexOf(lower) >= 0) ||
+           (i.title && i.title.toLowerCase().indexOf(lower) >= 0);
+  }).slice(0, 10);
 
-  if (!searchTerm) {
-    renderLinkSearchResults((S.data.issues || []).filter(function(i) { return i.id !== currentIssueId; }).slice(0, 10));
-    return;
-  }
+  if (matches.length) { renderLinkSearchResults(matches); return; }
+  if (!searchTerm) { msg('No other issues in this space to link'); return; }
 
-  results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">Looking up issue…</p>';
-  api('/api/issues/' + encodeURIComponent(searchTerm)).then(function(iss) {
-    if (!iss || !iss.id || iss.id === currentIssueId) {
-      results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">No matching issues found</p>';
+  // Not in the local cache — the key may belong to an issue this client hasn't
+  // loaded. Resolve it, but still refuse anything outside the current space so
+  // the failure is explained here rather than as a 400 after clicking Link.
+  msg('Looking up issue…');
+  api('/api/issues/' + encodeURIComponent(searchTerm), 'GET', null, { silent: true }).then(function (iss) {
+    if (!iss || !iss.id || iss.id === currentIssueId) { msg('No matching issues found'); return; }
+    if (spaceId && iss.space_id !== spaceId) {
+      msg(issueKeyStr(iss) + ' is in another space — issues can only be linked within the same space');
       return;
     }
     S.data.issues = S.data.issues || [];
-    if (!S.data.issues.some(function(i) { return i.id == iss.id; })) {
-      S.data.issues.push(iss);
-    }
+    if (!S.data.issues.some(function (i) { return i.id == iss.id; })) S.data.issues.push(iss);
     renderLinkSearchResults([iss]);
-  }).catch(function() {
-    results.innerHTML = '<p class="text-muted text-xs" style="padding:6px 4px">No matching issues found</p>';
+  }).catch(function () {
+    msg('No matching issues found');
   });
 };
 
@@ -9839,35 +10131,51 @@ window._clearLinkSelection = function() {
   $('linkSubmitBtn').disabled = true;
 };
 
+// Re-read the open issue and repaint just the links section. Guarded on the
+// drawer still showing the same issue, so a slow response can't paint one
+// issue's links into another's drawer.
+async function _refreshDrawerLinks() {
+  var issueId = S.drawerIssueId;
+  if (!issueId) return;
+  try {
+    var issue = await api('/api/issues/' + issueId, 'GET', null, { silent: true });
+    if (issue && S.drawerIssueId === issueId) renderDrawerLinks(issue);
+  } catch (_) { /* leave the current list in place */ }
+}
+
 window._submitLink = async function() {
+  var btn = $('linkSubmitBtn');
   var targetId = $('linkSelectedIssue').dataset.issueId;
   var linkType = $('linkTypeSelect').value;
   if (!targetId) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Linking…'; }
   try {
+    // silent: the server's 409/400 text ("already linked that way",
+    // "conflicting link…") is more useful than api()'s generic toast, and
+    // without this both would fire.
     await api('/api/links', 'POST', {
       source_id: S.drawerIssueId,
       target_id: targetId,
       link_type: linkType
-    });
-    toast('Issue linked');
+    }, { silent: true });
+    toast('Issue linked', 'success');
     window._hideLinkDialog();
-    // Refresh the drawer
-    var issue = await api('/api/issues/' + S.drawerIssueId);
-    renderDrawerLinks(issue);
-    await refreshData();
-  } catch(e) { toast(e.message || 'Failed to create link', 'error'); }
+    await _refreshDrawerLinks();
+  } catch(e) {
+    toast(e.message || 'Failed to create link', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Link'; }
+  }
 };
 
 window._removeLink = async function(linkId) {
   var ok = await confirmDialog('Remove this link?');
   if (!ok) return;
   try {
-    await api('/api/links/' + linkId, 'DELETE');
-    toast('Link removed');
-    var issue = await api('/api/issues/' + S.drawerIssueId);
-    renderDrawerLinks(issue);
-    await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
+    await api('/api/links/' + linkId, 'DELETE', null, { silent: true });
+    toast('Link removed', 'success');
+    await _refreshDrawerLinks();
+  } catch(e) { toast(e.message || 'Failed to remove link', 'error'); }
 };
 
 // Store current issue data for tab switching
@@ -10165,10 +10473,10 @@ function renderDrawerAttachments(attachments) {
     html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">' +
       '<span style="font-size:18px">' + fileIcon(a.mime_type) + '</span>' +
       '<div style="flex:1;min-width:0">' +
-      '<a href="/api/files/' + esc(a.filename) + '" target="_blank" style="font-size:13px;color:var(--accent);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Click to open">' + esc(a.original_name) + '</a>' +
+      '<a href="' + esc(fileApiUrl(a.filename)) + '" target="_blank" style="font-size:13px;color:var(--accent);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Click to open">' + esc(a.original_name) + '</a>' +
       '<div style="font-size:11px;color:var(--text3)">' + fmtSize(a.size) + (a.uploader_name ? ' · ' + esc(a.uploader_name) : '') + ' · ' + fmtDateTime(a.created_at) + '</div>' +
       '</div>' +
-      '<a href="/api/files/' + esc(a.filename) + '" download="' + esc(a.original_name) + '" title="Download" style="color:var(--text3);font-size:15px;text-decoration:none;padding:2px 4px;border-radius:4px;line-height:1" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'">⬇</a>' +
+      '<a href="' + esc(fileApiUrl(a.filename)) + '" download="' + esc(a.original_name) + '" title="Download" style="color:var(--text3);font-size:15px;text-decoration:none;padding:2px 4px;border-radius:4px;line-height:1" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'">⬇</a>' +
       '<button title="Rename" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--text3);padding:2px 4px;border-radius:4px" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'" onclick="renameAttachment(\'' + a.id + '\',\'' + esc(a.original_name).replace(/'/g,"&#39;") + '\')">✏</button>' +
       (canDelete ? '<button class="btn btn-sm btn-outline text-danger" style="padding:2px 8px;font-size:11px" onclick="deleteAttachment(\'' + a.id + '\')">✕</button>' : '') +
       '</div>';
@@ -11204,6 +11512,10 @@ function getCreateModalCustomFieldValues() {
       if (el.tagName === 'SELECT' && el.multiple) {
         var mv = Array.from(el.selectedOptions).map(function (o) { return o.value; }).join(',');
         if (mv) cfs[id] = mv;
+      } else if (el.type === 'checkbox') {
+        // The input carries a literal value="true", so reading .value would
+        // save "true" for an unchecked box — read .checked instead.
+        if (el.checked) cfs[id] = 'true';
       } else if (el.value) cfs[id] = el.value;
     }
   });
@@ -11555,19 +11867,16 @@ function populateIssueFormSelects(opts) {
 
 async function handleIssueSubmit(e) {
   e.preventDefault();
-  var titleVal = $('issueTitleInput') && $('issueTitleInput').value.trim();
-  if (titleVal == null || titleVal == '') {
-    toast('Please fill in the Title — it is mandatory', 'error');
-    $('issueTitleInput').focus();
-    $('issueTitleInput').style.border = '2px solid #e53e3e';
-    setTimeout(function(){ $('issueTitleInput').style.border = ''; }, 3000);
-    return;
-  }
+  // Space first — required-field validation is per space, so it needs to be
+  // resolved before anything else can be checked.
   var spaceVal = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || (S.data && S.data.spaces && S.data.spaces[0] && S.data.spaces[0].id);
   if (spaceVal == null || spaceVal == '') {
     toast('Please select a Space — it is mandatory', 'error');
     return;
   }
+  // Enforces whatever is flagged Required in Settings → Custom Fields for this
+  // space (built-in and custom alike), instead of hardcoding Title.
+  if (!validateCreateRequiredFields(spaceVal)) return;
   var teamVal = $('issueTeam') ? $('issueTeam').value : '';
   var productVal = $('issueProductType') ? $('issueProductType').value : '';
   var startVal = $('issueStartDate').value;
@@ -12176,6 +12485,7 @@ document.addEventListener('DOMContentLoaded', function () {
       else if (cfContainer) cfContainer.innerHTML = '';
       renderIssueProductTypeSets(spaceId);
       applyBuiltinFieldVisibility(spaceId, $('modal-issue'), 'create');
+      markCreateRequiredLabels(spaceId);
     }
 
     var allCFs = S.data.custom_fields || [];
@@ -13443,16 +13753,76 @@ document.addEventListener('click', function(e) {
 });
 
 // ── All Work inline edit functions ─────────────────────────
+// Which cell/button opened the current inline menu, so re-clicking it can
+// toggle the menu shut. `_awMenuSeq` invalidates the pending outside-click
+// registration below whenever the menu is torn down, so a timer left over
+// from a closed menu can't close the next one that opens.
+var _awMenuOwner = null;
+var _awMenuDocHandler = null;
+var _awMenuSeq = 0;
+
+// Resolve the click to its owning cell so clicking anywhere in the same cell
+// counts as the same trigger. Uses e.target rather than e.currentTarget
+// because awInlineAssignee opens its menu after an async members fetch, by
+// which point currentTarget has been cleared.
+function _awMenuOwnerFor(e) {
+  var t = e && e.target;
+  if (!t) return null;
+  return (t.closest && t.closest('td,button')) || t;
+}
+
 function _awRemoveMenu() {
   var m = document.getElementById('_awInlineMenu');
   if (m) m.remove();
+  if (_awMenuDocHandler) {
+    document.removeEventListener('click', _awMenuDocHandler);
+    _awMenuDocHandler = null;
+  }
+  _awMenuOwner = null;
+  _awMenuSeq++;
+}
+
+// Keep the menu inside the viewport: cap its height to the space available,
+// flip it above the trigger when it won't fit below, and pull it back in
+// horizontally. Without this, clicking a row near the bottom of the list
+// pushed the last options off-screen where they couldn't be reached.
+function _awPositionMenu(menu, anchorEl, clickX, clickY) {
+  var GAP = 4, MARGIN = 8;
+  var vw = window.innerWidth, vh = window.innerHeight;
+  var rect = anchorEl && anchorEl.getBoundingClientRect
+    ? anchorEl.getBoundingClientRect()
+    : { top: clickY, bottom: clickY, left: clickX, right: clickX };
+
+  var spaceBelow = vh - rect.bottom - GAP - MARGIN;
+  var spaceAbove = rect.top - GAP - MARGIN;
+  var flipUp = spaceBelow < 140 && spaceAbove > spaceBelow;
+
+  menu.style.maxHeight = Math.max(120, Math.min(300, flipUp ? spaceAbove : spaceBelow)) + 'px';
+
+  var h = menu.offsetHeight;
+  menu.style.top = (flipUp
+    ? Math.max(MARGIN, rect.top - GAP - h)
+    : Math.min(rect.bottom + GAP, vh - MARGIN - h)) + 'px';
+
+  var w = menu.offsetWidth;
+  menu.style.left = Math.max(MARGIN, Math.min(rect.left, vw - MARGIN - w)) + 'px';
 }
 
 function _awShowMenu(e, items, onSelect) {
+  var owner = _awMenuOwnerFor(e);
+  // Second click on the same trigger closes instead of rebuilding. The
+  // trigger stops propagation, so the outside-click handler never fires for
+  // this click and can't do it for us.
+  if (document.getElementById('_awInlineMenu') && _awMenuOwner && _awMenuOwner === owner) {
+    _awRemoveMenu();
+    return;
+  }
   _awRemoveMenu();
+  _awMenuOwner = owner;
+  var mySeq = _awMenuSeq;
   var menu = document.createElement('div');
   menu.id = '_awInlineMenu';
-  menu.style.cssText = 'position:fixed;top:'+(e.clientY+4)+'px;left:'+e.clientX+'px;background:#ffffff;border:1px solid #dfe1e6;border-radius:4px;box-shadow:0 8px 16px rgba(9,30,66,0.25);z-index:9999;min-width:240px;padding:6px 0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-height:300px;overflow-y:auto;';
+  menu.style.cssText = 'position:fixed;top:-9999px;left:-9999px;background:#ffffff;border:1px solid #dfe1e6;border-radius:4px;box-shadow:0 8px 16px rgba(9,30,66,0.25);z-index:9999;min-width:240px;padding:6px 0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-height:300px;overflow-y:auto;';
   items.forEach(function(item) {
     var div = document.createElement('div');
     div.style.cssText = 'padding:8px 16px;cursor:pointer;font-size:14px;border-radius:0;display:flex;align-items:center;gap:4px;color:#172b4d;border-left:3px solid transparent;';
@@ -13463,8 +13833,11 @@ function _awShowMenu(e, items, onSelect) {
     menu.appendChild(div);
   });
   document.body.appendChild(menu);
+  _awPositionMenu(menu, owner, e.clientX, e.clientY);
   setTimeout(function() {
-    document.addEventListener('click', function h() { _awRemoveMenu(); document.removeEventListener('click', h); });
+    if (mySeq !== _awMenuSeq) return; // this menu was already closed/replaced
+    _awMenuDocHandler = function () { _awRemoveMenu(); };
+    document.addEventListener('click', _awMenuDocHandler);
   }, 100);
 }
 
@@ -13956,80 +14329,8 @@ window._copyIssueUrl = function() {
   }
 
   document.addEventListener('DOMContentLoaded', gsInit);
-  // Also init after app data loads
-  var _gsOrigInit = window._afterDataLoad;
-  window._gsLateInit = function() { gsInit(); };
   setTimeout(function(){ gsInit(); }, 1200);
 })();
-
-document.addEventListener('DOMContentLoaded', function() {
-  const submitBtn = document.querySelector('[onclick*="submitIssueForm"]') || document.querySelector('button[type="submit"]');
-  
-  if (submitBtn) {
-    const originalClick = submitBtn.onclick;
-    submitBtn.onclick = function(e) {
-      const team = document.getElementById('issueTeam')?.value || '';
-      const productType = document.getElementById('issueProductType')?.value || '';
-      const createdAt = new Date().toISOString();
-      
-      window.issueTeamValue = team;
-      window.issueProductTypeValue = productType;
-      window.issueCreatedAt = createdAt;
-      
-      console.log('Team:', team, 'Product Type:', productType);
-      
-      if (originalClick) return originalClick.call(this, e);
-    };
-  }
-  
-  const forms = document.querySelectorAll('form');
-  forms.forEach(form => {
-    form.addEventListener('submit', function(e) {
-      const team = document.getElementById('issueTeam')?.value || '';
-      const productType = document.getElementById('issueProductType')?.value || '';
-      
-      if (e.target.method && e.target.method.toUpperCase() === 'POST') {
-        const formData = new FormData(e.target);
-        formData.append('team', team);
-        formData.append('productType', productType);
-        formData.append('createdAt', new Date().toISOString());
-      }
-    });
-  });
-});
-
-var _gsTimer=null;
-window._globalSearch=function(query){
-  var box=document.getElementById("globalSearchResults");
-  if(!box)return;
-  var q=(query||"").trim();
-  if(q.length<2){box.style.display="none";return;}
-  box.innerHTML="<div style=\"padding:12px 16px;color:var(--text3);font-size:13px\">Searching...</div>";
-  box.style.display="block";
-  clearTimeout(_gsTimer);
-  _gsTimer=setTimeout(async function(){
-    try{
-      var r=await api("/api/issues/search?q="+encodeURIComponent(q));
-      if(!r||!r.length){box.innerHTML="<div style=\"padding:12px 16px;color:var(--text3);font-size:13px\">No results found</div>";return;}
-      box.innerHTML=r.slice(0,15).map(function(i){
-        var sc=i.status==="Done"?"#36b37e":i.status==="In Progress"?"#0129AC":"#42526e";
-        return "<div onclick=\"window._gsg(\x27"+i.id+"\x27)\" style=\"padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px\">"+"<span style=\"font-size:11px;font-weight:700;color:#0129AC;min-width:70px\">"+i.key+"</span>"+"<span style=\"flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">"+i.title+"</span>"+"<span style=\"font-size:11px;color:"+sc+";font-weight:600\">"+i.status+"</span></div>";
-      }).join("");
-    }catch(e){box.innerHTML="<div style=\"padding:12px\">Error</div>";}
-  },300);
-};
-window._gsg=function(id){
-  var b=document.getElementById("globalSearchResults");
-  var inp=document.getElementById("globalSearchInput");
-  if(b)b.style.display="none";
-  if(inp)inp.value="";
-  openIssuePage(id);
-};
-document.addEventListener("click",function(e){
-  var b=document.getElementById("globalSearchResults");
-  var inp=document.getElementById("globalSearchInput");
-  if(b&&inp&&e.target!==inp&&!b.contains(e.target))b.style.display="none";
-});
 
 async function renderDeletedTickets(el) {
   var me = S.currentUserObj || {};
