@@ -171,6 +171,7 @@ const q = (text, params) => pool.query(text, params);
 const {
   validateSchemaReadOnly, logProductTeamCombinationStatus, logDuplicateKeyWarning
 } = require('./lib/schema-check');
+const { runMigrations } = require('./lib/migrate');
 const {
   buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin,
   UPDATE_WHITELIST, validateSpaceRoleAssignment,
@@ -2470,6 +2471,33 @@ app.get('/space/:key/:tab?', (req, res) => {
 (async () => {
   try {
     await pool.query('SELECT 1');
+
+    // Bring the schema up to what this build expects, before anything serves
+    // traffic. Tracked in schema_migrations, so this is a no-op on every boot
+    // after the first. MIGRATE_ON_BOOT=off skips it (apply manually with
+    // `npm run migrate`); =warn starts the server even if a migration fails.
+    const migrateMode = (process.env.MIGRATE_ON_BOOT || 'on').toLowerCase();
+    if (migrateMode === 'off') {
+      console.log('[migrate] Skipped (MIGRATE_ON_BOOT=off).');
+    } else {
+      try {
+        await runMigrations(pool);
+      } catch (e) {
+        if (migrateMode === 'warn') {
+          console.error('[migrate] Continuing despite failure (MIGRATE_ON_BOOT=warn):', e.message);
+        } else {
+          console.error('');
+          console.error('  DEPLOY ABORTED — a database migration failed.');
+          console.error('  ' + e.message);
+          console.error('  The schema was rolled back to its previous state and no');
+          console.error('  traffic was served. Fix the migration or restore the last');
+          console.error('  release; data is unchanged.');
+          console.error('');
+          process.exit(1);
+        }
+      }
+    }
+
     await validateSchemaReadOnly(pool);
     await logProductTeamCombinationStatus(pool, q);
     await logDuplicateKeyWarning(pool, q);
