@@ -290,11 +290,26 @@ function fmtDateShort(d) {
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// Calendar date as YYYY-MM-DD, for input[type=date] values.
+//
+// Postgres DATE columns come back from node-pg as a Date at LOCAL midnight, and
+// JSON then serialises that to UTC — so 2026-03-01 in IST arrives as
+// "2026-02-28T18:30:00.000Z". Reading that back with toISOString() returned
+// 2026-02-28, i.e. every sprint and issue date displayed a day early for any
+// timezone ahead of UTC. Local getters resolve it back to the intended day.
+// Bare 'YYYY-MM-DD' strings are already calendar dates and are passed through
+// untouched, so they can't be shifted in the other direction.
 function fmtDateISO(d) {
   if (!d) return '';
+  if (typeof d === 'string') {
+    const dateOnly = d.match(/^(\d{4}-\d{2}-\d{2})$/);
+    if (dateOnly) return dateOnly[1];
+  }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toISOString().split('T')[0];
+  return dt.getFullYear() + '-' +
+    String(dt.getMonth() + 1).padStart(2, '0') + '-' +
+    String(dt.getDate()).padStart(2, '0');
 }
 
 function initials(name) {
@@ -809,7 +824,9 @@ var PRIORITY_ICONS = {
   highest: '\u2B06\u2B06', high: '\u2B06', medium: '\u2B1B', low: '\u2B07', lowest: '\u2B07\u2B07'
 };
 var TYPE_ICONS = {
-  epic: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#9747FF"/><path d="M9.5 3.5L6 8h3l-2.5 5 6-6.5H9L11 3.5z" fill="white"/></svg>', story: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#36B37E"/><path d="M5 4.5h6v1H8.5V11h-1V5.5H5V4.5z" fill="white"/><rect x="4" y="7" width="8" height="1" fill="white"/></svg>', task: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#0052CC"/><polyline points="3.5,8 6.5,11 12.5,5" stroke="white" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>', bug: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#FF5630"/><circle cx="8" cy="8" r="3" fill="white" opacity="0.9"/><line x1="8" y1="3" x2="8" y2="5" stroke="white" stroke-width="1.5"/><line x1="8" y1="11" x2="8" y2="13" stroke="white" stroke-width="1.5"/><line x1="3" y1="7" x2="5" y2="7.5" stroke="white" stroke-width="1.5"/><line x1="11" y1="7.5" x2="13" y2="7" stroke="white" stroke-width="1.5"/><line x1="4" y1="5" x2="6" y2="6.5" stroke="white" stroke-width="1.5"/><line x1="10" y1="6.5" x2="12" y2="5" stroke="white" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="#FF5630"/></svg>', subtask: '<svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#00B8D9"/><path d="M4 4v5h2" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><polyline points="6,7 9,10.5 13.5,5.5" stroke="white" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  // Standalone glyph family (no badge). Sized on a 16x16 grid because that is
+  // where they are read — board cards, table rows, the drawer type picker.
+  epic: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M9.6 1.6 4.2 9.1h3.2l-.9 5.6 5.5-7.6H8.9z" fill="#6554C0"/></svg>', story: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4.4 2.2h7.2v11.6L8 11l-3.6 2.8z" fill="#36B37E"/></svg>', task: '<svg width="16" height="16" viewBox="0 0 16 16"><rect x="1.6" y="1.6" width="12.8" height="12.8" rx="3.4" fill="none" stroke="#0052CC" stroke-width="1.7"/><path d="M4.9 8.2 7.1 10.4 11.2 5.9" stroke="#0052CC" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>', bug: '<svg width="16" height="16" viewBox="0 0 16 16"><ellipse cx="8" cy="9.2" rx="5" ry="5.6" fill="#E5493A"/><path d="M3 9.2a5 5.6 0 0 1 10 0z" fill="#D93A2B"/><circle cx="8" cy="3.5" r="2.3" fill="#22252A"/><line x1="6.6" y1="1.8" x2="5.4" y2="0.7" stroke="#22252A" stroke-width="1" stroke-linecap="round"/><line x1="9.4" y1="1.8" x2="10.6" y2="0.7" stroke="#22252A" stroke-width="1" stroke-linecap="round"/><line x1="8" y1="4.4" x2="8" y2="14.6" stroke="#22252A" stroke-width="0.9"/><circle cx="5.6" cy="7.6" r="1.15" fill="#22252A"/><circle cx="10.4" cy="7.6" r="1.15" fill="#22252A"/><circle cx="5.9" cy="11.2" r="0.95" fill="#22252A"/><circle cx="10.1" cy="11.2" r="0.95" fill="#22252A"/></svg>', subtask: '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3.6 2.6v5.2a2.2 2.2 0 0 0 2.2 2.2h4.6" stroke="#00B8D9" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M9.3 7.8 12.8 10 9.3 12.2z" fill="#00B8D9"/></svg>'
 };
 var SPRINT_STATUS_COLORS = {
   planning: '#6b7280', active: '#3b82f6', completed: '#10b981'
@@ -1741,9 +1758,33 @@ function saveNavState() {
   } catch (_) {}
 }
 
+// The admin console is a wide two-pane layout, so the nav sidebar is collapsed
+// while it's open to give it room. The state the sidebar was in beforehand is
+// remembered and put back on the way out, rather than leaving it collapsed
+// everywhere else. Null means "nothing to restore" — either we aren't in
+// settings, or the user toggled it themselves while there and owns it now.
+var _sidebarStateBeforeSettings = null;
+
+function collapseSidebarForSettings() {
+  var sb = $('sidebar');
+  if (!sb) return;
+  if (_sidebarStateBeforeSettings === null) {
+    _sidebarStateBeforeSettings = sb.classList.contains('collapsed');
+  }
+  sb.classList.add('collapsed');
+}
+
+function restoreSidebarAfterSettings() {
+  var sb = $('sidebar');
+  if (!sb || _sidebarStateBeforeSettings === null) return;
+  sb.classList.toggle('collapsed', _sidebarStateBeforeSettings);
+  _sidebarStateBeforeSettings = null;
+}
+
 function navigateTo(view, opts) {
   opts = opts || {};
   document.body.classList.remove('settings-active');
+  if (view !== 'settings') restoreSidebarAfterSettings();
   if (view === 'global-reports' && !canViewReports()) {
     toast('Only admins and space admins can access Reports', 'error');
     return;
@@ -1781,7 +1822,7 @@ function navigateTo(view, opts) {
   else if (view === 'spaces') renderSpacesView();
   else if (view === 'worklog-report') renderWorklogReport();
   else if (view === 'product-roadmap') renderProductRoadmap();
-  else if (view === 'settings') { document.body.classList.add('settings-active'); renderAdminSettings('org-general'); }
+  else if (view === 'settings') { document.body.classList.add('settings-active'); collapseSidebarForSettings(); renderAdminSettings('org-general'); }
   else if (view === 'global-reports') renderGlobalReports();
 }
 
@@ -1834,6 +1875,10 @@ function renderGlobalReports() {
 
 function navigateToSpace(spaceId, tab, opts) {
   opts = opts || {};
+  // Clicking a space is the other way out of the admin console — it doesn't go
+  // through navigateTo(), so the sidebar has to be put back here too.
+  document.body.classList.remove('settings-active');
+  restoreSidebarAfterSettings();
   _exitIssuePage();
   tab = tab || 'summary';
   if (spaceId !== S.currentSpace) {
@@ -2101,13 +2146,6 @@ function renderSpaceHeader(space) {
   $('spaceIcon').textContent = space.icon || '\uD83D\uDCC1';
   $('spaceName').textContent = space.name;
   $('spaceKey').textContent = space.key;
-
-  var members = getSpaceMembers(space.id);
-  var shown = members.slice(0, 5);
-  var overflow = members.length - 5;
-  var membersHtml = shown.map(function (u) { return avatarHtml(u, 28); }).join('');
-  if (overflow > 0) membersHtml += '<span class="avatar-overflow" style="cursor:pointer" title="View all members" onclick="_settingsActiveTab=\'people\';navigateToSpace(S.currentSpace,\'space-settings\')">+' + overflow + '</span>';
-  $('spaceMembers').innerHTML = membersHtml;
 }
 
 function countAssignedPlusReported(data) {
@@ -4633,16 +4671,10 @@ function renderBacklog() {
   }
   issues = applyBacklogFilters(issues);
 
-  // Sort sprints: active first, planning, completed
-  var order = { active: 0, planning: 1, completed: 2 };
-  var sorted = sprints.slice().sort(function (a, b) {
-    return (order[a.status] || 9) - (order[b.status] || 9);
-  });
-
-  var html = '';
-
-  for (var s = 0; s < sorted.length; s++) {
-    var sp = sorted[s];
+  // One sprint lane. Extracted from the render loop so the page's section order
+  // can be composed explicitly below instead of falling out of a status sort.
+  function sprintLaneHtml(sp) {
+    var html = '';
     var sprintIssues = issues.filter(function (iss) { return iss.sprint_id == sp.id; });
     if (searchTerm) {
       sprintIssues = sprintIssues.filter(function (iss) {
@@ -4694,7 +4726,27 @@ function renderBacklog() {
     }
     html += '<div class="backlog-add-row"><button class="btn btn-link btn-sm" onclick="window._addIssueToSprint(\'' + sp.id + '\')">+ Add issue</button></div>';
     html += '</div></div>';
+    return html;
   }
+
+  // Page order: active sprint(s), then planning, then Backlog, then completed
+  // last. Backlog sits above completed because it's worked with daily — you
+  // drag from it into the next sprint — whereas completed sprints are history
+  // and were pushing the backlog further down the page with every sprint.
+  function lanesFor(status) {
+    return sprints
+      .filter(function (sp) { return sp.status === status; })
+      .sort(function (a, b) { return (a.position || 0) - (b.position || 0); })
+      .map(sprintLaneHtml).join('');
+  }
+  // Any sprint with an unexpected status still renders, just above the backlog,
+  // rather than silently disappearing from the page.
+  var KNOWN_SPRINT_STATUSES = ['active', 'planning', 'completed'];
+  var strayLanes = sprints
+    .filter(function (sp) { return KNOWN_SPRINT_STATUSES.indexOf(sp.status) < 0; })
+    .map(sprintLaneHtml).join('');
+
+  var html = lanesFor('active') + lanesFor('planning') + strayLanes;
 
   // Backlog (no sprint)
   var backlogIssues = issues.filter(function (iss) { return !iss.sprint_id; });
@@ -4719,6 +4771,9 @@ function renderBacklog() {
   html += '<div class="backlog-add-row"><button class="btn btn-link btn-sm" onclick="window._addIssueToSprint(null)">+ Add issue</button></div>';
   html += '</div></div>';
 
+  // Completed sprints go last, below the backlog (collapsed by default).
+  html += lanesFor('completed');
+
   $('backlogContent').innerHTML = html;
 }
 
@@ -4730,17 +4785,20 @@ function backlogRow(iss) {
     var parent = S.data.issues.find(function(i){ return i.id === iss.parent_id; });
     if (parent) parentInfo = '<span class="subtask-parent-ref" title="Subtask of ' + esc(parent.key) + '">' + esc(parent.key) + ' &rsaquo;</span> ';
   }
+  // .backlog-row is a CSS grid, so every row must emit the SAME number of cells
+  // in the SAME order or the columns stop lining up. That means: the parent
+  // reference lives inside the title cell rather than being its own cell, and
+  // story points render an empty cell when unset instead of being skipped.
   return '<div class="backlog-row' + (isSubtask ? ' backlog-row-subtask' : '') + '" draggable="true" data-issue-id="' + iss.id + '" ' +
     'ondragstart="event.dataTransfer.setData(\'text/plain\',\'' + iss.id + '\')" ' +
     'onclick="openIssuePage(\'' + iss.id + '\')">' +
-    '<span class="issue-type-icon">' + typeIcon(iss.type) + '</span>' +
-    '<span class="issue-key">' + esc(issueKeyStr(iss)) + '</span>' +
-    parentInfo +
-    '<span class="backlog-issue-title">' + esc(iss.title) + '</span>' +
-    priorityBadge(iss.priority, true) +
-    statusBadge(iss.status, true) +
-    (iss.story_points != null ? '<span class="badge badge-points">' + iss.story_points + '</span>' : '') +
-    avatarHtml(assignee, 24) +
+    '<span class="bl-cell bl-type">' + typeIcon(iss.type) + '</span>' +
+    '<span class="bl-cell issue-key bl-key">' + esc(issueKeyStr(iss)) + '</span>' +
+    '<span class="bl-cell bl-title" title="' + escAttr(iss.title) + '">' + parentInfo + esc(iss.title) + '</span>' +
+    '<span class="bl-cell bl-priority">' + priorityBadge(iss.priority, true) + '</span>' +
+    '<span class="bl-cell bl-status">' + statusBadge(iss.status, true) + '</span>' +
+    '<span class="bl-cell bl-points">' + (iss.story_points != null ? '<span class="badge badge-points">' + iss.story_points + '</span>' : '') + '</span>' +
+    '<span class="bl-cell bl-assignee">' + avatarHtml(assignee, 24) + '</span>' +
     '</div>';
 }
 
@@ -5197,7 +5255,7 @@ async function renderReportContent(type, selectedSprintId) {
     // queries never look at activeSprint, so showing a "Sprint:" dropdown
     // there looked interactive but silently did nothing when changed. Control
     // Chart WAS in that category too, but now queries per-sprint data.
-    var sprintTypes = ['sprint-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items','spillover','control'];
+    var sprintTypes = ['sprint-summary','story-summary','burndown','team-workload','bug-summary','epic-progress','scope-change','blocked-items','spillover','control'];
     var sprintSelectorHtml = (sprintTypes.indexOf(type) >= 0 && allSprints && allSprints.length > 0)
       ? '<div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text2);margin-right:8px">Sprint:</label>' +
         '<select class="input input-sm" onchange="window._globalRptSprintChange(this.value,\'' + type + '\')">' +
@@ -5209,6 +5267,8 @@ async function renderReportContent(type, selectedSprintId) {
     if (type === 'sprint-summary') {
       var dSS = await api('/api/reports/sprint/' + activeSprint.id);
       renderSprintSummaryReport(c, dSS, allSprints, sprintSelectorHtml);
+    } else if (type === 'story-summary') {
+      renderStorySummaryReport(c, activeSprint, allSprints, sprintSelectorHtml);
     } else if (type === 'burndown') {
       var data = await api('/api/reports/burndown/' + activeSprint.id);
       renderBurndownReport(c, data, allSprints, sprintSelectorHtml);
@@ -5252,6 +5312,8 @@ async function renderReportContent(type, selectedSprintId) {
         if (rtype === 'sprint-summary') {
           var d = await api('/api/reports/sprint/' + sprintId);
           renderSprintSummaryReport(cont, d, allSprints, newSel);
+        } else if (rtype === 'story-summary') {
+          renderStorySummaryReport(cont, selSprint, allSprints, newSel);
         } else if (rtype === 'burndown') {
           var d = await api('/api/reports/burndown/' + sprintId);
           renderBurndownReport(cont, d, allSprints, newSel);
@@ -5993,10 +6055,48 @@ function renderTeamWorkloadReport(c, data, sprintArg, allSprints, sprintSelector
   var workDays = computeSprintWorkDays(sprint);
   var roleColor = { 'Developer': '#0052cc', 'QA': '#7c3aed', 'Dev + QA': '#10b981', 'Other': '#6b7280' };
 
+  // Tickets behind each number, for the shared drill-down popup. The API only
+  // returns totals, so the lists come from the loaded space issues — the same
+  // source the Bug Summary and Spillover reports drill from.
+  var sprintIssues = getSpaceIssues(S.currentSpace).filter(function (i) {
+    return i.sprint_id === sprint.id;
+  });
+
   var tableRows = rows.map(function(r) {
     var capacity = personCapacitySP(workDays, r.leave_days);
-    var utilPct = capacity ? Math.round((r.assigned_sp / capacity) * 100) : (r.assigned_sp ? null : 0);
-    var utilColor = utilPct === null ? '#6b7280' : utilPct > 100 ? '#dc2626' : utilPct >= 80 ? '#10b981' : utilPct >= 50 ? '#f59e0b' : '#42526e';
+
+    var mine = sprintIssues.filter(function (i) { return i.assignee_id === r.id; });
+    var doneIssues = mine.filter(function (i) { return i.status === 'Done'; });
+    var openIssues = mine.filter(function (i) { return i.status !== 'Done'; });
+    var safeKey = String(r.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+    var who = r.name || 'Unknown';
+    // points: true makes the popup show each ticket's own points and sum them
+    // in its header, so the list visibly reconciles with the cell you clicked.
+    window._reportDrillData['tw_asg_' + safeKey] = { label: who + ' — Assigned', issues: mine, points: true };
+    window._reportDrillData['tw_cmp_' + safeKey] = { label: who + ' — Completed', issues: doneIssues, points: true };
+    window._reportDrillData['tw_rem_' + safeKey] = { label: who + ' — Remaining', issues: openIssues, points: true };
+
+    // Only offer the click when there is something to show.
+    function drill(key, count) {
+      if (!count) return '';
+      return ' onclick="window._showReportIssues(\'' + key + '\')" title="Click to view these tickets"' +
+        ' onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'"';
+    }
+    var clickable = 'cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;';
+
+    // Three different ratios, all in story points — keep them straight:
+    //   Workload    = assigned  / capacity  → how much we PUT ON them
+    //   Utilization = completed / capacity  → how much they actually DELIVERED
+    //   Completion  = completed / assigned  → how far through their own load
+    var workloadPct = capacity ? Math.round((r.assigned_sp / capacity) * 100) : (r.assigned_sp ? null : 0);
+    var workloadColor = workloadPct === null ? '#6b7280' : workloadPct > 100 ? '#dc2626' : workloadPct >= 80 ? '#10b981' : workloadPct >= 50 ? '#f59e0b' : '#42526e';
+
+    var utilPct = capacity ? Math.round((r.completed_sp / capacity) * 100) : null;
+    // Deliberately no red here: a low figure mid-sprint is normal, not a fault.
+    var utilColor = utilPct === null ? '#6b7280' : utilPct >= 100 ? '#10b981' : utilPct >= 70 ? '#3b82f6' : utilPct >= 40 ? '#f59e0b' : '#6b7280';
+
+    // Points, not issue counts, so the row reconciles: assigned = completed + remaining.
+    var remainingSp = Math.max(r.assigned_sp - r.completed_sp, 0);
     var completionPct = r.assigned_sp ? Math.round((r.completed_sp / r.assigned_sp) * 100) : 0;
     return '<tr>' +
       '<td style="padding:10px 12px;font-weight:600;white-space:nowrap">' +
@@ -6008,30 +6108,157 @@ function renderTeamWorkloadReport(c, data, sprintArg, allSprints, sprintSelector
       '</div></td>' +
       '<td style="padding:10px 12px;text-align:center;color:' + (r.leave_days ? '#f59e0b' : 'var(--text3)') + ';font-weight:600">' + (r.leave_days || 0) + '</td>' +
       '<td style="padding:10px 12px;text-align:center;font-weight:700;color:var(--text)">' + (capacity !== null ? capacity : '—') + '</td>' +
-      '<td style="padding:10px 12px;text-align:center">' + r.assigned_sp + '</td>' +
+      // Point totals first, then the ratios derived from them. Each total is
+      // clickable and opens the tickets it was calculated from.
+      '<td style="padding:10px 12px;text-align:center;' + (mine.length ? clickable : '') + '"' + drill('tw_asg_' + safeKey, mine.length) + '>' + r.assigned_sp + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;color:#10b981;font-weight:700;' + (doneIssues.length ? clickable : '') + '"' + drill('tw_cmp_' + safeKey, doneIssues.length) + '>' + r.completed_sp + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;color:#f59e0b;font-weight:600;' + (openIssues.length ? clickable : '') + '"' + drill('tw_rem_' + safeKey, openIssues.length) + '>' + remainingSp + '</td>' +
+      '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + workloadColor + '">' + (workloadPct !== null ? workloadPct + '%' : '—') + '</td>' +
       '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + utilColor + '">' + (utilPct !== null ? utilPct + '%' : '—') + '</td>' +
-      '<td style="padding:10px 12px;text-align:center;color:#10b981;font-weight:600">' + r.completed + '</td>' +
-      '<td style="padding:10px 12px;text-align:center;color:#f59e0b;font-weight:600">' + r.remaining + '</td>' +
       '<td style="padding:10px 12px;text-align:center;color:var(--text2)">' + completionPct + '%</td>' +
       '</tr>';
   }).join('');
   var thStyle = 'padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)';
   c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
     '<h4 style="margin:0 0 4px">Team Workload — ' + esc(sprint.name||'Sprint') + '</h4>' +
-    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 6px">' +
     (workDays ? 'Capacity is each person\'s share of ' + workDays.workingDays + ' working days' + (workDays.holidays ? ' minus ' + workDays.holidays + ' holiday' + (workDays.holidays !== 1 ? 's' : '') : '') + ', adjusted for their own leave days' : 'Set Start/End Date on this sprint to see capacity') +
+    '</p>' +
+    // Three percentages sit side by side, so name what each divides by.
+    '<p style="font-size:11.5px;color:var(--text3);margin:0 0 16px;line-height:1.7">' +
+    '<strong style="color:var(--text2)">Workload</strong> = Assigned ÷ Capacity (how much we put on them) &nbsp;·&nbsp; ' +
+    '<strong style="color:var(--text2)">Utilization</strong> = Completed ÷ Capacity (how much they delivered) &nbsp;·&nbsp; ' +
+    '<strong style="color:var(--text2)">Completion</strong> = Completed ÷ Assigned (how far through their load)' +
     '</p>' +
     '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
     '<thead><tr>' +
     '<th style="' + thStyle + '">Team Member</th>' +
     '<th style="' + thStyle + ';text-align:center">Leave Days</th>' +
-    '<th style="' + thStyle + ';text-align:center">Capacity (pts)</th>' +
-    '<th style="' + thStyle + ';text-align:center">Assigned (pts)</th>' +
-    '<th style="' + thStyle + ';text-align:center">Utilization</th>' +
-    '<th style="' + thStyle + ';text-align:center">Completed</th>' +
-    '<th style="' + thStyle + ';text-align:center">Remaining</th>' +
-    '<th style="' + thStyle + ';text-align:center">Completion</th>' +
+    '<th style="' + thStyle + ';text-align:center" title="Working days available to this person, in story points">Capacity (pts)</th>' +
+    '<th style="' + thStyle + ';text-align:center" title="Story points on the tickets assigned to them in this sprint">Assigned (pts)</th>' +
+    '<th style="' + thStyle + ';text-align:center" title="Story points on their tickets that reached Done">Completed (pts)</th>' +
+    '<th style="' + thStyle + ';text-align:center" title="Assigned − Completed — points still open">Remaining (pts)</th>' +
+    '<th style="' + thStyle + ';text-align:center" title="Assigned ÷ Capacity — how heavily they are loaded. Over 100% means more work than they have days for.">Workload</th>' +
+    '<th style="' + thStyle + ';text-align:center" title="Completed ÷ Capacity — how much of their available capacity they actually delivered">Utilization</th>' +
+    '<th style="' + thStyle + ';text-align:center" title="Completed ÷ Assigned — how far through their own workload">Completion</th>' +
     '</tr></thead><tbody>' + tableRows + '</tbody></table></div></div>';
+}
+
+// ── Story Summary ───────────────────────────────────────────
+// Ticket counts for one sprint, broken down by status and then by assignee.
+// Computed from the loaded space issues (no endpoint needed) — the same source
+// Bug Summary and Blocked Items use.
+// Workflow order, Blocked before Done — colours match STATUS_COLORS so a status
+// reads the same here as it does on the board.
+var STORY_SUMMARY_STATUSES = [
+  { key: 'To Do',       label: 'To Do',       color: '#42526e' },
+  { key: 'In Progress', label: 'In Progress', color: '#0052cc' },
+  { key: 'In Review',   label: 'In Review',   color: '#ff991f' },
+  { key: 'Blocked',     label: 'Blocked',     color: '#dc2626' },
+  { key: 'Done',        label: 'Done',        color: '#00875a' }
+];
+
+function renderStorySummaryReport(c, sprint, allSprints, sprintSelectorHtml) {
+  sprintSelectorHtml = sprintSelectorHtml || '';
+  sprint = sprint || {};
+  var issues = getSpaceIssues(S.currentSpace).filter(function (i) { return i.sprint_id === sprint.id; });
+
+  // All five statuses always show, so the columns are the same on every sprint
+  // and a zero is a real "none blocked" answer rather than a missing column.
+  var statuses = STORY_SUMMARY_STATUSES;
+  var byStatus = function (list, key) { return list.filter(function (i) { return i.status === key; }); };
+
+  if (!issues.length) {
+    c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+      '<h4 style="margin:0 0 4px">Story Summary — ' + esc(sprint.name || 'Sprint') + '</h4>' +
+      '<p class="placeholder-text">No tickets in this sprint yet.</p></div>';
+    return;
+  }
+
+  // ── Totals across the sprint, as clickable tiles ──
+  window._reportDrillData['sy_total'] = { label: 'All tickets — ' + (sprint.name || 'Sprint'), issues: issues };
+  var tiles = [{ label: 'Total Tickets', value: issues.length, color: 'var(--text)', key: 'sy_total' }];
+  statuses.forEach(function (s) {
+    var list = byStatus(issues, s.key);
+    var dk = 'sy_st_' + s.key.replace(/[^a-zA-Z0-9]/g, '_');
+    window._reportDrillData[dk] = { label: s.label + ' — ' + (sprint.name || 'Sprint'), issues: list };
+    tiles.push({ label: s.label, value: list.length, color: s.color, key: dk });
+  });
+
+  // Tile styling matches the other reports' KPI cards (inline, not a class —
+  // that's the existing convention in this file).
+  var tilesHtml = tiles.map(function (t) {
+    var click = t.value
+      ? ' onclick="window._showReportIssues(\'' + t.key + '\')" title="Click to view these tickets"' +
+        ' onmouseover="this.style.boxShadow=\'0 0 0 2px #0052cc55\'" onmouseout="this.style.boxShadow=\'none\'"'
+      : '';
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;flex:1;min-width:120px;text-align:center' +
+      (t.value ? ';cursor:pointer' : '') + '"' + click + '>' +
+      '<div style="font-size:26px;font-weight:800;color:' + t.color + ';line-height:1.1">' + t.value + '</div>' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-top:6px">' + esc(t.label) + '</div>' +
+      '</div>';
+  }).join('');
+
+  // ── Per-assignee breakdown ──
+  var groups = {};
+  issues.forEach(function (i) {
+    var id = i.assignee_id || '_unassigned';
+    if (!groups[id]) groups[id] = { id: id, user: i.assignee_id ? findUser(i.assignee_id) : null, issues: [] };
+    groups[id].issues.push(i);
+  });
+  // Unassigned sorts last however many it has — it isn't a person's workload.
+  var memberRows = Object.keys(groups).map(function (id) { return groups[id]; })
+    .sort(function (a, b) {
+      if ((a.id === '_unassigned') !== (b.id === '_unassigned')) return a.id === '_unassigned' ? 1 : -1;
+      return b.issues.length - a.issues.length;
+    });
+
+  var tdBase = 'padding:10px 12px;text-align:center;font-weight:700;';
+  var bodyHtml = memberRows.map(function (g) {
+    var safeKey = String(g.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+    var who = g.user ? g.user.name : 'Unassigned';
+    window._reportDrillData['sy_u_' + safeKey] = { label: who + ' — All tickets', issues: g.issues };
+
+    var cells = statuses.map(function (s) {
+      var list = byStatus(g.issues, s.key);
+      var dk = 'sy_u_' + safeKey + '_' + s.key.replace(/[^a-zA-Z0-9]/g, '_');
+      window._reportDrillData[dk] = { label: who + ' — ' + s.label, issues: list };
+      var click = list.length
+        ? ' onclick="window._showReportIssues(\'' + dk + '\')" title="Click to view these tickets"' +
+          ' onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'"'
+        : '';
+      return '<td style="' + tdBase + 'color:' + (list.length ? s.color : 'var(--text3)') +
+        (list.length ? ';cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px' : '') +
+        '"' + click + '>' + list.length + '</td>';
+    }).join('');
+
+    var donePct = Math.round((byStatus(g.issues, 'Done').length / g.issues.length) * 100);
+    return '<tr>' +
+      '<td style="padding:10px 12px;font-weight:600;white-space:nowrap">' +
+      '<div style="display:inline-flex;align-items:center;gap:8px">' +
+      (g.user ? avatarHtml(g.user, 26)
+              : '<span style="width:26px;height:26px;border-radius:50%;background:var(--bg4);display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:var(--text3)">?</span>') +
+      '<span>' + esc(who) + '</span></div></td>' +
+      '<td style="' + tdBase + 'cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px"' +
+        ' onclick="window._showReportIssues(\'sy_u_' + safeKey + '\')" title="Click to view these tickets"' +
+        ' onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">' + g.issues.length + '</td>' +
+      cells +
+      '<td style="padding:10px 12px;text-align:center;color:var(--text2)">' + donePct + '%</td>' +
+      '</tr>';
+  }).join('');
+
+  var thStyle = 'padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)';
+  c.innerHTML = '<div class="report-chart">' + sprintSelectorHtml +
+    '<h4 style="margin:0 0 4px">Story Summary — ' + esc(sprint.name || 'Sprint') + '</h4>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Every ticket in this sprint by status, then per assignee. Click any number to see the tickets behind it.</p>' +
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">' + tilesHtml + '</div>' +
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+    '<thead><tr>' +
+    '<th style="' + thStyle + '">Assignee</th>' +
+    '<th style="' + thStyle + ';text-align:center">Total</th>' +
+    statuses.map(function (s) { return '<th style="' + thStyle + ';text-align:center">' + esc(s.label) + '</th>'; }).join('') +
+    '<th style="' + thStyle + ';text-align:center" title="Done ÷ Total for this person">Done %</th>' +
+    '</tr></thead><tbody>' + bodyHtml + '</tbody></table></div></div>';
 }
 
 // ── Bug Summary ─────────────────────────────────────────────
@@ -7490,6 +7717,48 @@ function renderSettingsGeneral(space) {
     '</div></div>';
 }
 
+// Settings-tab table search. Rows carry a data-search haystack and are shown or
+// hidden in place rather than re-rendered, so role selects and Remove buttons
+// keep their bound handlers and the box keeps focus while typing.
+function settingsSearchBoxHtml(id, placeholder) {
+  return '<input type="text" id="' + escAttr(id) + '" class="input input-sm" placeholder="' + escAttr(placeholder) + '" ' +
+    'autocomplete="off" style="width:220px">';
+}
+
+function wireSettingsTableSearch(inputId, emptyMessage) {
+  var input = $(inputId);
+  if (!input) return;
+  var table = $('settingsTabContent').querySelector('table');
+  if (!table) return;
+  var tbody = table.querySelector('tbody');
+
+  // Placeholder row reused for "nothing matched", separate from the table's own
+  // "none yet" row so clearing the box restores the original empty state.
+  var noHit = document.createElement('tr');
+  noHit.className = 'settings-search-empty';
+  noHit.hidden = true;
+  noHit.innerHTML = '<td colspan="' + (table.querySelectorAll('thead th').length || 1) +
+    '" class="text-muted" style="text-align:center;padding:24px"></td>';
+  tbody.appendChild(noHit);
+
+  input.addEventListener('input', function () {
+    var q = input.value.trim().toLowerCase();
+    var shown = 0, total = 0;
+    tbody.querySelectorAll('tr[data-search]').forEach(function (row) {
+      total++;
+      var hit = !q || row.getAttribute('data-search').indexOf(q) >= 0;
+      row.hidden = !hit;
+      if (hit) shown++;
+    });
+    if (total && !shown) {
+      noHit.querySelector('td').textContent = emptyMessage.replace('%s', input.value.trim());
+      noHit.hidden = false;
+    } else {
+      noHit.hidden = true;
+    }
+  });
+}
+
 function renderSettingsPeople(space) {
   var memberRecs = (S.data.space_members || []).filter(function (m) { return m.space_id == space.id; });
   var orgAdmin = isOrgAdminUser();
@@ -7522,7 +7791,7 @@ function renderSettingsPeople(space) {
       roleCell = spaceRoleBadgeHtml(rec.role);
     }
 
-    rowsHtml += '<tr>' +
+    rowsHtml += '<tr data-search="' + escAttr(((user.name || '') + ' ' + (user.email || '')).toLowerCase()) + '">' +
       '<td>' + avatarHtml(user, 28) + '</td>' +
       '<td>' + esc(user.name) + '</td>' +
       '<td class="text-muted">' + esc(user.email || '') + '</td>' +
@@ -7534,13 +7803,18 @@ function renderSettingsPeople(space) {
 
   var html = '<div class="flex items-center justify-between mb-16">' +
     '<h3 style="margin:0">Members</h3>' +
+    '<div style="display:flex;align-items:center;gap:8px">' +
+    settingsSearchBoxHtml('peopleSearchInput', 'Search name or email…') +
     (canManageSpace(space.id) ? '<button class="btn btn-primary btn-sm" id="inviteMemberBtnSettings">+ Add User</button>' : '') +
+    '</div>' +
     '</div>' +
     '<div class="table-container"><table class="data-table" style="width:100%"><thead><tr>' +
     '<th style="width:40px"></th><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th style="width:80px">Actions</th>' +
     '</tr></thead><tbody>' + (rowsHtml || '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:24px">No members yet</td></tr>') + '</tbody></table></div>';
 
   $('settingsTabContent').innerHTML = html;
+
+  wireSettingsTableSearch('peopleSearchInput', 'No members match "%s"');
 
   // Invite member button
   var invBtn = $('inviteMemberBtnSettings');
@@ -7880,7 +8154,21 @@ function paintSettingsCustomFields(space) {
     var applyBtn = f.is_builtin
       ? ''
       : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
-    rowsHtml += '<tr>' +
+    // Everything shown in the row is searchable, plus field_key and the raw
+    // option values \u2014 so "slack", "multi_select", "built-in", "required" or an
+    // option that got truncated in the Options column all still match.
+    var haystack = [
+      f.name,
+      f.field_key,
+      f.is_builtin ? 'built-in builtin' : 'custom',
+      f.field_type || f.type,
+      f.is_required ? 'required yes' : 'optional no',
+      formatFieldShowIn(f),
+      optionsDisplay,
+      normalizeCFOptions(f.options).join(' ')
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    rowsHtml += '<tr data-search="' + escAttr(haystack) + '">' +
       '<td>' + esc(f.name) + '</td>' +
       '<td>' + sourceBadge + '</td>' +
       '<td><span class="badge badge-muted">' + esc(f.field_type || f.type) + '</span></td>' +
@@ -7897,7 +8185,10 @@ function paintSettingsCustomFields(space) {
 
   var html = '<div class="flex items-center justify-between mb-16">' +
     '<h3 style="margin:0">Issue Fields</h3>' +
+    '<div style="display:flex;align-items:center;gap:8px">' +
+    settingsSearchBoxHtml('cfSearchInput', 'Search name, type, options…') +
     '<button class="btn btn-primary btn-sm" id="addCustomFieldBtnSettings">+ Add Field</button>' +
+    '</div>' +
     '</div>' +
     '<div class="table-container"><table class="data-table" style="width:100%"><thead><tr>' +
     '<th>Name</th><th>Source</th><th>Type</th><th>Required</th><th>Show in</th><th>Options</th><th style="width:300px">Actions</th>' +
@@ -7905,6 +8196,8 @@ function paintSettingsCustomFields(space) {
     '<p class="text-muted text-sm" style="margin-top:12px">Built-in fields (Title, Team, Sprint, etc.) are added automatically for each space. Remove a field to hide it on create/drawer forms. Use <strong>+ Add Field</strong> for extra custom fields (Environment, Severity, etc.).</p>';
 
   $('settingsTabContent').innerHTML = html;
+
+  wireSettingsTableSearch('cfSearchInput', 'No fields match "%s"');
 
   // Add field button
   $('addCustomFieldBtnSettings').onclick = function () { openCustomFieldModal(); };
@@ -8886,7 +9179,18 @@ async function openDrawer(issueId) {
     api('/api/issues/' + issue.id, 'PUT', { reporter_id: S.currentUser }).catch(function(){});
   }
 
-  var sprints = (S.data.sprints || []).filter(function (sp) { return sp.space_id == spaceId; });
+  // Completed sprints aren't offered — you shouldn't be able to move a ticket
+  // into a sprint that's already closed. The ticket's CURRENT sprint is kept
+  // even if completed, otherwise the select would fall back to "None" and the
+  // next save would silently rip the ticket out of its sprint.
+  // Deliberately not getIssueFormSprints() here: that also restricts to sprints
+  // the user is rostered on, which would leave most members with no options at
+  // all in the drawer.
+  var sprints = (S.data.sprints || []).filter(function (sp) {
+    if (sp.space_id != spaceId) return false;
+    if (sp.id === issue.sprint_id) return true;
+    return sp.status !== 'completed';
+  });
   populateSprintSelect($('drawerSprint'), sprints, issue.sprint_id);
 
   $('drawerPoints').value = issue.story_points != null ? issue.story_points : '';
@@ -9077,7 +9381,6 @@ function bindDrawerEdits(issue) {
       var old = document.getElementById('_typeMenu');
       if (old) { old.remove(); return; }
       var types = ['epic','story','task','bug','subtask'];
-      var icons = {epic:'⚡',story:'📖',task:'✅',bug:'🐛',subtask:'📌'};
       var rect = typeEl.getBoundingClientRect();
       var menu = document.createElement('div');
       menu.id = '_typeMenu';
@@ -9085,7 +9388,9 @@ function bindDrawerEdits(issue) {
       types.forEach(function(t) {
         var item = document.createElement('div');
         item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:13px;border-radius:4px;display:flex;align-items:center;gap:8px;';
-        item.innerHTML = '<span>'+ icons[t] +'</span><span>'+(t.charAt(0).toUpperCase()+t.slice(1))+'</span>';
+        // Use the shared TYPE_ICONS set rather than a local emoji list, so this
+        // menu can't drift from the icons shown on boards, tables and drawers.
+        item.innerHTML = '<span style="display:inline-flex;align-items:center">'+ typeIcon(t) +'</span><span>'+(t.charAt(0).toUpperCase()+t.slice(1))+'</span>';
         item.onmouseover = function(){ this.style.background='#f4f5f7'; };
         item.onmouseout = function(){ this.style.background='';};
         item.onclick = function(){
@@ -11690,10 +11995,6 @@ function updateRoleBasedUI() {
     var showSprint = S.currentTab === 'backlog' && !!S.currentSpace && canCreateSprint(S.currentSpace);
     createSprintBtn.style.display = showSprint ? '' : 'none';
   }
-  var inviteMemberBtn = $('inviteMemberBtn');
-  if (inviteMemberBtn) {
-    inviteMemberBtn.style.display = canManageSpace(S.currentSpace) ? '' : 'none';
-  }
 }
 
 function isSpaceOwner(spaceId) {
@@ -12357,6 +12658,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // Sidebar toggle
   if ($('sidebarToggle')) $('sidebarToggle').addEventListener('click', function () {
     $('sidebar').classList.toggle('collapsed');
+    // Toggling by hand inside Settings means the user owns the state from here
+    // on — drop the remembered value so leaving Settings doesn't undo them.
+    _sidebarStateBeforeSettings = null;
   });
 
   // Sidebar search (element may not exist if removed from HTML)
@@ -12532,15 +12836,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // Create sprint
   $('createSprintBtn').addEventListener('click', function () { window._openSprintModal(null); });
-
-  // Invite member (header button opens invite modal directly)
-  $('inviteMemberBtn').addEventListener('click', function () {
-    if (S.currentSpace) {
-      openInviteMemberModal();
-    } else {
-      toast('Select a space first', 'error');
-    }
-  });
 
   // Notifications
   $('notifBtn').addEventListener('click', function (e) {
@@ -12728,18 +13023,6 @@ document.addEventListener('DOMContentLoaded', function () {
       document.querySelectorAll('.yw-filter-panel').forEach(function(p) { p.hidden = true; });
     }
   }, true);
-
-  // Space search
-  $('spaceSearch').addEventListener('input', function () {
-    var term = $('spaceSearch').value;
-    if (S.currentTab === 'backlog') {
-      $('backlogSearch').value = term;
-      renderBacklog();
-    } else if (S.currentTab === 'allwork') {
-      $('allWorkSearch').value = term;
-      renderAllWork();
-    }
-  });
 
   // Report selector
   $('reportSelector').addEventListener('change', function () {

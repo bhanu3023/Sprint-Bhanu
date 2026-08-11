@@ -1156,14 +1156,50 @@ body.light .backlog-lane-header { background: #f7f8fa; }
 .backlog-lane-body.collapsed { display: none; }
 .backlog-add-row { padding: 6px 14px; }
 
+/* Fixed column grid so priority / status / points / assignee line up down the
+   lane instead of drifting with each title's length. Cell count and order here
+   must match backlogRow() in app.js. */
 .backlog-row {
-  display: flex;
+  display: grid;
+  grid-template-columns:
+    18px                /* type icon   */
+    76px                /* issue key   */
+    minmax(0, 1fr)      /* title       */
+    86px                /* priority    */
+    104px               /* status      */
+    38px                /* points      */
+    24px;               /* assignee    */
   align-items: center;
+  column-gap: 10px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background-color 0.15s ease;
-  gap: 8px;
+}
+
+.bl-cell { min-width: 0; display: flex; align-items: center; }
+.bl-type { justify-content: center; }
+.bl-key { font-size: 11px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.bl-title {
+  font-size: 13px;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;          /* block, not flex — ellipsis needs a text box */
+  line-height: 1.5;
+}
+.bl-points { justify-content: flex-end; }
+.bl-assignee { justify-content: flex-end; }
+
+/* Narrow viewports: drop points, then status, before the title gets squeezed. */
+@media (max-width: 900px) {
+  .backlog-row { grid-template-columns: 18px 70px minmax(0, 1fr) 80px 100px 0 24px; }
+  .bl-points { display: none; }
+}
+@media (max-width: 700px) {
+  .backlog-row { grid-template-columns: 18px 64px minmax(0, 1fr) 78px 0 0 24px; }
+  .bl-status { display: none; }
 }
 
 .backlog-row:hover {
@@ -3048,8 +3084,13 @@ body.light .widget-card { background: #ffffff; border-color: #d0d7de; }
 body.light .link-item { background: #f7f8fa !important; }
 body.light #linkDialogInline { background: #ffffff; }
 
-/* Subtask indicators in backlog and board */
-.backlog-row-subtask { padding-left: 28px !important; }
+/* Subtask indicators in backlog and board.
+   The old rule indented the whole row (padding-left: 28px), which pushed every
+   column right and broke alignment with its sibling rows now that the row is a
+   fixed grid. The hierarchy cue is an inset accent bar plus an indent applied
+   only inside the title cell, so all columns stay on their tracks. */
+.backlog-row-subtask { box-shadow: inset 3px 0 0 var(--purple); }
+.backlog-row-subtask .bl-title { padding-left: 14px; }
 .backlog-row-subtask .issue-key { font-size: 10px; }
 .board-card-subtask { border-left: 3px solid var(--purple) !important; }
 .subtask-parent-ref {
@@ -3119,8 +3160,6 @@ select.input-sm { appearance: auto; -webkit-appearance: auto; }
 .avatar-group .avatar { margin-left: -4px; border: 2px solid var(--bg2); }
 .space-header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg2); }
 .space-header-left { display: flex; align-items: center; gap: 10px; }
-.space-header-center { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.space-header-right { display: flex; align-items: center; gap: 8px; }
 .space-icon { font-size: 24px; }
 .space-name-title { font-size: 18px; font-weight: 700; }
 body.light .space-header { background: #ffffff; border-bottom-color: #d0d7de; }
