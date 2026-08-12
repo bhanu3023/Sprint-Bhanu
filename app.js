@@ -139,35 +139,118 @@ function getPtComboTypesNeedingCombination() {
     || ['Message', 'Email', 'Content'];
 }
 
+// Maps a built-in field_key to how to read its value in the drawer and on a
+// plain issue record, so the Done check can be driven by the space's configured
+// required fields instead of a fixed list.
+var DONE_BUILTIN_READERS = {
+  title:           { el: 'drawerTitle',       issue: 'title' },
+  type:            { el: 'drawerType',        issue: 'type' },
+  priority:        { el: 'drawerPriority',    issue: 'priority' },
+  assignee:        { el: 'drawerAssignee',    issue: 'assignee_id' },
+  reporter:        { el: 'drawerReporter',    issue: 'reporter_id' },
+  sprint:          { el: 'drawerSprint',      issue: 'sprint_id' },
+  story_points:    { el: 'drawerPoints',      issue: 'story_points', numeric: true },
+  team:            { el: 'drawerTeam',        issue: 'team' },
+  product_type:    { el: 'drawerProductType', issue: 'product_type' },
+  start_date:      { el: 'drawerStartDate',   issue: 'start_date' },
+  due_date:        { el: 'drawerDueDate',     issue: 'due_date' },
+  description:     { el: 'drawerDesc',        issue: 'description',     html: true },
+  fix_description: { el: 'drawerFixDesc',     issue: 'fix_description', html: true }
+};
+
+// A custom field's saved value for an issue, from whichever cache has it.
+function doneCustomFieldStoredValue(issueId, fieldId) {
+  var d = window._drawerIssueData;
+  if (d && String(d.id) === String(issueId) && Array.isArray(d.custom_field_values)) {
+    var hit = d.custom_field_values.find(function (v) { return String(v.field_id) === String(fieldId); });
+    if (hit) return hit.value;
+  }
+  var bulk = (S.data.issue_field_values || []).find(function (v) {
+    return String(v.issue_id) === String(issueId) && String(v.field_id) === String(fieldId);
+  });
+  return bulk ? bulk.value : '';
+}
+
 function validateIssueForDone(issueOrId) {
   var issue = (issueOrId && typeof issueOrId === 'object') ? issueOrId : null;
   var issueId = issue ? issue.id : issueOrId;
   var missing = [];
   var useDrawer = issueId && S.drawerIssueId === issueId && $('drawerDesc') && $('drawerFixDesc');
 
-  var desc = useDrawer ? $('drawerDesc').innerHTML : (issue && issue.description);
-  var fixDesc = useDrawer ? $('drawerFixDesc').innerHTML : (issue && issue.fix_description);
-  if (htmlFieldIsEmpty(desc)) missing.push('Description');
-  if (htmlFieldIsEmpty(fixDesc)) missing.push('Fix Description');
-
-  var sprintVal = useDrawer && $('drawerSprint') ? $('drawerSprint').value : (issue && issue.sprint_id);
-  if (!sprintVal) missing.push('Sprint');
-
-  var teamVal = useDrawer && $('drawerTeam') ? $('drawerTeam').value : (issue && issue.team);
-  if (!teamVal) missing.push('Team');
-
-  var assigneeVal = useDrawer && $('drawerAssignee') ? $('drawerAssignee').value : (issue && issue.assignee_id);
-  if (!assigneeVal) missing.push('Assignee');
-
   var type = ((issue && issue.type) || (window._drawerIssueData && window._drawerIssueData.type) || 'task').toLowerCase();
-  if (['story', 'task', 'bug'].indexOf(type) >= 0) {
-    var pts = useDrawer && $('drawerPoints') ? $('drawerPoints').value : (issue && issue.story_points);
-    if (pts === '' || pts === null || pts === undefined || Number(pts) <= 0) missing.push('Story Points');
-  }
-
-  var ptId = getProductTeamSpaceId();
   var spaceId = (issue && issue.space_id) || (window._drawerIssueData && window._drawerIssueData.space_id) || S.currentSpace;
-  if (ptId && String(spaceId) === String(ptId)) {
+  var comboMode = productTypeMode(spaceId, 'drawer') === 'combo';
+
+  // Driven by Settings → Custom Fields, exactly like the create form: a field
+  // blocks Done when it is Required, applies to THIS issue type, and is shown in
+  // the Issue drawer. Replaces the old fixed list (Description, Fix Description,
+  // Sprint, Team, Assignee, Story Points), which no admin could change and which
+  // demanded Story Points on bugs.
+  getSpaceFieldRows(spaceId).forEach(function (field) {
+    if (!fieldRequiredForType(field, type)) return;
+    if (!customFieldShowsIn(field, 'drawer')) return;
+    if (isCombinationField(field)) return;               // handled by the combo block below
+    // In combo mode the plain Product Type control is hidden and the picker owns
+    // the value, so let the combo block check it — reading the hidden select here
+    // would always look empty and block Done.
+    if (field.field_key === 'product_type' && comboMode) return;
+
+    if (field.is_builtin) {
+      var r = DONE_BUILTIN_READERS[field.field_key];
+      if (!r) return;                                    // nothing readable → never block
+      // The stored value, from whichever record we have.
+      var fromRecord = function () {
+        if (issue && issue[r.issue] !== undefined) return issue[r.issue];
+        var d = window._drawerIssueData;
+        return d ? d[r.issue] : undefined;
+      };
+      var raw;
+      if (useDrawer && $(r.el)) {
+        var ctl = $(r.el);
+        raw = r.html ? ctl.innerHTML : ctl.value;
+        // Not every drawer field is a form control — Type is a <span> badge, so
+        // .value is undefined. Reading that as "empty" made Done complain that
+        // Type was missing on a ticket that plainly had a type. Fall back to the
+        // record whenever the element has no value to give.
+        if (!r.html && raw === undefined) raw = fromRecord();
+      } else {
+        raw = fromRecord();
+      }
+      var empty;
+      if (r.html) empty = htmlFieldIsEmpty(raw);
+      // 0 is a legitimate estimate (a trivial change, or a spike that carries no
+      // points), so only a BLANK box counts as unfilled. The old rule used
+      // Number(raw) <= 0, which rejected 0 here while the create form accepted it
+      // — the same ticket could be created but never closed.
+      else if (r.numeric) {
+        var n = String(raw == null ? '' : raw).trim();
+        empty = (n === '' || !isFinite(Number(n)));
+      }
+      else empty = !raw;
+      if (empty) missing.push(field.name || field.field_key);
+      return;
+    }
+
+    // Custom field: read the drawer input, else the cached issue_field_values.
+    var val = '';
+    if (useDrawer) {
+      var input = document.querySelector('#drawerCustomFields [data-cf-id="' + field.id + '"]');
+      if (input) val = input.type === 'checkbox' ? (input.checked ? '1' : '') : (input.value || '');
+      else val = doneCustomFieldStoredValue(issueId, field.id);
+    } else {
+      val = doneCustomFieldStoredValue(issueId, field.id);
+    }
+    if (!String(val == null ? '' : val).trim()) missing.push(field.name);
+  });
+
+  // Only spaces using the COMBINED picker have a Product Type + Combination
+  // requirement for Done. Deliberately not extended to plain-dropdown spaces:
+  // Product Type is seeded into every space, so keying off that would suddenly
+  // block Done on boards that never had this rule. Keeping it on combo mode
+  // leaves today's behaviour intact and also stops a Product_Team space whose
+  // Combination field was removed from being unable to reach Done at all
+  // (the old check read an empty picker and always reported Product Type missing).
+  if (comboMode) {
     var comboVal = null;
     if (!useDrawer && issue) {
       var meta = findCombinationFieldMeta(spaceId);
@@ -310,6 +393,31 @@ function fmtDateISO(d) {
   return dt.getFullYear() + '-' +
     String(dt.getMonth() + 1).padStart(2, '0') + '-' +
     String(dt.getDate()).padStart(2, '0');
+}
+
+// Moving a ticket into a sprint adopts that sprint's dates. Returns the changes
+// to apply given the ticket's current values, so the caller only writes what
+// actually differs (avoids a pointless save when the dates already match).
+//   → { sprint, start, end, changes: [{field, value, label}] }
+// A null/empty sprintId means "backlog": no sprint dates exist to copy, so no
+// changes are produced and the ticket keeps whatever dates it had.
+function sprintDateChanges(sprintId, currentStart, currentDue, sprints) {
+  var out = { sprint: null, start: '', end: '', changes: [] };
+  if (!sprintId) return out;
+  var list = sprints || (S.data && S.data.sprints) || [];
+  var sprint = list.find(function (sp) { return sp.id === sprintId; });
+  if (!sprint) return out;
+  out.sprint = sprint;
+  // A planning sprint may have no dates yet — only copy the ones that exist.
+  out.start = fmtDateISO(sprint.start_date);
+  out.end = fmtDateISO(sprint.end_date);
+  if (out.start && fmtDateISO(currentStart) !== out.start) {
+    out.changes.push({ field: 'start_date', value: out.start, label: 'start ' + out.start });
+  }
+  if (out.end && fmtDateISO(currentDue) !== out.end) {
+    out.changes.push({ field: 'due_date', value: out.end, label: 'due ' + out.end });
+  }
+  return out;
 }
 
 function initials(name) {
@@ -592,10 +700,17 @@ function refreshHomeMyIssuesPanel() {
 function refreshDashboardIssueStats() {
   api('/api/my-issues').then(function (data) {
     _ywCache = data;
+    // Recompute every tile from the freshly cached assigned set. Without this
+    // they would keep whatever the pre-cache fallback produced.
+    var list = getMyDashboardIssues();
     var totalEl = $('dbMyIssuesStat');
-    if (totalEl) totalEl.textContent = countAssignedPlusReported(data);
-    var openEl = $('dbOpenIssuesStat');
-    if (openEl) openEl.textContent = countOpenAssignedIssues(data);
+    if (totalEl) totalEl.textContent = list.length;
+    [['dbOpenIssuesStat', 'open'], ['dbActiveIssuesStat', 'active'],
+     ['dbBlockedIssuesStat', 'blocked'], ['dbClosedIssuesStat', 'closed']]
+      .forEach(function (pair) {
+        var el = $(pair[0]);
+        if (el) el.textContent = countMyIssuesByStatusGroup(list, pair[1]);
+      });
     _updateYourWorkTabBadges(data);
   }).catch(function () {});
 }
@@ -641,6 +756,22 @@ function navigateToYourWorkOpen() {
   S.yourWorkTab = 'assigned';
   navigateTo('yourwork');
 }
+
+// Open the ticket list behind a dashboard tile: My Work → Assigned to Me,
+// filtered to exactly the statuses that tile counted, so the list that appears
+// has the same length as the number that was clicked.
+// The tiles used to point at navigateToYourWork('assigned'), which clears all
+// filters and showed every assigned ticket regardless of which tile was
+// clicked, and at navigateToYourWorkOpen(), which filters "not Done" (To Do +
+// In Progress + In Review + Blocked) rather than the tile's "To Do".
+function navigateToMyWorkStatus(group) {
+  var statuses = DASH_STATUS_GROUPS[group] || [];
+  clearYourWorkFilters();          // also clears ywExcludeDone, which would otherwise hide Closed
+  S.ywFilters.status = statuses.slice();
+  S.yourWorkTab = 'assigned';
+  navigateTo('yourwork');
+}
+window.navigateToMyWorkStatus = navigateToMyWorkStatus;
 window.navigateToYourWork = navigateToYourWork;
 window.navigateToYourWorkRecent = navigateToYourWorkRecent;
 window.navigateToYourWorkOpen = navigateToYourWorkOpen;
@@ -690,6 +821,98 @@ function confirmDialog(msg) {
     $('confirmYes').onclick = function () { _confirmResolve = null; closeModal('modal-confirm'); resolve(true); };
     $('confirmNo').onclick = function () { _confirmResolve = null; closeModal('modal-confirm'); resolve(false); };
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// TYPED CONFIRM DIALOG
+// ═══════════════════════════════════════════════════════════
+// GitHub-style "type the name to confirm" gate for destructive actions. The
+// confirm button stays disabled until the typed text matches, so nobody deletes
+// a ticket by muscle-memory-clicking through a dialog.
+//
+//   opts = {
+//     title, intro,             // heading + first paragraph
+//     phrase,                   // the exact text the user must type
+//     phraseHint,               // label above the input (defaults from phrase)
+//     note,                     // reassurance line (recoverable) — optional
+//     warn,                     // red warning line (irreversible) — optional
+//     details,                   // array of 'label: value' strings, rendered as a list
+//     confirmLabel              // button text (default 'Delete')
+//   }
+// Resolves true only on an exact (case-insensitive, trimmed) match.
+function typedConfirmDialog(opts) {
+  opts = opts || {};
+  var phrase = String(opts.phrase || 'delete');
+  return new Promise(function (resolve) {
+    var done = false;
+    function finish(val) {
+      if (done) return;
+      done = true;
+      document.removeEventListener('keydown', onKey, true);
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      resolve(val);
+    }
+    var wrap = document.createElement('div');
+    wrap.className = 'typed-confirm';
+    wrap.innerHTML =
+      '<div class="typed-confirm-backdrop"></div>' +
+      '<div class="typed-confirm-dialog" role="dialog" aria-modal="true">' +
+        '<h3 class="typed-confirm-title">' + esc(opts.title || 'Confirm delete') + '</h3>' +
+        '<p class="typed-confirm-intro">' + esc(opts.intro || '') + '</p>' +
+        (opts.details && opts.details.length
+          ? '<ul class="typed-confirm-details">' +
+            opts.details.map(function (d) { return '<li>' + esc(d) + '</li>'; }).join('') +
+            '</ul>'
+          : '') +
+        (opts.warn ? '<p class="typed-confirm-warn">' + esc(opts.warn) + '</p>' : '') +
+        (opts.note ? '<p class="typed-confirm-note">' + esc(opts.note) + '</p>' : '') +
+        '<label class="typed-confirm-label">' +
+          esc(opts.phraseHint || 'To confirm, type') +
+          ' <code class="typed-confirm-phrase">' + esc(phrase) + '</code>' +
+        '</label>' +
+        '<input class="typed-confirm-input" type="text" autocomplete="off" spellcheck="false" ' +
+          'aria-label="Type ' + escAttr(phrase) + ' to confirm">' +
+        '<div class="typed-confirm-actions">' +
+          '<button class="btn btn-secondary typed-confirm-cancel" type="button">Cancel</button>' +
+          '<button class="btn btn-danger typed-confirm-ok" type="button" disabled>' +
+            esc(opts.confirmLabel || 'Delete') + '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+
+    var input = wrap.querySelector('.typed-confirm-input');
+    var okBtn = wrap.querySelector('.typed-confirm-ok');
+    var matches = function () {
+      return input.value.trim().toLowerCase() === phrase.trim().toLowerCase();
+    };
+    input.addEventListener('input', function () {
+      var m = matches();
+      okBtn.disabled = !m;
+      wrap.querySelector('.typed-confirm-dialog').classList.toggle('is-armed', m);
+    });
+    // Enter submits only once it matches, so it can't fire on a half-typed phrase.
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && matches()) { e.preventDefault(); finish(true); }
+    });
+    okBtn.addEventListener('click', function () { if (matches()) finish(true); });
+    wrap.querySelector('.typed-confirm-cancel').addEventListener('click', function () { finish(false); });
+    wrap.querySelector('.typed-confirm-backdrop').addEventListener('click', function () { finish(false); });
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); finish(false); } }
+    document.addEventListener('keydown', onKey, true);
+    setTimeout(function () { input.focus(); }, 0);
+  });
+}
+window.typedConfirmDialog = typedConfirmDialog;
+
+// The two standard destructive copy blocks, so every call site says the same thing.
+// Soft delete is recoverable by an org admin until the retention window expires.
+function binRetentionDays() {
+  var n = (S.data && S.data.bin_retention_days) || 30;
+  return n;
+}
+function softDeleteNote() {
+  return 'This moves it to Deleted Items. If you need it back, ask an org admin to restore it — ' +
+    'after ' + binRetentionDays() + ' days it is deleted permanently and cannot be recovered.';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -810,6 +1033,27 @@ window.saveDrawerChanges = saveDrawerChanges;
 // ═══════════════════════════════════════════════════════════
 // CONSTANTS: STATUSES, PRIORITIES, TYPES
 // ═══════════════════════════════════════════════════════════
+// ── Schema-owned enumerations ─────────────────────────────
+// These three lists are fixed by CHECK constraints on the issues table
+// (issues_status_check / issues_type_check / issues_priority_check). They are NOT
+// admin-configurable: a value outside these sets is rejected by the database, so
+// every menu, filter and report must read them from here.
+//
+// They were previously hardcoded in a dozen places and had already drifted:
+//   - the All Work inline status menu omitted 'Blocked', so a blocked ticket
+//     showed no current-status tick and could not be set from there;
+//   - the All Work priority filter offered 'critical' (matches nothing, the enum
+//     has no such value) and omitted 'highest' and 'lowest' entirely, so the
+//     top and bottom priorities could not be filtered at all.
+// Keep in step with db/schema.sql if a constraint ever changes.
+var ISSUE_STATUSES   = ['To Do', 'In Progress', 'In Review', 'Done', 'Blocked'];
+var ISSUE_TYPES      = ['epic', 'story', 'task', 'bug', 'subtask'];
+var ISSUE_PRIORITIES = ['highest', 'high', 'medium', 'low', 'lowest'];
+// {v,l} option lists for the filter/menu builders.
+function enumOpts(values) {
+  return values.map(function (v) { return { v: v, l: cap(v) }; });
+}
+
 var STATUS_COLORS = {
   'To Do': '#42526e',
   'In Progress': '#0052cc',
@@ -840,14 +1084,18 @@ function statusBadge(status, noCaret) {
     'To Do':      'background:#dfe1e6;color:#42526e',
     'In Progress':'background:#deebff;color:#0052cc',
     'In Review':  'background:#fff0b3;color:#974f0c',
+    'Blocked':    'background:#ffebe6;color:#bf2600',
     'Done':       'background:#e3fcef;color:#006644'
   };
   var style = styles[status] || 'background:#dfe1e6;color:#42526e';
   // noCaret: read-only contexts that have no inline status editor wired up, so
   // the ▾ would advertise a dropdown that never opens.
-  var caret = noCaret ? '' : '<span style="font-size:11px;margin-left:2px">&#9662;</span>';
+  var caret = noCaret ? '' : '<span style="font-size:11px">&#9662;</span>';
   var cursor = noCaret ? 'default' : 'pointer';
-  return '<span style="' + style + ';border-radius:3px;text-transform:uppercase;font-size:11px;font-weight:700;letter-spacing:0.04em;padding:2px 8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;cursor:' + cursor + '">' + esc(status) + caret + '</span>';
+  // Layout (fixed width, centred text) lives in .issue-status-badge so every
+  // status pill in the app is the same size; only the colours are per-status.
+  return '<span class="issue-status-badge" style="' + style + ';cursor:' + cursor + '">' +
+    esc(status) + caret + '</span>';
 }
 
 function priorityBadge(priority, noCaret) {
@@ -855,16 +1103,24 @@ function priorityBadge(priority, noCaret) {
     highest: '#dc2626', high: '#ef4444', medium: '#f59e0b', low: '#3b82f6', lowest: '#6b7280'
   };
   var color = colors[priority] || '#6b7280';
+  // No margin-top nudge on the caret — the flex container centres it, and the
+  // nudge left it sitting a few pixels below the label.
   var caret = noCaret ? ''
-    : '<span style="color:#6b778c;font-size:12px;line-height:1;vertical-align:middle;margin-top:3px">&#9662;</span>';
-  return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;white-space:nowrap;cursor:' + (noCaret ? 'default' : 'pointer') + '">' +
+    : '<span style="color:#6b778c;font-size:12px;line-height:1">&#9662;</span>';
+  // Layout (fixed width, centred) lives in .issue-priority-badge; only the
+  // colour varies per priority.
+  return '<span class="issue-priority-badge" style="cursor:' + (noCaret ? 'default' : 'pointer') + '">' +
     '<span style="color:#172b4d;font-weight:500">' + cap(priority) + '</span>' +
     caret +
     '</span>';
 }
 
 function typeIcon(type) {
-  return TYPE_ICONS[type] || '\uD83D\uDCC4';
+  // Wrapped so the SVG doesn't sit on the text baseline. A bare inline <svg>
+  // baseline-aligns, which left the icon looking raised next to its label in
+  // the Type columns; the wrapper centres it instead. Harmless where the parent
+  // is already a flex row.
+  return '<span class="type-icon">' + (TYPE_ICONS[type] || '\uD83D\uDCC4') + '</span>';
 }
 
 function typeLabel(type) {
@@ -2175,6 +2431,32 @@ function getMyIssueCountFromLocalData() {
   return Object.keys(ids).length;
 }
 
+// Tickets ASSIGNED to me — the set every dashboard tile from Total Tickets
+// through Closed Tickets is measured against. Reported-by-me is deliberately
+// excluded: these tiles describe the user's own workload, and mixing in tickets
+// they merely raised for someone else inflated the totals.
+// Prefers the /api/my-issues cache, falling back to the locally loaded issues
+// before it arrives. Returned as a list so the status tiles break down exactly
+// the same set and therefore always sum to Total.
+function getMyDashboardIssues() {
+  if (_ywCache) return (_ywCache.assigned || []).slice();
+  return getVisibleIssues().filter(function (i) { return i.assignee_id == S.currentUser; });
+}
+
+// Status groups for the dashboard tiles. "Active" is deliberately both
+// In Progress and In Review — work that has been picked up but isn't finished.
+var DASH_STATUS_GROUPS = {
+  open:    ['To Do'],
+  active:  ['In Progress', 'In Review'],
+  blocked: ['Blocked'],
+  closed:  ['Done']
+};
+
+function countMyIssuesByStatusGroup(list, group) {
+  var wanted = DASH_STATUS_GROUPS[group] || [];
+  return (list || []).filter(function (i) { return wanted.indexOf(i.status) >= 0; }).length;
+}
+
 function formatDashboardActivity(row) {
   if (!row) return 'updated an issue';
   if (row.activity_type === 'created' || row.field_name === 'created') return 'created';
@@ -2200,8 +2482,8 @@ function renderHome() {
     });
   });
   var allIssues = getVisibleIssues();
-  var myAssignedReportedCount = _ywCache ? countAssignedPlusReported(_ywCache) : getMyIssueCountFromLocalData();
-  var openIssuesCount = _ywCache ? countOpenAssignedIssues(_ywCache) : getOpenAssignedCountLocal();
+  // One list drives Total Tickets and all four status tiles, so they reconcile.
+  var myDashIssues = getMyDashboardIssues();
   var myIssues = allIssues.filter(function (i) { return i.assignee_id == S.currentUser && i.status !== 'Done'; });
   var recentlyViewed24h = getRecentlyViewedIssues(RECENT_VIEWED_24H_MS);
 
@@ -2236,13 +2518,24 @@ function renderHome() {
     dbStat('Spaces', spaces.length, '#0129ac', '23,79,150',
       '<path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3A1.5 1.5 0 0 1 15 10.5v3A1.5 1.5 0 0 1 13.5 15h-3A1.5 1.5 0 0 1 9 13.5v-3z"/>',
       'navigateTo(\'spaces\')') +
-    dbStat('Total Tickets', myAssignedReportedCount, '#6366f1', '99,102,241',
+    dbStat('Total Tickets', myDashIssues.length, '#6366f1', '99,102,241',
       '<path d="M14.5 3a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h13zm-13-1A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13zM3 5.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5zM3 8a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9A.5.5 0 0 1 3 8zm0 2.5a.5.5 0 0 1 .5-.5h6a.5.5 0 0 1 0 1h-6a.5.5 0 0 1-.5-.5z"/>',
       'navigateToYourWork(\'assigned\')', 'dbMyIssuesStat') +
-    dbStat('Open Issues', openIssuesCount, '#f59e0b', '245,158,11',
-      '<path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm5 5a5 5 0 0 0-10 0h10z"/>',
-      'navigateToYourWorkOpen()', 'dbOpenIssuesStat') +
-    dbStat('Recently Viewed', recentlyViewed24h.length, '#10b981', '16,185,129',
+    // Status breakdown of the same set Total Tickets counts, so the four add up
+    // to it: To Do / In Progress+In Review / Blocked / Done.
+    dbStat('Open Issues', countMyIssuesByStatusGroup(myDashIssues, 'open'), '#f59e0b', '245,158,11',
+      '<path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>',
+      'navigateToMyWorkStatus(\'open\')', 'dbOpenIssuesStat') +
+    dbStat('Active Tickets', countMyIssuesByStatusGroup(myDashIssues, 'active'), '#0052cc', '0,82,204',
+      '<path d="M8 3.5a.5.5 0 0 1 .5.5v4l3 1.8a.5.5 0 0 1-.5.86l-3.25-1.95A.5.5 0 0 1 7.5 8.3V4a.5.5 0 0 1 .5-.5z"/><path d="M8 16A8 8 0 1 1 8 0a8 8 0 0 1 0 16zm0-1A7 7 0 1 0 8 1a7 7 0 0 0 0 14z"/>',
+      'navigateToMyWorkStatus(\'active\')', 'dbActiveIssuesStat') +
+    dbStat('Blocked Tickets', countMyIssuesByStatusGroup(myDashIssues, 'blocked'), '#dc2626', '220,38,38',
+      '<path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zM3.3 4.02 11.98 12.7A7 7 0 0 1 3.3 4.02zm1.42-.71a7 7 0 0 1 8.68 8.68L4.72 3.3z"/>',
+      'navigateToMyWorkStatus(\'blocked\')', 'dbBlockedIssuesStat') +
+    dbStat('Closed Tickets', countMyIssuesByStatusGroup(myDashIssues, 'closed'), '#10b981', '16,185,129',
+      '<path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l1.094 1.093 3.473-4.425z"/><path d="M8 16A8 8 0 1 1 8 0a8 8 0 0 1 0 16zm0-1A7 7 0 1 0 8 1a7 7 0 0 0 0 14z"/>',
+      'navigateToMyWorkStatus(\'closed\')', 'dbClosedIssuesStat') +
+    dbStat('Recently Viewed', recentlyViewed24h.length, '#8b5cf6', '139,92,246',
       '<path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>',
       'navigateToYourWorkRecent()');
 
@@ -2273,10 +2566,17 @@ function renderHome() {
   api('/api/my-issues', 'GET', null, { silent: true }).then(function (data) {
     _ywCache = data;
     if (S.currentView !== 'home') return;
+    // Same refresh as refreshDashboardIssueStats: recompute every tile from the
+    // now-cached assigned set rather than leaving them on fallback numbers.
+    var fresh = getMyDashboardIssues();
     var el = $('dbMyIssuesStat');
-    if (el) el.textContent = countAssignedPlusReported(data);
-    var openEl = $('dbOpenIssuesStat');
-    if (openEl) openEl.textContent = countOpenAssignedIssues(data);
+    if (el) el.textContent = fresh.length;
+    [['dbOpenIssuesStat', 'open'], ['dbActiveIssuesStat', 'active'],
+     ['dbBlockedIssuesStat', 'blocked'], ['dbClosedIssuesStat', 'closed']]
+      .forEach(function (pair) {
+        var tile = $(pair[0]);
+        if (tile) tile.textContent = countMyIssuesByStatusGroup(fresh, pair[1]);
+      });
   }).catch(function () {});
 }
 
@@ -2578,7 +2878,7 @@ function _renderYourWorkTable(issues, rawIssues, lastColLabel) {
       html += '<tr onclick="openIssuePage(\'' + iid + '\')">' +
         '<td class="yw-key">' + esc(issueKeyStr(iss)) + '</td>' +
         '<td class="yw-title-cell">' + esc(iss.title) + '</td>' +
-        '<td>' + typeIcon(iss.type) + ' <span style="font-size:12px;color:var(--text2)">' + cap(iss.type || '') + '</span></td>' +
+        '<td><span class="type-cell">' + typeIcon(iss.type) + '<span class="type-cell-label">' + cap(iss.type || '') + '</span></span></td>' +
         '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\')" style="cursor:pointer">' + statusBadge(iss.status) + '</td>' +
         '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\')" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>' +
         '<td class="yw-space-cell">' + esc(iss.space_name || '') + '</td>' +
@@ -4688,21 +4988,30 @@ function renderBacklog() {
     var points = sprintIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
     var collapsed = sp.status === 'completed';
 
+    // Header reads as title, then dimmed meta, then actions — instead of one
+    // flat run of inline text. Meta items get real dividers so "4 issues" and
+    // "29 pts" no longer run together.
+    var dateRange = (sp.start_date || sp.end_date)
+      ? '<span class="lane-meta-item">' +
+          '<svg class="lane-meta-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' +
+          (sp.start_date ? fmtDateShort(sp.start_date) : '?') + ' – ' + (sp.end_date ? fmtDateShort(sp.end_date) : '?') +
+        '</span>'
+      : '';
+
     html += '<div class="backlog-lane" data-sprint-id="' + sp.id + '">' +
       '<div class="backlog-lane-header" onclick="window._toggleBacklogLane(this)">' +
       '<div class="lane-header-left">' +
-      '<span class="lane-toggle">' + (collapsed ? '\u25B8' : '\u25BE') + '</span>' +
-      '<strong>' + esc(sp.name) + '</strong> ' +
+      '<span class="lane-toggle' + (collapsed ? ' is-collapsed' : '') + '" aria-hidden="true">' +
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+      '</span>' +
+      '<span class="lane-title">' + esc(sp.name) + '</span>' +
       sprintStatusBadge(sp.status) +
-      (sp.start_date || sp.end_date
-        ? ' <span class="sprint-dates">📅 ' +
-          (sp.start_date ? fmtDateShort(sp.start_date) : '?') +
-          ' — ' +
-          (sp.end_date ? fmtDateShort(sp.end_date) : '?') +
-          '</span>'
-        : '') +
-      ' <span class="text-muted">' + sprintIssues.length + ' issues</span>' +
-      ' <span class="text-muted">' + points + ' pts</span></div>' +
+      '<span class="lane-meta">' +
+        dateRange +
+        '<span class="lane-meta-item">' + sprintIssues.length + (sprintIssues.length === 1 ? ' issue' : ' issues') + '</span>' +
+        '<span class="lane-meta-item">' + points + ' pts</span>' +
+      '</span>' +
+      '</div>' +
       '<div class="lane-header-actions">';
 
     if (sp.status === 'planning' && canManageSprints) {
@@ -4715,16 +5024,27 @@ function renderBacklog() {
       html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._openSprintModal(\'' + sp.id + '\')">Edit</button>' +
         '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._deleteSprint(\'' + sp.id + '\')">Delete</button>';
     }
+    // A completed sprint is closed history: its velocity is frozen at completion
+    // and the Spillover / Scope Change / Sprint Summary reports read its live
+    // membership, so adding tickets afterwards silently disagrees with the
+    // recorded numbers. Completed lanes therefore accept no drops and offer no
+    // "Add issue". Active and planning lanes are unchanged.
+    var isClosedLane = sp.status === 'completed';
     html += '</div></div>' +
-      '<div class="backlog-lane-body' + (collapsed ? ' collapsed' : '') + '" data-sprint-drop="' + sp.id + '" ' +
-      'ondragover="event.preventDefault();event.currentTarget.classList.add(\'drag-over\')" ' +
-      'ondragleave="window._laneDragLeave(event)" ' +
-      'ondrop="window._dropToSprint(event,\'' + sp.id + '\')">';
+      '<div class="backlog-lane-body' + (collapsed ? ' collapsed' : '') + '" data-sprint-drop="' + sp.id + '"' +
+      (isClosedLane ? ' data-lane-closed="true"' :
+        ' ondragover="event.preventDefault();event.currentTarget.classList.add(\'drag-over\')"' +
+        ' ondragleave="window._laneDragLeave(event)"' +
+        ' ondrop="window._dropToSprint(event,\'' + sp.id + '\')"') + '>';
 
     for (var bi = 0; bi < sprintIssues.length; bi++) {
       html += backlogRow(sprintIssues[bi]);
     }
-    html += '<div class="backlog-add-row"><button class="btn btn-link btn-sm" onclick="window._addIssueToSprint(\'' + sp.id + '\')">+ Add issue</button></div>';
+    if (!isClosedLane) {
+      html += '<div class="backlog-add-row"><button type="button" class="backlog-add-btn" onclick="window._addIssueToSprint(\'' + sp.id + '\')">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
+        'Add issue</button></div>';
+    }
     html += '</div></div>';
     return html;
   }
@@ -4755,11 +5075,21 @@ function renderBacklog() {
       return iss.title.toLowerCase().indexOf(searchTerm) >= 0 || issueKeyStr(iss).toLowerCase().indexOf(searchTerm) >= 0;
     });
   }
+  // Backlog shows a points total too, so its header matches the sprint lanes.
+  var backlogPoints = backlogIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
 
   html += '<div class="backlog-lane">' +
     '<div class="backlog-lane-header" onclick="window._toggleBacklogLane(this)">' +
-    '<div class="lane-header-left"><span class="lane-toggle">\u25BE</span>' +
-    '<strong>Backlog</strong> <span class="text-muted">' + backlogIssues.length + ' issues</span></div></div>' +
+    '<div class="lane-header-left">' +
+    '<span class="lane-toggle" aria-hidden="true">' +
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+    '</span>' +
+    '<span class="lane-title">Backlog</span>' +
+    '<span class="lane-meta">' +
+      '<span class="lane-meta-item">' + backlogIssues.length + (backlogIssues.length === 1 ? ' issue' : ' issues') + '</span>' +
+      '<span class="lane-meta-item">' + backlogPoints + ' pts</span>' +
+    '</span>' +
+    '</div></div>' +
     '<div class="backlog-lane-body" data-sprint-drop="null" ' +
     'ondragover="event.preventDefault();event.currentTarget.classList.add(\'drag-over\')" ' +
     'ondragleave="window._laneDragLeave(event)" ' +
@@ -4768,7 +5098,9 @@ function renderBacklog() {
   for (var bk = 0; bk < backlogIssues.length; bk++) {
     html += backlogRow(backlogIssues[bk]);
   }
-  html += '<div class="backlog-add-row"><button class="btn btn-link btn-sm" onclick="window._addIssueToSprint(null)">+ Add issue</button></div>';
+  html += '<div class="backlog-add-row"><button type="button" class="backlog-add-btn" onclick="window._addIssueToSprint(null)">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
+    'Add issue</button></div>';
   html += '</div></div>';
 
   // Completed sprints go last, below the backlog (collapsed by default).
@@ -4808,8 +5140,9 @@ window._toggleBacklogLane = function (header) {
   var scrollTop = scrollEl.scrollTop || window.scrollY;
   var body = header.nextElementSibling;
   body.classList.toggle('collapsed');
+  // Rotate the chevron rather than swapping a glyph, so it animates.
   var toggle = header.querySelector('.lane-toggle');
-  toggle.textContent = body.classList.contains('collapsed') ? '\u25B8' : '\u25BE';
+  if (toggle) toggle.classList.toggle('is-collapsed', body.classList.contains('collapsed'));
   // Restore scroll position so page doesn't jump
   requestAnimationFrame(function() {
     if (scrollEl === document.documentElement) window.scrollTo(0, scrollTop);
@@ -4834,6 +5167,12 @@ window._dropToSprint = async function (event, sprintId) {
   if (!issueId) return;
   var targetSprintId = lane.getAttribute('data-sprint-drop');
   if (targetSprintId === 'null') targetSprintId = null;
+  // Belt-and-braces: completed lanes render without drop handlers, but guard here
+  // too so no other path can drop a ticket into closed sprint history.
+  if (isSprintClosed(targetSprintId)) {
+    toast('That sprint is completed — move the ticket to an active or planning sprint instead.', 'error');
+    return;
+  }
   try {
     await api('/api/issues/' + issueId + '/move', 'PUT', { sprint_id: targetSprintId, position: 0 });
     await refreshData();
@@ -4844,7 +5183,19 @@ window._dropToSprint = async function (event, sprintId) {
   }
 };
 
+// True when the id names a sprint that has been completed. Unknown ids and
+// null (the backlog) are NOT closed, so backlog drops keep working.
+function isSprintClosed(sprintId) {
+  if (!sprintId) return false;
+  var sp = (S.data.sprints || []).find(function (s) { return s.id === sprintId; });
+  return !!sp && sp.status === 'completed';
+}
+
 window._addIssueToSprint = function (sprintId) {
+  if (isSprintClosed(sprintId)) {
+    toast('That sprint is completed — pick an active or planning sprint instead.', 'error');
+    return;
+  }
   resetIssueForm();
   $('issueSpaceId').value = S.currentSpace;
   $('issueModalTitle').textContent = 'Create Issue';
@@ -4874,12 +5225,33 @@ window._completeSprint = async function (id) {
 };
 
 window._deleteSprint = async function (id) {
-  var ok = await confirmDialog('Delete this sprint? Issues will be moved to the backlog.');
+  var sp = (S.data.sprints || []).find(function (s) { return s.id === id; }) || {};
+  if (!canManageSpace(sp.space_id || S.currentSpace)) {
+    toast('Only a space admin can delete sprints. Ask a space admin or an org admin.', 'error');
+    return;
+  }
+  var live = (S.data.issues || []).filter(function (i) { return i.sprint_id === id; }).length;
+  var name = sp.name || 'this sprint';
+  var ok = await typedConfirmDialog({
+    title: 'Delete sprint "' + name + '"?',
+    intro: live
+      ? 'Its ' + live + ' ticket' + (live === 1 ? '' : 's') + ' move to the backlog. Nothing is deleted with the sprint — ' +
+        'and if the sprint is restored they come back with it.'
+      : 'This sprint has no tickets in it.',
+    note: softDeleteNote(),
+    phrase: name,
+    phraseHint: 'To confirm, type the sprint name',
+    confirmLabel: 'Delete sprint'
+  });
   if (!ok) return;
-  await api('/api/sprints/' + id, 'DELETE');
-  await refreshData();
-  renderBacklog();
-  toast('Sprint deleted');
+  try {
+    await api('/api/sprints/' + id, 'DELETE', null, { silent: true });
+    await refreshData();
+    renderBacklog();
+    toast('Sprint "' + name + '" moved to Deleted Items', 'success');
+  } catch (e) {
+    toast(e.message || 'Failed to delete sprint', 'error');
+  }
 };
 
 // Renders a scrollable checkbox list of a space's members into `containerId`,
@@ -5085,7 +5457,7 @@ function renderSprintBoard() {
 
   $('sprintHeader').innerHTML = '';
   var allBoardHtml = '';
-  var statuses = ['To Do', 'In Progress', 'In Review', 'Done', 'Blocked'];
+  var statuses = ISSUE_STATUSES;
 
   for (var si = 0; si < activeSprints.length; si++) {
     var activeSprint = activeSprints[si];
@@ -6716,7 +7088,7 @@ function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {
 
 function renderCumulativeReport(c, data, allSprints, sprintSelectorHtml) {
   sprintSelectorHtml = sprintSelectorHtml || '';
-  var STATUSES = ['To Do', 'In Progress', 'In Review', 'Done', 'Blocked'];
+  var STATUSES = ISSUE_STATUSES;
   var issues = getSpaceIssues(S.currentSpace);
   var counts = STATUSES.map(function(s) {
     var apiRow = Array.isArray(data) ? data.find(function(x){ return x.status === s; }) : null;
@@ -6903,11 +7275,11 @@ function renderControlChart(c, data, allSprints, sprintSelectorHtml) {
 // All available filter fields
 var AW_FILTER_FIELDS = [
   { key: 'type',      label: 'Type',       kind: 'multi',
-    opts: [{v:'task',l:'Task'},{v:'bug',l:'Bug'},{v:'story',l:'Story'},{v:'epic',l:'Epic'},{v:'subtask',l:'Subtask'}] },
+    opts: enumOpts(ISSUE_TYPES) },
   { key: 'status',    label: 'Status',     kind: 'multi',
-    opts: [{v:'To Do',l:'To Do'},{v:'In Progress',l:'In Progress'},{v:'In Review',l:'In Review'},{v:'Done',l:'Done'},{v:'Blocked',l:'Blocked'}] },
+    opts: enumOpts(ISSUE_STATUSES) },
   { key: 'priority',  label: 'Priority',   kind: 'multi',
-    opts: [{v:'critical',l:'Critical'},{v:'high',l:'High'},{v:'medium',l:'Medium'},{v:'low',l:'Low'}] },
+    opts: enumOpts(ISSUE_PRIORITIES) },
   { key: 'assignee',  label: 'Assignee',   kind: 'multi', opts: [] },
   { key: 'sprint',    label: 'Sprint',     kind: 'multi', opts: [] },
   { key: 'created',   label: 'Created',    kind: 'date',
@@ -7442,7 +7814,7 @@ function renderAllWork(opts) {
         switch(col.key) {
           case 'key':             cell = '<td class="issue-key" onclick="' + nav + '" style="white-space:nowrap;width:90px;min-width:90px">' + esc(issueKeyStr(iss)) + '</td>'; break;
           case 'title':           cell = '<td onclick="' + nav + '" style="min-width:200px;max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(iss.title) + '</td>'; break;
-          case 'type':            cell = '<td onclick="' + nav + '">' + typeIcon(iss.type) + ' ' + cap(iss.type) + '</td>'; break;
+          case 'type':            cell = '<td onclick="' + nav + '"><span class="type-cell">' + typeIcon(iss.type) + '<span class="type-cell-label">' + cap(iss.type) + '</span></span></td>'; break;
           case 'status':          cell = '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\'  )" style="cursor:pointer">' + statusBadge(iss.status) + '</td>'; break;
           case 'priority':        cell = '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\'  )" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>'; break;
           case 'assignee':        cell = '<td onclick="event.stopPropagation();awInlineAssignee(event,\'' + iid + '\',\'' + (iss.assignee_id||'') + '\'  )" style="cursor:pointer;white-space:nowrap">' + (assignee ? avatarHtml(assignee,24)+'&nbsp;'+esc(assignee.name)+'<span style="color:#6b778c;font-size:10px;margin-left:4px">&#9662;</span>' : '<span class="text-muted">Unassigned</span>') + '</td>'; break;
@@ -7550,15 +7922,45 @@ function renderAllWork(opts) {
 
 window._bulkDelete = async function () {
   var ids = Array.from(S.allWorkSelected);
-  var ok = await confirmDialog('Delete ' + ids.length + ' issue(s)? This cannot be undone.');
+  if (!ids.length) return;
+  var rows = ids.map(function (id) {
+    return (S.data.issues || []).find(function (i) { return i.id === id; });
+  }).filter(Boolean);
+  // Refuse up front for any space the user can't delete in, rather than firing N
+  // requests and collecting a pile of 403 toasts halfway through.
+  var blocked = rows.filter(function (i) { return !canDeleteIssue(i.space_id); });
+  if (blocked.length) {
+    toast('Only a space admin can delete tickets. ' + blocked.length + ' of your selected tickets are in spaces you do not administer.', 'error');
+    return;
+  }
+  // One ticket → type its key. Several → "delete all", so nobody has to paste
+  // twenty keys but the phrase still can't be typed by accident.
+  // Only take the single-key path when the ticket is actually in the cache —
+  // otherwise there is no key to show and we fall back to the counted phrasing.
+  var single = ids.length === 1 && rows.length === 1;
+  var key = single ? (issueKeyStr(rows[0]) || ids[0]) : null;
+  var ok = await typedConfirmDialog({
+    title: single ? 'Delete ' + key + '?' : 'Delete ' + ids.length + ' tickets?',
+    intro: single
+      ? (rows[0] && rows[0].title) || ''
+      : (rows.slice(0, 6).map(function (i) { return issueKeyStr(i); }).join(', ') +
+         (rows.length > 6 ? ' and ' + (rows.length - 6) + ' more' : '')) || (ids.length + ' selected tickets'),
+    note: softDeleteNote(),
+    phrase: single ? key : 'delete all',
+    phraseHint: single ? 'To confirm, type the ticket number' : 'To confirm, type',
+    confirmLabel: single ? 'Delete ticket' : 'Delete ' + ids.length + ' tickets'
+  });
   if (!ok) return;
+  var done = 0, failed = 0;
   for (var i = 0; i < ids.length; i++) {
-    await api('/api/issues/' + ids[i], 'DELETE');
+    try { await api('/api/issues/' + ids[i], 'DELETE', null, { silent: true }); done++; }
+    catch (e) { failed++; }
   }
   S.allWorkSelected.clear();
   await refreshData();
   renderAllWork();
-  toast('Deleted ' + ids.length + ' issues');
+  if (failed) toast(done + ' moved to Deleted Items, ' + failed + ' failed', 'error');
+  else toast(done + ' ticket' + (done === 1 ? '' : 's') + ' moved to Deleted Items', 'success');
 };
 
 window._bulkDeselect = function() {
@@ -7690,6 +8092,12 @@ function renderSpaceSettings(subTab) {
     case 'customfields':
       renderSettingsCustomFields(space);
       break;
+    // Space admins reach the bin here (their space only). renderDeletedTickets
+    // decides read-only vs actionable from the server's can_restore flag, so a
+    // space admin sees the list without Restore / Delete forever buttons.
+    case 'deleted':
+      renderDeletedTickets($('settingsTabContent'), { spaceId: space.id });
+      break;
     default: renderSettingsGeneral(space);
   }
 }
@@ -7701,7 +8109,7 @@ window._switchSettingsTab = function (tab) {
 
 function renderSettingsGeneral(space) {
   var canManage = canManageSpace(space.id);
-  var canDelete = isOrgAdminUser();
+  var canDelete = canDeleteSpace();
   $('settingsTabContent').innerHTML =
     '<div class="settings-section"><h3>General</h3>' +
     '<p><strong>Name:</strong> ' + esc(space.name) + '</p>' +
@@ -7954,9 +8362,12 @@ function getCreateRequiredErrors(spaceId) {
   var errors = [];
   var rows = getSpaceFieldRows(spaceId);
   var checkedTitle = false;
+  // The type currently chosen on the form decides which required rules apply,
+  // so Story Points can be mandatory for a story but not for a bug.
+  var selectedType = $('issueType') ? $('issueType').value : '';
 
   rows.forEach(function (field) {
-    if (!field.is_required) return;
+    if (!fieldRequiredForType(field, selectedType)) return;
     if (!customFieldShowsIn(field, 'create')) return;
 
     var el, opts = null, label = field.name;
@@ -8019,19 +8430,30 @@ function markCreateRequiredLabels(spaceId) {
   var modal = $('modal-issue');
   if (!modal) return;
   modal.querySelectorAll('.cf-req-star').forEach(function (s) { s.remove(); });
-  getSpaceFieldRows(spaceId).forEach(function (field) {
-    if (!field.is_builtin || !field.is_required) return;
-    if (!customFieldShowsIn(field, 'create')) return;
-    var desc = CREATE_BUILTIN_INPUTS[field.field_key];
-    if (!desc) return;
-    var wrap = desc.wrapId ? $(desc.wrapId) : ($(desc.id) && $(desc.id).closest('.form-group'));
-    var label = wrap && wrap.querySelector('.form-label');
+  var selectedType = $('issueType') ? $('issueType').value : '';
+  function addStar(label) {
     if (!label || label.querySelector('.cf-req-star')) return;
     var star = document.createElement('span');
     star.className = 'cf-req-star';
     star.style.color = 'var(--red)';
     star.textContent = ' *';
     label.appendChild(star);
+  }
+  getSpaceFieldRows(spaceId).forEach(function (field) {
+    if (!fieldRequiredForType(field, selectedType)) return;
+    if (!customFieldShowsIn(field, 'create')) return;
+    if (field.is_builtin) {
+      var desc = CREATE_BUILTIN_INPUTS[field.field_key];
+      if (!desc) return;
+      var wrap = desc.wrapId ? $(desc.wrapId) : ($(desc.id) && $(desc.id).closest('.form-group'));
+      addStar(wrap && wrap.querySelector('.form-label'));
+      return;
+    }
+    // Custom fields: their star is rendered inline at build time, but a type
+    // change clears every .cf-req-star, so it has to be re-added here too.
+    var input = modal.querySelector('[data-cf-id="' + field.id + '"]');
+    var group = input && input.closest('.form-group');
+    addStar(group && group.querySelector('.form-label'));
   });
 }
 
@@ -8105,6 +8527,65 @@ function readShowInFromForm() {
   return show.length ? show : ['drawer'];
 }
 
+// ── "Required, but only for these issue types" ────────────
+// Story Points is the motivating case: mandatory on a story or task, meaningless
+// on a bug. `required_types` narrows is_required to the listed types.
+// An EMPTY or missing list means "every type", so every field that was already
+// required before this feature keeps behaving exactly the same.
+// Derived from ISSUE_TYPES so the checkbox list can never offer a type the
+// database would reject, or miss one that was added.
+var REQUIRED_TYPE_CHOICES = enumOpts(ISSUE_TYPES);
+
+function normalizeTypeList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(function (t) { return String(t).toLowerCase().trim(); }).filter(Boolean);
+}
+
+// The single rule every caller uses. `type` is the issue type being created/edited.
+function fieldRequiredForType(field, type) {
+  if (!field || !field.is_required) return false;
+  var types = normalizeTypeList(field.required_types);
+  if (!types.length) return true;                 // unset = required for all types
+  return types.indexOf(String(type || '').toLowerCase().trim()) >= 0;
+}
+
+function renderRequiredTypeChoices(selected) {
+  var box = $('customFieldRequiredTypes');
+  if (!box) return;
+  var sel = normalizeTypeList(selected);
+  var all = sel.length === 0;                     // unset shows as "all ticked"
+  box.innerHTML = REQUIRED_TYPE_CHOICES.map(function (c) {
+    var on = all || sel.indexOf(c.v) >= 0;
+    return '<label><input type="checkbox" class="cf-req-type" value="' + c.v + '"' +
+      (on ? ' checked' : '') + '> ' + c.l + '</label>';
+  }).join('');
+}
+
+function readRequiredTypesFromForm() {
+  var box = $('customFieldRequiredTypes');
+  if (!box) return [];
+  return Array.prototype.slice.call(box.querySelectorAll('.cf-req-type'))
+    .filter(function (c) { return c.checked; })
+    .map(function (c) { return c.value; });
+}
+
+// The type checkboxes are meaningless unless Required is on.
+function syncRequiredTypesVisibility() {
+  var group = $('customFieldRequiredTypesGroup');
+  var req = $('customFieldRequired');
+  if (group) group.hidden = !(req && req.checked);
+}
+
+function formatRequiredForTypes(field) {
+  if (!field || !field.is_required) return 'No';
+  var types = normalizeTypeList(field.required_types);
+  if (!types.length || types.length === REQUIRED_TYPE_CHOICES.length) return 'Yes — all types';
+  var labels = REQUIRED_TYPE_CHOICES
+    .filter(function (c) { return types.indexOf(c.v) >= 0; })
+    .map(function (c) { return c.l; });
+  return 'Yes — ' + (labels.length ? labels.join(', ') : 'no types');
+}
+
 function renderSettingsCustomFields(space) {
   $('settingsTabContent').innerHTML =
     '<div class="text-muted" style="padding:24px;text-align:center">Loading custom fields…</div>';
@@ -8151,7 +8632,10 @@ function paintSettingsCustomFields(space) {
     var deleteBtn = isLockedBuiltinField(f)
       ? '<span class="text-muted text-sm">Required</span>'
       : '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '">Remove</button>';
-    var applyBtn = f.is_builtin
+    // "Apply to all boards" posts to /api/custom-fields/:id/apply-to-all, which is
+    // org-admin-only. A space admin could see and click it and only get a 403, so
+    // it is hidden for anyone who is not an org admin.
+    var applyBtn = (f.is_builtin || !isOrgAdminUser())
       ? ''
       : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
     // Everything shown in the row is searchable, plus field_key and the raw
@@ -8162,7 +8646,7 @@ function paintSettingsCustomFields(space) {
       f.field_key,
       f.is_builtin ? 'built-in builtin' : 'custom',
       f.field_type || f.type,
-      f.is_required ? 'required yes' : 'optional no',
+      formatRequiredForTypes(f),
       formatFieldShowIn(f),
       optionsDisplay,
       normalizeCFOptions(f.options).join(' ')
@@ -8172,7 +8656,7 @@ function paintSettingsCustomFields(space) {
       '<td>' + esc(f.name) + '</td>' +
       '<td>' + sourceBadge + '</td>' +
       '<td><span class="badge badge-muted">' + esc(f.field_type || f.type) + '</span></td>' +
-      '<td>' + (f.is_required ? '\u2705 Yes' : 'No') + '</td>' +
+      '<td class="text-sm">' + esc(formatRequiredForTypes(f)) + '</td>' +
       '<td class="text-muted text-sm">' + esc(formatFieldShowIn(f)) + '</td>' +
       '<td class="text-muted text-sm">' + esc(optionsDisplay) + '</td>' +
       '<td>' +
@@ -8266,17 +8750,34 @@ window._editSpaceSettings = function () {
 window._deleteSpace = async function (spaceId) {
   var space = getSpace(spaceId);
   var spaceName = space ? space.name : 'this space';
-  var ok = await confirmDialog('Delete "' + spaceName + '"? All issues, sprints, and data will be permanently lost.');
+  if (!canDeleteSpace()) {
+    toast('Only an org admin can delete a space.', 'error');
+    return;
+  }
+  var issueCount = (S.data.issues || []).filter(function (i) { return i.space_id === spaceId; }).length;
+  // DELETE /api/spaces/:id archives the space — nothing is destroyed. The old copy
+  // claimed "all issues, sprints, and data will be permanently lost", which was
+  // simply untrue and made a reversible action look terrifying.
+  var ok = await typedConfirmDialog({
+    title: 'Delete space "' + spaceName + '"?',
+    intro: 'The space and its ' + issueCount + ' ticket' + (issueCount === 1 ? '' : 's') +
+      ' are removed from the sidebar and from everyone\'s boards, searches and reports.',
+    note: 'Nothing is destroyed: the space is archived and appears in Deleted Items, where an org admin can restore it. ' +
+      'Archived spaces are never auto-deleted.',
+    phrase: spaceName,
+    phraseHint: 'To confirm, type the space name',
+    confirmLabel: 'Delete space'
+  });
   if (!ok) return;
   try {
-    await api('/api/spaces/' + spaceId, 'DELETE');
+    await api('/api/spaces/' + spaceId, 'DELETE', null, { silent: true });
     await refreshData();
     if (S.currentSpace === spaceId) S.currentSpace = null;
     navigateTo('home');
     renderSidebar();
-    popupAlert('Space Deleted', '"' + spaceName + '" has been deleted successfully.', 'success');
+    popupAlert('Space deleted', '"' + spaceName + '" is in Deleted Items. An org admin can restore it from Admin Settings.', 'success');
   } catch (e) {
-    popupAlert('Delete Failed', 'Could not delete the space. Please try again.', 'error');
+    popupAlert('Delete failed', e.message || 'Could not delete the space. Please try again.', 'error');
   }
 };
 
@@ -8424,13 +8925,24 @@ function openCustomFieldModal(field) {
   var isCombo = field && isCombinationField(field);
   var isBuiltin = !!(field && field.is_builtin);
   var isProductTypeBuiltin = field && isBuiltinProductTypeField(field);
-  var canEditOptions = isCombo || isProductTypeBuiltin || (isBuiltin && field.field_type === 'select') || (!isBuiltin && field && (field.field_type === 'select' || field.field_type === 'multi_select'));
+  // Built-in selects whose choices are NOT ours to edit:
+  //   type, priority → fixed by CHECK constraints on the issues table, so a value
+  //                    added here can never be saved (the insert would fail);
+  //   sprint         → the choices come from the sprints table, not from options.
+  // The Options box was offered for all three even though nothing reads it — a
+  // dead control that invited an admin to configure something that cannot work.
+  var FIXED_OPTION_BUILTINS = ['type', 'priority', 'status', 'sprint'];
+  var optionsAreFixed = isBuiltin && FIXED_OPTION_BUILTINS.indexOf(field.field_key) >= 0;
+  var canEditOptions = isCombo || isProductTypeBuiltin ||
+    (isBuiltin && field.field_type === 'select' && !optionsAreFixed) ||
+    (!isBuiltin && field && (field.field_type === 'select' || field.field_type === 'multi_select'));
   if (field) {
     $('customFieldModalTitle').textContent = isCombo ? 'Edit Combination (by Product Type)' : (isProductTypeBuiltin ? 'Edit Product Type options' : (isBuiltin ? 'Edit Built-in Field' : 'Edit Custom Field'));
     $('customFieldId').value = field.id;
     $('customFieldName').value = field.name || '';
     $('customFieldType').value = field.field_type || field.type || 'text';
     $('customFieldRequired').checked = !!(field.is_required || field.required);
+    renderRequiredTypeChoices(field.required_types);
     writeShowInToForm(field);
     if (isCombo) {
       var parsed = parseCombinationFieldOptions(field);
@@ -8450,6 +8962,7 @@ function openCustomFieldModal(field) {
     $('customFieldName').value = '';
     $('customFieldType').value = 'text';
     $('customFieldRequired').checked = false;
+    renderRequiredTypeChoices([]);
     $('customFieldOptions').value = '';
     $('cfComboMessage').value = '';
     $('cfComboEmail').value = '';
@@ -8459,8 +8972,10 @@ function openCustomFieldModal(field) {
     if ($('customFieldName')) $('customFieldName').readOnly = false;
     if ($('customFieldType')) $('customFieldType').disabled = false;
   }
+  // "Add to all boards" posts to /api/custom-fields/create-for-all, which is
+  // org-admin-only — hidden for space admins so it can't be ticked and then 403.
   var applyAllGroup = $('customFieldApplyAllGroup');
-  if (applyAllGroup) applyAllGroup.hidden = !!field;
+  if (applyAllGroup) applyAllGroup.hidden = !!field || !isOrgAdminUser();
   if ($('customFieldApplyAll')) $('customFieldApplyAll').checked = false;
   if ($('customFieldName')) {
     $('customFieldName').readOnly = !!isCombo || !!isBuiltin;
@@ -8469,6 +8984,12 @@ function openCustomFieldModal(field) {
     $('customFieldType').disabled = !!isBuiltin;
   }
   if ($('customFieldShowInGroup')) $('customFieldShowInGroup').hidden = false;
+  syncRequiredTypesVisibility();
+  var reqBox = $('customFieldRequired');
+  if (reqBox && !reqBox._reqTypesBound) {
+    reqBox._reqTypesBound = true;
+    reqBox.addEventListener('change', syncRequiredTypesVisibility);
+  }
   toggleCustomFieldOptions(isCombo ? field : (canEditOptions ? field : null));
   openModal('modal-custom-field');
 }
@@ -8919,6 +9440,9 @@ $('customFieldForm').addEventListener('submit', async function (e) {
   var optionsRaw = $('customFieldOptions').value.trim();
   var isComboField = (name || '').toLowerCase().trim() === 'combination' || ($('customFieldCombinationGroups') && !$('customFieldCombinationGroups').hidden);
   var showIn = readShowInFromForm();
+  // Only meaningful when Required is on; sent as [] otherwise so turning Required
+  // off also clears any stale type list.
+  var requiredTypes = required ? readRequiredTypesFromForm() : [];
   var options;
   if (isComboField) {
     options = buildCombinationOptionsFromEditor();
@@ -8930,15 +9454,22 @@ $('customFieldForm').addEventListener('submit', async function (e) {
   }
 
   if (!name) { toast('Field name is required', 'error'); return; }
+  // "Required, for no types" is a contradiction — say so rather than silently
+  // storing a rule that can never fire.
+  if (required && !requiredTypes.length) {
+    toast('Pick at least one issue type this field is required for, or untick Required.', 'error');
+    syncRequiredTypesVisibility();
+    return;
+  }
 
   try {
     if (id) {
       var editingField = (S.data.custom_fields || []).find(function (f) { return String(f.id) === String(id); });
       var payload;
       if (editingField && editingField.is_builtin) {
-        payload = { is_required: required, options: options, show_in: showIn };
+        payload = { is_required: required, options: options, show_in: showIn, required_types: requiredTypes };
       } else {
-        payload = { name: name, field_type: type, is_required: required, options: options, show_in: showIn };
+        payload = { name: name, field_type: type, is_required: required, options: options, show_in: showIn, required_types: requiredTypes };
       }
       await api('/api/custom-fields/' + id, 'PUT', payload);
       await refreshData();
@@ -8949,7 +9480,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
       }
       toast('Custom field updated');
     } else if (applyAll) {
-      var result = await api('/api/custom-fields/create-for-all', 'POST', { name: name, field_type: type, is_required: required, options: options });
+      var result = await api('/api/custom-fields/create-for-all', 'POST', { name: name, field_type: type, is_required: required, options: options, show_in: showIn, required_types: requiredTypes });
       await refreshData();
       await refreshAllCustomFields();
       closeModal('modal-custom-field');
@@ -8960,7 +9491,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
         ? 'Added "' + name + '" to: ' + result.addedTo.join(', ')
         : 'Every board already has a field named "' + name + '"', result.added > 0 ? 'success' : 'warning');
     } else {
-      var payload2 = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options, show_in: showIn };
+      var payload2 = { space_id: S.currentSpace, name: name, field_type: type, is_required: required, options: options, show_in: showIn, required_types: requiredTypes };
       await api('/api/custom-fields', 'POST', payload2);
       await refreshData();
       closeModal('modal-custom-field');
@@ -9002,10 +9533,19 @@ function getDrawerTitleValue() {
   return el ? finalizeIssueTitle(el.value) : '';
 }
 
-function bindDrawerTitleField(autoSave) {
+// #drawerTitle is static markup that outlives every drawer open, so its listeners
+// are bound once (rebinding stacked duplicates). It therefore must NOT capture an
+// autoSave: the closure it captured on the first open kept saving to that first
+// ticket, so editing any later ticket's title silently overwrote the first one's
+// — and patched the wrong row in the local cache too. Resolve the save target at
+// typing time instead, via _activeDrawerAutoSave.
+function bindDrawerTitleField() {
   var el = $('drawerTitle');
   if (!el || el._titleBound) return;
   el._titleBound = true;
+  var autoSave = function (field, value) {
+    if (_activeDrawerAutoSave) _activeDrawerAutoSave(field, value);
+  };
 
   el.addEventListener('input', function () {
     var noBreaks = stripTitleNewlines(el.value);
@@ -9308,6 +9848,12 @@ function startDrawerLiveSync(issueId) {
 }
 window.openDrawer = openDrawer;
 
+// The autoSave closure belonging to the drawer that is open RIGHT NOW.
+// Handlers bound once to persistent drawer markup (the title textarea) must call
+// through this rather than capturing an autoSave, or they keep saving to the
+// first ticket ever opened. See bindDrawerTitleField.
+var _activeDrawerAutoSave = null;
+
 function bindDrawerEdits(issue) {
   var issueId = issue.id;
   var pending = {};
@@ -9336,6 +9882,8 @@ function bindDrawerEdits(issue) {
       } catch(e) { toast('Save failed', 'error'); }
     }, 800);
   }
+  // Point the once-bound handlers at THIS drawer's save.
+  _activeDrawerAutoSave = autoSave;
 
   async function saveFieldNow(field, value) {
     try {
@@ -9380,7 +9928,7 @@ function bindDrawerEdits(issue) {
       e.stopPropagation();
       var old = document.getElementById('_typeMenu');
       if (old) { old.remove(); return; }
-      var types = ['epic','story','task','bug','subtask'];
+      var types = ISSUE_TYPES;
       var rect = typeEl.getBoundingClientRect();
       var menu = document.createElement('div');
       menu.id = '_typeMenu';
@@ -9409,21 +9957,25 @@ function bindDrawerEdits(issue) {
   }
   $('drawerSprint').onchange = function () {
     var sprintId = $('drawerSprint').value;
-    // Check if existing due date exceeds the newly selected sprint's end date
-    var dueVal = $('drawerDueDate').value;
-    if (sprintId && dueVal) {
-      var sprint = (S.data.sprints || []).find(function(sp){ return sp.id === sprintId; });
-      if (sprint && sprint.end_date) {
-        var sprintEnd = new Date(sprint.end_date.slice(0,10) + 'T00:00:00');
-        var duePicked = new Date(dueVal + 'T00:00:00');
-        if (duePicked > sprintEnd) {
-          toast('Due date (' + dueVal + ') exceeds sprint end date (' + sprint.end_date.slice(0,10) + '). Due date cleared.', 'error');
-          $('drawerDueDate').value = '';
-          autoSave('due_date', null);
-        }
-      }
-    }
     autoSave('sprint_id', sprintId || null);
+    // Moving a ticket into a sprint adopts that sprint's dates — whether it came
+    // from the backlog or from another sprint. This replaces the old behaviour of
+    // only clearing a due date that overshot the sprint end, which left the start
+    // date pointing at the previous sprint.
+    // Clearing the sprint (→ backlog) leaves the dates alone: there are no sprint
+    // dates to copy, and wiping them would lose information.
+    var plan = sprintDateChanges(sprintId, $('drawerStartDate').value, $('drawerDueDate').value);
+    if (!plan.sprint) return;
+    plan.changes.forEach(function (ch) {
+      $(ch.field === 'start_date' ? 'drawerStartDate' : 'drawerDueDate').value = ch.value;
+      autoSave(ch.field, ch.value);
+    });
+    if (plan.changes.length) {
+      toast('Dates set from ' + (plan.sprint.name || 'sprint') + ': ' +
+        plan.changes.map(function (c) { return c.label; }).join(', '));
+    } else if (!plan.start && !plan.end) {
+      toast((plan.sprint.name || 'That sprint') + ' has no dates set, so the ticket dates were left as they are.', 'warning');
+    }
   };
   $('drawerPoints').oninput     = function () {
     autoSave('story_points', $('drawerPoints').value ? parseInt($('drawerPoints').value, 10) : null);
@@ -9444,7 +9996,12 @@ function bindDrawerEdits(issue) {
   if ($('drawerProductType')) {
     $('drawerProductType').onchange = function () {
       var dSpace = (_drawerIssueData && _drawerIssueData.space_id) || S.currentSpace;
-      if (getProductTeamSpaceId() && String(dSpace) === String(getProductTeamSpaceId())) return;
+      // Skip only when the combined picker owns this field for this space — it
+      // saves product_type together with the combination. Was gated on
+      // "is Product_Team", which meant a Product_Team space WITHOUT a combination
+      // field could never save a product type, and any other space with one
+      // would have saved it twice.
+      if (productTypeMode(dSpace, 'drawer') === 'combo') return;
       autoSave('product_type', $('drawerProductType').value || null);
     };
   }
@@ -9472,7 +10029,7 @@ function bindDrawerEdits(issue) {
     autoSave('due_date', val || null);
   };
 
-  bindDrawerTitleField(autoSave);
+  bindDrawerTitleField();
 
   var _drawerDescOriginal = $('drawerDesc') ? $('drawerDesc').innerHTML : (issue.description || '');
   window._drawerDescOriginalHtml = _drawerDescOriginal;
@@ -9482,15 +10039,22 @@ function bindDrawerEdits(issue) {
     updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
   };
 
-  // Open links inside contenteditable description
-  $('drawerDesc').addEventListener('mousedown', function(e) {
-    var a = e.target.closest('a[href]');
-    if (a) { e.preventDefault(); e.stopPropagation(); window.open(a.href, '_blank', 'noopener'); }
-  });
-  $('drawerDesc').addEventListener('click', function(e) {
-    var a = e.target.closest('a[href]');
-    if (a) { e.preventDefault(); e.stopPropagation(); window.open(a.href, '_blank', 'noopener'); }
-  });
+  // Open links inside contenteditable description.
+  // Bound ONCE per element, like the paste handler below: #drawerDesc is static
+  // markup and bindDrawerEdits() runs on every drawer open, so an unguarded
+  // addEventListener stacked another pair each time — after opening N issues, a
+  // click on a description link fired window.open N times and spawned N tabs.
+  (function () {
+    var descEl = $('drawerDesc');
+    if (!descEl || descEl._linkOpenBound) return;
+    descEl._linkOpenBound = true;
+    var openLink = function (e) {
+      var a = e.target.closest('a[href]');
+      if (a) { e.preventDefault(); e.stopPropagation(); window.open(a.href, '_blank', 'noopener'); }
+    };
+    descEl.addEventListener('mousedown', openLink);
+    descEl.addEventListener('click', openLink);
+  })();
   var drawerDescSaveBtn = $('drawerDescSave');
   var drawerDescCancelBtn = $('drawerDescCancel');
   if(drawerDescSaveBtn) drawerDescSaveBtn.onclick = async function(e) {
@@ -9745,9 +10309,15 @@ function bindDrawerEdits(issue) {
       }
     });
 
-    document.addEventListener('click', function(e) {
-      if (!dropdown.contains(e.target) && e.target !== textarea) closeMention();
-    });
+    // Guarded for the same reason as the handlers above: this is a document-level
+    // listener registered inside bindDrawerEdits(), so without the flag every
+    // drawer open leaked another permanent listener onto document.
+    if (!textarea._mentionOutsideBound) {
+      textarea._mentionOutsideBound = true;
+      document.addEventListener('click', function(e) {
+        if (!dropdown.contains(e.target) && e.target !== textarea) closeMention();
+      });
+    }
   })();
 
   // Paste image support for comment box — bind ONCE per drawer element, not per click.
@@ -9890,15 +10460,13 @@ function bindDrawerEdits(issue) {
     var existing = document.querySelector('.drawer-actions-menu');
     if (existing) { existing.remove(); return; }
 
-    var isOwner = (S.currentUserObj || {}).role === 'owner' || (S.currentUserObj || {}).role === 'admin';
+    // Space role, not org role — a space admin can delete tickets in their own space.
+    var mayDelete = canDeleteIssue(issue.space_id);
 
     var menu = document.createElement('div');
     menu.className = 'drawer-actions-menu';
-    // Member quick actions always shown; Move/Delete for owner/admin only
-    var memberActions =
-      '';
-    menu.innerHTML = isOwner
-      ? '<div class="drawer-actions-item danger" id="drawerDeleteItem">🗑️ Delete issue</div>'
+    menu.innerHTML = mayDelete
+      ? '<div class="drawer-actions-item danger" id="drawerDeleteItem">🗑️ Delete ticket</div>'
       : '<div class="drawer-actions-item" style="color:var(--text3);padding:8px 12px;font-size:13px">No actions available</div>';
 
     var rect = $('drawerActionsBtn').getBoundingClientRect();
@@ -9965,50 +10533,35 @@ function bindDrawerEdits(issue) {
       // Delete issue
       var drawerDeleteItem = document.getElementById('drawerDeleteItem'); if (drawerDeleteItem) drawerDeleteItem.onclick = async function () {
         menu.remove();
-        // Only owner and admin can delete
-        var role = (S.currentUserObj || {}).role;
-        if (role !== 'owner' && role !== 'admin') {
-          toast('Only owners and admins can delete issues', 'error');
+        // Gate on the SPACE role, matching the backend's 'issue.delete' rule. The
+        // old check was org-role-only, so a space admin — who the API happily lets
+        // delete — was told "only owners and admins can delete issues".
+        if (!canDeleteIssue(issue.space_id)) {
+          toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
           return;
         }
-        // Show confirmation modal
-        var confirmModal = document.createElement('div');
-        confirmModal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center';
-        confirmModal.innerHTML = '<div style="background:#fff;border-radius:8px;padding:28px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2)">' +
-          '<h3 style="margin:0 0 8px;color:#172b4d;font-size:18px">Delete Issue</h3>' +
-          '<p style="color:#42526e;margin:0 0 16px">Are you sure you want to delete this issue? This action cannot be undone.</p>' +
-          '<p style="color:#42526e;margin:0 0 16px">Type <strong>delete</strong> to confirm:</p>' +
-          '<input id="deleteConfirmInput" type="text" placeholder="Type delete here..." style="width:100%;padding:8px 12px;border:1px solid #dfe1e6;border-radius:4px;font-size:14px;box-sizing:border-box;margin-bottom:16px">' +
-          '<div style="display:flex;gap:8px;justify-content:flex-end">' +
-          '<button id="deleteCancelBtn" style="padding:8px 16px;border:1px solid #dfe1e6;border-radius:4px;background:#fff;cursor:pointer;font-size:14px">Cancel</button>' +
-          '<button id="deleteConfirmBtn" style="padding:8px 16px;border:none;border-radius:4px;background:#de350b;color:#fff;cursor:pointer;font-size:14px;font-weight:600">Delete</button>' +
-          '</div></div>';
-        document.body.appendChild(confirmModal);
-        document.getElementById('deleteConfirmInput').focus();
-        document.getElementById('deleteCancelBtn').onclick = function() { confirmModal.remove(); };
-        confirmModal.onclick = function(e) { if (e.target === confirmModal) confirmModal.remove(); };
-        document.getElementById('deleteConfirmBtn').onclick = async function() {
-          var val = document.getElementById('deleteConfirmInput').value.trim().toLowerCase();
-          if (val !== 'delete') {
-            document.getElementById('deleteConfirmInput').style.border = '1px solid #de350b';
-            document.getElementById('deleteConfirmInput').placeholder = 'Please type "delete" to confirm';
-            return;
-          }
-          confirmModal.remove();
-          try {
-            await api('/api/issues/' + issueId, 'DELETE');
-            toast('Issue deleted successfully');
-            // Close drawer and go back
-            var drawer = document.getElementById('issueDrawer');
-            if (drawer) drawer.setAttribute('hidden', '');
-            S.drawerIssueId = null;
-            window.history.replaceState({}, '', '/');
-            await refreshData();
-            renderCurrentView();
-          } catch (err) {
-            toast('Failed to delete issue', 'error');
-          }
-        };
+        var key = issueKeyStr(issue) || issueId;
+        var ok = await typedConfirmDialog({
+          title: 'Delete ' + key + '?',
+          intro: issue.title || '',
+          note: softDeleteNote(),
+          phrase: key,
+          phraseHint: 'To confirm, type the ticket number',
+          confirmLabel: 'Delete ticket'
+        });
+        if (!ok) return;
+        try {
+          await api('/api/issues/' + issueId, 'DELETE');
+          toast(key + ' moved to Deleted Items', 'success');
+          var drawer = document.getElementById('issueDrawer');
+          if (drawer) drawer.setAttribute('hidden', '');
+          S.drawerIssueId = null;
+          window.history.replaceState({}, '', '/');
+          await refreshData();
+          renderCurrentView();
+        } catch (err) {
+          toast(err.message || 'Failed to delete ticket', 'error');
+        }
       };
     }
 
@@ -10131,11 +10684,26 @@ window._toggleSubtaskDone = async function(subtaskId, checked) {
 };
 
 window._deleteSubtask = async function(subtaskId) {
-  var ok = await confirmDialog('Delete this subtask?');
+  var sub = (S.data.issues || []).find(function (i) { return i.id === subtaskId; }) || {};
+  var parent = (S.data.issues || []).find(function (i) { return i.id === S.drawerIssueId; }) || {};
+  var spaceId = sub.space_id || parent.space_id || S.currentSpace;
+  if (!canDeleteIssue(spaceId)) {
+    toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
+    return;
+  }
+  var key = issueKeyStr(sub) || 'this subtask';
+  var ok = await typedConfirmDialog({
+    title: 'Delete subtask ' + key + '?',
+    intro: sub.title || '',
+    note: softDeleteNote(),
+    phrase: key,
+    phraseHint: 'To confirm, type the subtask number',
+    confirmLabel: 'Delete subtask'
+  });
   if (!ok) return;
   try {
     await api('/api/issues/' + subtaskId, 'DELETE');
-    toast('Subtask deleted');
+    toast(key + ' moved to Deleted Items', 'success');
     var issue = await api('/api/issues/' + S.drawerIssueId);
     renderDrawerSubtasks(issue.subtasks || []);
     await refreshData();
@@ -10850,10 +11418,31 @@ function getProductTeamSpaceId() {
   return sp ? sp.id : null;
 }
 
-function shouldShowProductTeamFields(spaceId) {
-  var ptId = getProductTeamSpaceId();
-  if (!ptId || !spaceId) return false;
-  return String(spaceId) === String(ptId);
+// ── Product Type / Combination visibility ─────────────────
+// Driven by what the space actually has in Settings → Custom Fields, not by
+// whether the space happens to be Product_Team:
+//   has Combination (+ Product Type)  → the combined Product Type + Combinations
+//                                       picker, exactly what Product_Team shows
+//   has Product Type only             → the plain Product Type dropdown
+//   has neither                       → nothing
+// Previously both surfaces gated on `spaceId === Product_Team`, so every other
+// space got nothing on create even with Product Type enabled in its settings —
+// and the standalone dropdown was hard-hidden for ALL spaces, Product_Team
+// included, which is why ticking the field in Custom Fields did nothing.
+function spaceHasCombinationField(spaceId, place) {
+  var meta = findCombinationFieldMeta(spaceId);
+  if (!meta) return false;
+  return customFieldShowsIn(meta, place);
+}
+function spaceHasProductTypeField(spaceId, place) {
+  return isSpaceBuiltinFieldEnabled(spaceId, 'product_type', place);
+}
+// 'combo' | 'plain' | 'none' — the single decision both surfaces follow.
+function productTypeMode(spaceId, place) {
+  if (!spaceId) return 'none';
+  var hasPt = spaceHasProductTypeField(spaceId, place);
+  if (spaceHasCombinationField(spaceId, place) && hasPt) return 'combo';
+  return hasPt ? 'plain' : 'none';
 }
 
 function getIssueFormTeam() {
@@ -10870,7 +11459,9 @@ function findCombinationFieldMeta(spaceId) {
 async function ensureCombinationFieldMeta(spaceId) {
   var meta = findCombinationFieldMeta(spaceId);
   if (meta && meta.id) return meta;
-  if (spaceId !== getProductTeamSpaceId()) return null;
+  // Used to bail out for anything that wasn't Product_Team, so a space with its
+  // own Combination field could never load its options. Any space may have one now.
+  if (!spaceId) return null;
   try {
     var data = await api('/api/data?space_id=' + encodeURIComponent(spaceId));
     if (data && data.custom_fields && data.custom_fields.length) {
@@ -10895,17 +11486,14 @@ function renderIssueProductTypeSets(spaceId) {
   var group = $('issueCombinationGroup');
   var container = $('issueCombinationField');
   var productTypeGroup = $('issueProductTypeGroup');
-  var groupLabel = group && group.querySelector('.form-label');
+
   if (!group || !container) return Promise.resolve();
 
   var team = getIssueFormTeam();
-  var showCombo = shouldShowProductTeamFields(spaceId)
-    && isSpaceBuiltinFieldEnabled(spaceId, 'product_type', 'create')
-    && isSpaceBuiltinFieldEnabled(spaceId, 'combination', 'create');
+  var mode = productTypeMode(spaceId, 'create');
 
-  if (productTypeGroup) productTypeGroup.hidden = true;
-
-  if (!showCombo) {
+  if (mode === 'none') {
+    if (productTypeGroup) productTypeGroup.hidden = true;
     group.hidden = true;
     container.innerHTML = '';
     _issuePtComboSel = null;
@@ -10913,15 +11501,32 @@ function renderIssueProductTypeSets(spaceId) {
     return Promise.resolve();
   }
 
-  group.hidden = false;
-  if (groupLabel) groupLabel.textContent = 'Product Type & Combinations';
+  if (mode === 'plain') {
+    // Product Type on its own — the plain dropdown, no Combinations picker.
+    group.hidden = true;
+    container.innerHTML = '';
+    _issuePtComboSel = null;
+    if (productTypeGroup) productTypeGroup.hidden = false;
+    return Promise.resolve();
+  }
 
-  var ptId = getProductTeamSpaceId();
+  // mode === 'combo'
+  if (productTypeGroup) productTypeGroup.hidden = true;
+  group.hidden = false;
+  // No outer label — the picker carries its own "Product Type" / "Combinations"
+  // section headings, so a wrapper label just repeated them.
+
   if (!_issuePtComboSel) _issuePtComboSel = emptyPtComboSelection();
 
-  return ensureCombinationFieldMeta(ptId).then(function (meta) {
+  // The space's OWN combination field, so a non-Product_Team space uses its own
+  // configured options rather than borrowing Product_Team's.
+  return ensureCombinationFieldMeta(spaceId).then(function (meta) {
     if (!meta || !meta.id) {
-      container.innerHTML = '<p class="combo-type-hint">Combination field is not set up for Product_Team — add it in Space Settings → Custom Fields.</p>';
+      // Combination is configured but its options failed to load — fall back to
+      // the plain dropdown rather than showing an empty box.
+      group.hidden = true;
+      container.innerHTML = '';
+      if (productTypeGroup) productTypeGroup.hidden = !spaceHasProductTypeField(spaceId, 'create');
       return;
     }
     container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta, spaceId);
@@ -10937,33 +11542,46 @@ async function renderDrawerProductTypeSets(issueId, spaceId, cfValues, productTy
   var row = $('drawerCombinationRow');
   var container = $('drawerCombinationField');
   var ptRow = $('drawerProductTypeRow');
-  var comboLabel = row && row.querySelector('.dfl');
+
   if (!row || !container) return;
 
   var team = $('drawerTeam') ? $('drawerTeam').value : '';
-  if (!shouldShowProductTeamFields(spaceId)
-    || !isSpaceBuiltinFieldEnabled(spaceId, 'product_type', 'drawer')
-    || !isSpaceBuiltinFieldEnabled(spaceId, 'combination', 'drawer')) {
+  var mode = productTypeMode(spaceId, 'drawer');
+
+  if (mode === 'none') {
     row.hidden = true;
     container.innerHTML = '';
     if (ptRow) ptRow.hidden = true;
     return;
   }
 
-  var ptId = getProductTeamSpaceId();
-  if (!ptId) {
+  if (mode === 'plain') {
+    // Plain Product Type row; its own onchange already saves product_type.
     row.hidden = true;
-    if (ptRow) ptRow.hidden = true;
+    container.innerHTML = '';
+    if (ptRow) {
+      ptRow.hidden = false;
+      if ($('drawerProductType')) $('drawerProductType').value = productType || '';
+    }
     return;
   }
 
+  // mode === 'combo'
   if (ptRow) ptRow.hidden = true;
   row.hidden = false;
-  if (comboLabel) comboLabel.textContent = 'Product Type & Combinations';
+  // The row is a single full-width cell now; the picker supplies its own
+  // section headings, so there is no .dfl label to fill in.
 
-  var meta = await ensureCombinationFieldMeta(ptId);
+  var meta = await ensureCombinationFieldMeta(spaceId);
   if (!meta || !meta.id) {
-    container.innerHTML = '<span class="text-muted" style="font-size:12px">Combination field unavailable</span>';
+    // Same fallback as the create form: show the plain row rather than an
+    // "unavailable" dead end, so the user can still set a product type.
+    row.hidden = true;
+    container.innerHTML = '';
+    if (ptRow && spaceHasProductTypeField(spaceId, 'drawer')) {
+      ptRow.hidden = false;
+      if ($('drawerProductType')) $('drawerProductType').value = productType || '';
+    }
     return;
   }
 
@@ -11279,7 +11897,7 @@ function buildProductTypeCheckboxListHtml(selectedTypes, ptOptions) {
     var val = t.v != null ? t.v : t;
     var label = t.l != null ? t.l : getProductTypeLabel(val);
     var checked = selectedTypes.indexOf(val) >= 0;
-    return '<label class="pt-combo-check">' +
+    return '<label class="pt-combo-check" title="' + escAttr(label) + '">' +
       '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + esc(val) + '"' + (checked ? ' checked' : '') + '>' +
       '<span class="pt-combo-check-label">' + esc(label) + '</span></label>';
   }).join('');
@@ -11310,7 +11928,8 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
       '<div class="pt-combo-group-title">' + esc(productTypeUsesAllCombinations(type) ? getProductTypeLabel(type) + ' — all combinations' : getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
-      return '<label class="pt-combo-check">' +
+      // title carries the full value — labels are single-line with an ellipsis.
+      return '<label class="pt-combo-check" title="' + escAttr(c) + '">' +
         '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + esc(c) + '"' + (checked ? ' checked' : '') + '>' +
         '<span class="pt-combo-check-label">' + esc(c) + '</span></label>';
     }).join('');
@@ -11436,15 +12055,17 @@ function readPtComboSelectionFromContainer(container) {
 }
 
 function getProductTypeSetsFieldValue() {
-  var ptId = getProductTeamSpaceId();
   var spaceId = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || '';
-  if (ptId && String(spaceId) === String(ptId)) {
+  // Read the combined picker whenever THIS space is in combo mode — was gated on
+  // spaceId === Product_Team, so another space's picker would have been ignored
+  // on submit and its combination silently dropped.
+  if (productTypeMode(spaceId, 'create') === 'combo') {
     var container = $('issueCombinationField');
     var sel = _issuePtComboSel || readPtComboSelectionFromContainer(container);
     if (!sel.productTypes.length && !sel.combinations.length && container) {
       sel = readPtComboSelectionFromContainer(container);
     }
-    var meta = findCombinationFieldMeta(ptId);
+    var meta = findCombinationFieldMeta(spaceId);
     var serialized = serializePtComboSelection(sel);
     return {
       product_type: serialized.product_type,
@@ -11831,7 +12452,9 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
   var c = $('drawerCustomFields');
   if (!c) return;
 
-  if (spaceId === getProductTeamSpaceId()) {
+  // Any space may own a Combination field now, so preload its options whenever
+  // one is configured rather than only for Product_Team.
+  if (spaceId && findCombinationFieldMeta(spaceId)) {
     await ensureCombinationFieldMeta(spaceId);
   }
 
@@ -11987,6 +12610,21 @@ function isSpaceAdminAnywhere() {
 
 function canViewReports() {
   return isOrgAdminUser() || isSpaceAdminAnywhere();
+}
+
+// Mirrors the backend's ACTION_MIN_ROLE — 'issue.delete' and 'issue.bulk' both
+// need site_admin in the space. Org admins pass everywhere. Keep these in step
+// with lib/permissions.js: a UI check that is stricter than the server hides a
+// button the user is actually allowed to press.
+function canDeleteIssue(spaceId) {
+  return isSpaceAdmin(spaceId);
+}
+// Restore and permanent delete are org-admin only, by design: a space admin can
+// put things in the bin but not empty it or pull things back out. The bin itself
+// reads the server's `can_restore` flag rather than re-deriving that here, so the
+// button set can never disagree with what the API will allow.
+function canDeleteSpace() {
+  return isOrgAdminUser();
 }
 
 function updateRoleBasedUI() {
@@ -12170,9 +12808,14 @@ async function handleIssueSubmit(e) {
   e.preventDefault();
   // Space first — required-field validation is per space, so it needs to be
   // resolved before anything else can be checked.
-  var spaceVal = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || (S.data && S.data.spaces && S.data.spaces[0] && S.data.spaces[0].id);
+  // No spaces[0] fallback: it made the guard below unreachable, so submitting
+  // with nothing selected quietly created the ticket in whichever space happened
+  // to be first in the list.
+  var spaceVal = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || '';
   if (spaceVal == null || spaceVal == '') {
     toast('Please select a Space — it is mandatory', 'error');
+    var spaceSel = $('issueSpaceSelect');
+    if (spaceSel) { spaceSel.focus(); }
     return;
   }
   // Enforces whatever is flagged Required in Settings → Custom Fields for this
@@ -12207,8 +12850,9 @@ async function handleIssueSubmit(e) {
   }
   var id = $('issueId').value;
   var parentId = $('issueParentId').value || null;
-  // Ensure space_id is set
-  var resolvedSpace = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace || (S.data && S.data.spaces && S.data.spaces[0] && S.data.spaces[0].id);
+  // Already validated above as non-empty — reuse it rather than re-resolving with
+  // a different fallback chain, which is how the two could disagree.
+  var resolvedSpace = spaceVal;
   var ptPayload = getProductTypeSetsFieldValue();
   var payload = {
     space_id: resolvedSpace,
@@ -12733,7 +13377,10 @@ document.addEventListener('DOMContentLoaded', function () {
       });
       cfContainer.innerHTML = unique.map(function (f) {
         var opts = getCustomFieldOptions(f);
-        var req = f.is_required ? ' <span style="color:var(--red)">*</span>' : '';
+        // Tagged .cf-req-star so markCreateRequiredLabels can clear and re-add it
+        // when the issue type changes, without re-rendering (which would wipe input).
+        var req = fieldRequiredForType(f, $('issueType') ? $('issueType').value : '')
+          ? ' <span class="cf-req-star" style="color:var(--red)">*</span>' : '';
         var renderType = getCustomFieldRenderType(f);
         if (renderType === 'select' || renderType === 'multi_select') {
           var searchHint = isCombinationField(f) ? ' <span style="font-size:11px;color:var(--text3);font-weight:400">(searchable)</span>' : '';
@@ -12790,6 +13437,17 @@ document.addEventListener('DOMContentLoaded', function () {
       renderIssueProductTypeSets(spaceId);
       applyBuiltinFieldVisibility(spaceId, $('modal-issue'), 'create');
       markCreateRequiredLabels(spaceId);
+      // Required-ness can depend on the issue type, so the asterisks have to be
+      // recomputed whenever Type changes — not just once when the form is built.
+      // Only the stars are touched, never a re-render: re-rendering would discard
+      // anything the user had already typed into the custom fields.
+      var typeSel = $('issueType');
+      if (typeSel && !typeSel._reqTypeBound) {
+        typeSel._reqTypeBound = true;
+        typeSel.addEventListener('change', function () {
+          markCreateRequiredLabels(($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace);
+        });
+      }
     }
 
     var allCFs = S.data.custom_fields || [];
@@ -12817,11 +13475,23 @@ document.addEventListener('DOMContentLoaded', function () {
   window.openCreateIssueModal = function() {
     resetIssueForm();
     $('issueModalTitle').textContent = 'Create Issue';
-    var ptId = getProductTeamSpaceId();
-    var spaceToUse = S.currentSpace || ptId || ((S.data && S.data.spaces && S.data.spaces[0]) ? S.data.spaces[0].id : '');
-    $('issueSpaceId').value = spaceToUse;
+    // Only ever pre-select the space you are actually in. This used to fall back
+    // to Product_Team and then to spaces[0], so pressing + Create Issue from Home,
+    // Assigned to me, Reports, Spaces, Work Log or Roadmap — every view where
+    // navigateTo() sets S.currentSpace = null — silently pre-selected
+    // Product_Team, and tickets landed in the wrong board. Leaving it blank makes
+    // the Space picker an explicit choice instead of a hidden default.
+    var spaceToUse = S.currentSpace || '';
     window._populateIssueSpaceDropdown && window._populateIssueSpaceDropdown(spaceToUse);
-    window._onIssueSpaceChange && window._onIssueSpaceChange(spaceToUse);
+    // The picker lists only spaces you can create in. If spaceToUse isn't one of
+    // them, `sel.value = spaceToUse` silently does nothing and the picker shows
+    // "— Select a space —" while the hidden input still held that space — submit
+    // reads the hidden input, so the ticket went to a space the picker never
+    // offered. Take the effective value back off the picker so the two agree.
+    var spaceSel = $('issueSpaceSelect');
+    var effectiveSpace = spaceSel ? (spaceSel.value || '') : spaceToUse;
+    $('issueSpaceId').value = effectiveSpace;
+    window._onIssueSpaceChange && window._onIssueSpaceChange(effectiveSpace);
     populateIssueFormSelects();
     openModal('modal-issue');
   };
@@ -13942,9 +14612,19 @@ async function renderAdminAuditLog(el) {
 // Google Docs, browser pages all carry their own margins/empty paragraphs),
 // which shows up here as large gaps between lines. Paste as plain text
 // instead — line breaks are kept, but the source's own spacing is dropped.
+// Every rich-text field in the app carries .jira-editor-body or .rte-content, so
+// matching on the class covers the comment box too (it was missing from the old
+// id list, so a Teams paste there went in as raw markup) and any field added later.
+var PLAIN_PASTE_IDS = ['drawerDesc', 'drawerFixDesc', 'issueDescContent', 'drawerCommentInput'];
+function isPlainTextPasteTarget(el) {
+  if (!el) return false;
+  if (PLAIN_PASTE_IDS.indexOf(el.id) !== -1) return true;
+  return !!(el.classList &&
+    (el.classList.contains('jira-editor-body') || el.classList.contains('rte-content')));
+}
 document.addEventListener('paste', function(e) {
   var active = document.activeElement;
-  if (!active || (active.id !== 'drawerDesc' && active.id !== 'drawerFixDesc' && active.id !== 'issueDescContent')) return;
+  if (!isPlainTextPasteTarget(active)) return;
   var cd = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
   if (!cd) return;
   var items = cd.items || [];
@@ -13978,62 +14658,13 @@ window._openAttachmentPreviewFromDataUrl = function (dataUrl) {
   document.body.appendChild(lb);
 };
 
-// ── Clickable issue type badge (like Jira) ─────────────────
-document.addEventListener('click', function(e) {
-  var typeEl = document.getElementById('drawerType');
-  if (!typeEl || !typeEl.contains(e.target)) return;
-  // Remove existing menu
-  var old = document.getElementById('typeDropdownMenu');
-  if (old) { old.remove(); return; }
-  var types = ['epic','story','task','bug','subtask'];
-  var icons = {
-    epic: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#9747FF;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">E</span>',
-    story: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#36B37E;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">S</span>',
-    task: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#0052CC;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">T</span>',
-    bug: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#FF5630;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">B</span>',
-    subtask: '<span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:#0065FF;color:#fff;font-size:9px;font-weight:700;text-align:center;line-height:14px">ST</span>'
-  };
-  var rect = typeEl.getBoundingClientRect();
-  var menu = document.createElement('div');
-  menu.id = 'typeDropdownMenu';
-  menu.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:' + rect.left + 'px;' +
-    'background:var(--bg2);border:1px solid var(--border);border-radius:6px;' +
-    'box-shadow:0 4px 16px rgba(0,0,0,.2);z-index:9999;min-width:160px;padding:4px;';
-  body.light && (menu.style.background = '#fff');
-  types.forEach(function(t) {
-    var item = document.createElement('div');
-    item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:13px;border-radius:4px;display:flex;align-items:center;gap:8px;';
-    item.innerHTML = '<span>' + icons[t] + '</span><span>' + (t.charAt(0).toUpperCase() + t.slice(1)) + '</span>';
-    item.onmouseover = function() { this.style.background = 'var(--bg3)'; };
-    item.onmouseout = function() { this.style.background = ''; };
-    item.onclick = function() {
-      menu.remove();
-      // Update badge immediately
-      typeEl.textContent = t.charAt(0).toUpperCase() + t.slice(1);
-      typeEl.className = 'badge badge-type badge-type-' + t;
-      // Save via autoSave
-      if (window._drawerAutoSave) window._drawerAutoSave('type', t);
-      else {
-        var issueId = window.S && S.drawerIssueId;
-        if (issueId) {
-          fetch('/api/issues/' + issueId, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken() },
-            body: JSON.stringify({ type: t })
-          }).then(function() { toast('Type updated'); });
-        }
-      }
-    };
-    menu.appendChild(item);
-  });
-  document.body.appendChild(menu);
-  // Close on outside click
-  setTimeout(function() {
-    document.addEventListener('click', function handler(ev) {
-      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', handler); }
-    });
-  }, 100);
-});
+// The clickable issue-type badge lives in bindDrawerEdits() (search "_typeMenu").
+// A second, duplicate document-level picker used to live here and rendered its own
+// competing menu on the same click. Its save path called window._drawerAutoSave,
+// which is never defined, so it fell through to fetch(PATCH /api/issues/:id) — a
+// route the server does not have. fetch() does not reject on 404, so the .then()
+// still fired "Type updated" while nothing was saved. Removed; the surviving
+// picker saves through autoSave() -> PUT /api/issues/:id.
 
 // ── All Work inline edit functions ─────────────────────────
 // Which cell/button opened the current inline menu, so re-clicking it can
@@ -14182,7 +14813,7 @@ function updateStatusBtn(status) {
 }
 
 function toggleStatusDropdown() {
-  var statuses = ['To Do','In Progress','In Review','Done','Blocked'];
+  var statuses = ISSUE_STATUSES;
   var current = document.getElementById('drawerStatus').value;
   var btn = document.getElementById('drawerStatusBtn');
   var old = document.getElementById('_statusBtnMenu');
@@ -14202,7 +14833,11 @@ function toggleStatusDropdown() {
       var sel = document.getElementById('drawerStatus');
       sel.value = s;
       sel.dispatchEvent(new Event('change'));
-      updateStatusBtn(s);
+      // Paint from the select's value AFTER the change handler, not from `s`.
+      // A blocked Done transition reverts sel.value inside the handler; passing
+      // `s` here repainted the button "DONE" anyway, so the UI showed Done while
+      // nothing was saved and a refresh snapped it back to the real status.
+      updateStatusBtn(sel.value);
     };
     menu.appendChild(item);
   });
@@ -14218,7 +14853,7 @@ function toggleStatusDropdown() {
 
 function awInlineStatus(e, issueId, current) {
   e.stopPropagation();
-  var statuses = ['To Do','In Progress','In Review','Done'];
+  var statuses = ISSUE_STATUSES;
   var items = statuses.map(function(s) {
     var check = s === current ? '<span style="color:#0052cc;font-weight:700;margin-left:auto">&#10003;</span>' : '';
     return { value: s, html: '<span style="font-size:14px;color:#172b4d;flex:1">' + s + '</span>' + check };
@@ -14462,16 +15097,69 @@ window._copyIssueUrl = function() {
 })();
 // Auto-linkify URLs
 (function(){
+  // Only bare URLs sitting in plain text become links. Deliberately DOM-based:
+  // the previous version ran a regex over el.innerHTML, which matched URLs inside
+  // attribute values too — a pasted Teams/Outlook anchor carries
+  // title="https://…", so it produced title="<a href="…">…</a>", the quote closed
+  // the attribute early, and every remaining attribute (id, rel, class="fui-Link
+  // ___1q1shib …") spilled out as visible text. Worse, it compounded: each blur
+  // re-ran over the already-broken markup. Walking text nodes and building the
+  // anchor with createElement/textContent makes that class of bug impossible —
+  // a URL can never be re-parsed as markup.
+  var URL_RE = /https?:\/\/[^\s<>"']+/g;
+
+  function linkifyTextNodes(root) {
+    var doc = root.ownerDocument || document;
+    var pending = [];
+    var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    while (walker.nextNode()) {
+      var node = walker.currentNode;
+      if (!node.nodeValue || node.nodeValue.indexOf('http') === -1) continue;
+      // Never touch text that is already inside a link — that is what created
+      // nested <a> tags and the mangling that followed.
+      var inAnchor = false;
+      for (var p = node.parentNode; p && p !== root; p = p.parentNode) {
+        if (p.nodeName === 'A') { inAnchor = true; break; }
+      }
+      if (!inAnchor) pending.push(node);
+    }
+
+    var changed = false;
+    pending.forEach(function (node) {
+      var text = node.nodeValue;
+      URL_RE.lastIndex = 0;
+      var frag = doc.createDocumentFragment();
+      var last = 0, m;
+      while ((m = URL_RE.exec(text)) !== null) {
+        var url = m[0];
+        // Don't swallow punctuation that merely follows the URL in a sentence.
+        var trimmed = url.replace(/[.,;:!?)\]}'"]+$/, '');
+        var start = m.index;
+        if (start > last) frag.appendChild(doc.createTextNode(text.slice(last, start)));
+        var a = doc.createElement('a');
+        a.href = trimmed;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.style.cssText = 'color:#0129AC;text-decoration:underline;cursor:pointer';
+        a.textContent = trimmed;      // never parsed as HTML
+        frag.appendChild(a);
+        last = start + trimmed.length;
+        URL_RE.lastIndex = last;
+        changed = true;
+      }
+      if (!changed && last === 0) return;
+      if (last < text.length) frag.appendChild(doc.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+    return changed;
+  }
+  window._linkifyTextNodes = linkifyTextNodes;   // exported for tests
+
   function linkify(el,field){
     if(!el||el._lf)return;
     el._lf=true;
     el.addEventListener("blur",function(){
-      var h=el.innerHTML;
-      var h2=h.replace(/(?<!href=")(https?:\/\/[^\s<"]+)/g,'<a href="$1" style="color:#0129AC;text-decoration:underline;cursor:pointer" target="_blank">$1</a>');
-      if(h2!==h){
-        el.innerHTML=h2;
-        markDrawerDescDirty(el.id);
-      }
+      if (linkifyTextNodes(el)) markDrawerDescDirty(el.id);
     });
   }
   function init(){
@@ -14615,49 +15303,302 @@ window._copyIssueUrl = function() {
   setTimeout(function(){ gsInit(); }, 1200);
 })();
 
-async function renderDeletedTickets(el) {
-  var me = S.currentUserObj || {};
-  if (me.role !== 'admin' && me.role !== 'owner') {
-    el.innerHTML = '<div class="view-empty"><h2>Access Denied</h2><p>Only org admins can view deleted tickets.</p></div>';
+// Delete bin. Org admin sees every space and is the only role that can Restore or
+// Permanently delete. A space admin sees their own spaces' items read-only, so the
+// action column is omitted entirely rather than shown-then-rejected.
+// `opts.spaceId` renders the space-scoped view used by Space Settings → Deleted items.
+async function renderDeletedTickets(el, opts) {
+  opts = opts || {};
+  el.innerHTML = '<div style="padding:20px;color:var(--text3)">Loading deleted items…</div>';
+  var res;
+  try {
+    res = await api('/api/issues/deleted', 'GET', null, { silent: true });
+  } catch (err) {
+    // 403 here means "not an admin of any space" — show the reason, not a red error.
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:14px">' +
+      esc(err.message || 'You do not have permission to view the deleted items bin.') + '</div>';
     return;
   }
-  el.innerHTML = '<div style="padding:20px;color:var(--text3)">Loading deleted tickets...</div>';
-  try {
-    var tickets = await api('/api/issues/deleted');
-    if (!tickets || !tickets.length) {
-      el.innerHTML = '<div style="padding:24px;color:var(--text3);text-align:center;font-size:14px">No deleted tickets found.</div>';
-      return;
-    }
-    var html = '<div style="padding:0 0 16px"><h3 style="margin:0 0 4px;font-size:16px">Deleted Tickets</h3><p style="color:var(--text3);font-size:13px;margin:0">' + tickets.length + ' ticket(s) in bin</p></div>';
-    html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden">';
-    html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
-    html += '<thead><tr style="background:var(--bg3);color:var(--text2)"><th style="padding:10px 12px;text-align:left">Key</th><th style="padding:10px 12px;text-align:left">Title</th><th style="padding:10px 12px;text-align:left">Status</th><th style="padding:10px 12px;text-align:left">Deleted At</th><th style="padding:10px 12px;text-align:left">Action</th></tr></thead><tbody>';
-    tickets.forEach(function(t) {
-      html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 12px;font-weight:700;color:#0129AC">' + esc(t.key||'') + '</td>' +
-        '<td style="padding:10px 12px">' + esc(t.title||'No title') + '</td>' +
-        '<td style="padding:10px 12px">' + esc(t.status||'') + '</td>' +
-        '<td style="padding:10px 12px;color:var(--text3);font-size:12px">' + fmtDateTime(t.deleted_at) + '</td>' +
-        '<td style="padding:10px 12px"><button class="btn btn-sm btn-outline" onclick="window._restoreTicket(\'' + t.id + '\',this)">Restore</button></td>' +
-        '</tr>';
-    });
-    html += '</tbody></table></div>';
-    el.innerHTML = html;
-    window._restoreTicket = async function(id, btn) {
-      btn.disabled = true; btn.textContent = 'Restoring...';
-      try {
-        await api('/api/issues/' + id + '/restore', 'POST');
-        toast('Ticket restored successfully', 'success');
-        await refreshData();
-        renderDeletedTickets(el);
-      } catch(e) {
-        toast('Failed to restore ticket', 'error');
-        btn.disabled = false; btn.textContent = '∩ Restore';
-      }
-    };
-  } catch(err) {
-    el.innerHTML = '<div style="padding:20px;color:red">Error loading deleted tickets</div>';
+  // Tolerate both the current {can_restore, items} shape and a bare array.
+  var canRestore = Array.isArray(res) ? isOrgAdminUser() : !!(res && res.can_restore);
+  var tickets = Array.isArray(res) ? res : ((res && res.items) || []);
+  if (opts.spaceId) tickets = tickets.filter(function (t) { return t.space_id === opts.spaceId; });
+
+  if (!tickets.length) {
+    el.innerHTML = '<div style="padding:24px;color:var(--text3);text-align:center;font-size:14px">Nothing in the bin.</div>';
+    return;
   }
+
+  var TYPE_LABEL = { ticket: 'Ticket', sprint: 'Sprint', space: 'Space' };
+  var TYPE_COLOR = { ticket: 'var(--accent)', sprint: '#8b5cf6', space: '#0891b2' };
+  var counts = tickets.reduce(function (a, t) {
+    var k = t.entity_type || 'ticket'; a[k] = (a[k] || 0) + 1; return a;
+  }, {});
+  var summary = Object.keys(counts).map(function (k) {
+    return counts[k] + ' ' + (TYPE_LABEL[k] || k).toLowerCase() + (counts[k] === 1 ? '' : 's');
+  }).join(' · ');
+
+  var days = (res && res.retention_days) || binRetentionDays();
+  // A bin row must ALWAYS have a name to show and to type. `label` is what the
+  // current API sends; `key`/`name`/`title` cover an older or partial response so
+  // the confirm dialog can never end up asking you to "type" an empty string.
+  tickets.forEach(function (t) {
+    t.entity_type = t.entity_type || 'ticket';
+    t.label = t.label || t.key || t.name || t.title || t.id;
+  });
+  var byId = {};
+  tickets.forEach(function (t) { byId[t.id] = t; });
+
+  // "What exactly am I destroying?" — only non-zero facts, so the list stays short.
+  function purgeDetails(t) {
+    var out = [];
+    if (t.entity_type === 'sprint') {
+      out.push('Sprint record and its history are removed');
+      out.push('Its tickets are already in the backlog and are NOT affected');
+      return out;
+    }
+    if (t.title) out.push('Title: ' + t.title);
+    if (t.space_name) out.push('Space: ' + t.space_name);
+    if (t.status) out.push('Status when deleted: ' + t.status);
+    if (t.assignee_name) out.push('Assignee: ' + t.assignee_name);
+    if (t.comment_count) out.push(t.comment_count + ' comment' + (t.comment_count === 1 ? '' : 's') + ' will be destroyed');
+    if (t.worklog_count) {
+      out.push(t.worklog_count + ' work log' + (t.worklog_count === 1 ? '' : 's') +
+        (t.logged_minutes ? ' (' + fmtMins(t.logged_minutes) + ' logged)' : '') + ' will be destroyed');
+    }
+    if (t.attachment_count) out.push(t.attachment_count + ' attachment' + (t.attachment_count === 1 ? '' : 's') + ' will be deleted from disk');
+    if (t.subtask_count) out.push(t.subtask_count + ' subtask' + (t.subtask_count === 1 ? '' : 's') + ' will be detached (not deleted)');
+    if (!t.comment_count && !t.worklog_count && !t.attachment_count) {
+      out.push('No comments, work logs or attachments attached');
+    }
+    return out;
+  }
+
+  var html = '<div style="padding:0 0 16px">' +
+    '<h3 style="margin:0 0 4px;font-size:16px">Deleted Items</h3>' +
+    '<p style="color:var(--text3);font-size:13px;margin:0">' + (summary || '0 items') + ' in the bin · ' +
+    'tickets and sprints are deleted permanently ' + days + ' days after they were binned' +
+    (canRestore ? '' : ' · read-only — only an org admin can restore or permanently delete') + '</p></div>';
+
+  // Bulk bar — org admin only, since it is a purge control.
+  if (canRestore) {
+    html += '<div class="bin-bulkbar">' +
+      '<label style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
+        '<input type="checkbox" id="binSelectAll"> Select all' +
+      '</label>' +
+      '<span id="binSelCount" style="color:var(--text3)">None selected</span>' +
+      '<span style="flex:1"></span>' +
+      '<button class="btn btn-sm btn-outline" id="binBulkRestore" disabled>Restore selected</button>' +
+      '<button class="btn btn-sm btn-outline text-danger" id="binBulkPurge" disabled>Delete forever</button>' +
+    '</div>';
+  }
+
+  html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow-x:auto">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:var(--bg3);color:var(--text2)">' +
+    (canRestore ? '<th style="padding:10px 12px;width:28px"></th>' : '') +
+    '<th style="padding:10px 12px;text-align:left">Type</th>' +
+    '<th style="padding:10px 12px;text-align:left">Name</th>' +
+    '<th style="padding:10px 12px;text-align:left">Details</th>' +
+    '<th style="padding:10px 12px;text-align:left">Space</th>' +
+    '<th style="padding:10px 12px;text-align:left">Deleted</th>' +
+    '<th style="padding:10px 12px;text-align:left">By</th>' +
+    '<th style="padding:10px 12px;text-align:left">Auto-deletes</th>' +
+    (canRestore ? '<th style="padding:10px 12px;text-align:left">Actions</th>' : '') +
+    '</tr></thead><tbody>';
+  tickets.forEach(function (t) {
+    var ty = t.entity_type || 'ticket';
+    // Spaces are archived rather than tombstoned, so purging them is refused by
+    // the API — don't offer a button that can only fail.
+    var canPurge = canRestore && ty !== 'space';
+    var dl = t.days_left;
+    var expiry = ty === 'space'
+      ? '<span style="color:var(--text3)">never</span>'
+      : (dl == null ? '—'
+        : dl <= 0 ? '<span class="bin-expiry-soon">any moment</span>'
+        : dl <= 3 ? '<span class="bin-expiry-soon">in ' + dl + ' day' + (dl === 1 ? '' : 's') + '</span>'
+        : 'in ' + dl + ' days');
+    html += '<tr style="border-bottom:1px solid var(--border)">' +
+      (canRestore
+        ? '<td style="padding:10px 12px">' +
+            '<input type="checkbox" class="bin-check" data-id="' + escAttr(t.id) + '"' +
+            (canPurge ? '' : ' data-nopurge="1"') + '>' +
+          '</td>'
+        : '') +
+      '<td style="padding:10px 12px"><span class="badge badge-muted">' + esc(TYPE_LABEL[ty] || ty) + '</span></td>' +
+      '<td style="padding:10px 12px;font-weight:700;color:' + TYPE_COLOR[ty] + '">' + esc(t.label || '') + '</td>' +
+      '<td style="padding:10px 12px">' + esc(t.title || '—') +
+        (ty === 'sprint' && t.restorable_issues
+          ? '<div style="color:var(--text3);font-size:12px;margin-top:2px">' +
+            t.restorable_issues + ' ticket' + (t.restorable_issues === 1 ? '' : 's') + ' will come back with it</div>'
+          : '') +
+      '</td>' +
+      '<td style="padding:10px 12px;color:var(--text3)">' + esc(t.space_name || '—') + '</td>' +
+      '<td style="padding:10px 12px;color:var(--text3);font-size:12px">' + fmtDateTime(t.deleted_at) + '</td>' +
+      '<td style="padding:10px 12px;color:var(--text3);font-size:12px">' + esc(t.deleted_by_name || '—') + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px">' + expiry + '</td>' +
+      (canRestore
+        ? '<td style="padding:10px 12px;white-space:nowrap">' +
+            '<button class="btn btn-sm btn-outline bin-restore-btn" data-type="' + escAttr(ty) + '" data-id="' + escAttr(t.id) + '" data-key="' + escAttr(t.label || '') + '">Restore</button>' +
+            (canPurge
+              ? ' <button class="btn btn-sm btn-outline text-danger bin-purge-btn" data-type="' + escAttr(ty) + '" data-id="' + escAttr(t.id) + '" data-key="' + escAttr(t.label || '') + '">Delete forever</button>'
+              : '') +
+          '</td>'
+        : '') +
+      '</tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<p style="font-size:12px;color:var(--text3);margin-top:10px">' +
+    'Restoring a sprint also brings back the tickets that went to the backlog with it — except any you have since moved into another sprint, which stay where you put them. ' +
+    'Archived spaces can be restored but are never permanently deleted, by hand or automatically.' +
+    (canRestore ? '' : ' To restore something, ask an org admin.') + '</p>';
+  el.innerHTML = html;
+
+  if (!canRestore) return;   // no handlers to bind for the read-only view
+
+  // ── selection ────────────────────────────────────────────
+  var checks = Array.prototype.slice.call(el.querySelectorAll('.bin-check'));
+  var selAll = el.querySelector('#binSelectAll');
+  var countEl = el.querySelector('#binSelCount');
+  var bulkRestore = el.querySelector('#binBulkRestore');
+  var bulkPurge = el.querySelector('#binBulkPurge');
+  function selected() {
+    return checks.filter(function (c) { return c.checked; }).map(function (c) { return byId[c.dataset.id]; }).filter(Boolean);
+  }
+  function syncSel() {
+    var sel = selected();
+    var purgeable = sel.filter(function (t) { return t.entity_type !== 'space'; });
+    countEl.textContent = sel.length ? sel.length + ' selected' : 'None selected';
+    bulkRestore.disabled = !sel.length;
+    bulkPurge.disabled = !purgeable.length;
+    // The purge button counts only what CAN be purged, so the number on the button
+    // is the number of things that will actually be destroyed.
+    bulkPurge.textContent = purgeable.length ? 'Delete forever (' + purgeable.length + ')' : 'Delete forever';
+    selAll.checked = checks.length > 0 && sel.length === checks.length;
+  }
+  checks.forEach(function (c) { c.addEventListener('change', syncSel); });
+  if (selAll) selAll.addEventListener('change', function () {
+    checks.forEach(function (c) { c.checked = selAll.checked; });
+    syncSel();
+  });
+  syncSel();
+
+  // ── single restore ───────────────────────────────────────
+  el.querySelectorAll('.bin-restore-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      btn.disabled = true; btn.textContent = 'Restoring…';
+      try {
+        var out = await api('/api/bin/' + btn.dataset.type + '/' + btn.dataset.id + '/restore', 'POST', null, { silent: true });
+        var n = out && out.restored_issues;
+        toast(btn.dataset.key + ' restored' + (n ? ' with ' + n + ' ticket' + (n === 1 ? '' : 's') : ''), 'success');
+        await refreshData();
+        renderDeletedTickets(el, opts);
+      } catch (e) {
+        toast(e.message || 'Failed to restore', 'error');
+        btn.disabled = false; btn.textContent = 'Restore';
+      }
+    });
+  });
+
+  // ── single permanent delete ──────────────────────────────
+  el.querySelectorAll('.bin-purge-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      var item = byId[btn.dataset.id] || {};
+      var key = item.label || btn.dataset.key || btn.dataset.id;
+      var isSprint = btn.dataset.type === 'sprint';
+      var ok = await typedConfirmDialog({
+        title: 'Permanently delete ' + key + '?',
+        intro: isSprint
+          ? 'This destroys the sprint record for good.'
+          : 'This destroys the ticket and everything attached to it:',
+        details: purgeDetails(item),
+        warn: 'This cannot be undone. There is no second bin.',
+        phrase: key,
+        phraseHint: isSprint ? 'To confirm, type the sprint name' : 'To confirm, type the ticket number',
+        confirmLabel: 'Delete forever'
+      });
+      if (!ok) return;
+      btn.disabled = true; btn.textContent = 'Deleting…';
+      try {
+        await api('/api/bin/' + btn.dataset.type + '/' + btn.dataset.id, 'DELETE', null, { silent: true });
+        toast(key + ' permanently deleted', 'success');
+        await refreshData();
+        renderDeletedTickets(el, opts);
+      } catch (e) {
+        toast(e.message || 'Failed to permanently delete item', 'error');
+        btn.disabled = false; btn.textContent = 'Delete forever';
+      }
+    });
+  });
+
+  // ── bulk restore ─────────────────────────────────────────
+  bulkRestore.addEventListener('click', async function () {
+    var sel = selected();
+    if (!sel.length) return;
+    var ok = await confirmDialog('Restore ' + sel.length + ' item(s) from the bin?');
+    if (!ok) return;
+    bulkRestore.disabled = true;
+    var done = 0, failed = 0;
+    for (var i = 0; i < sel.length; i++) {
+      try {
+        await api('/api/bin/' + sel[i].entity_type + '/' + sel[i].id + '/restore', 'POST', null, { silent: true });
+        done++;
+      } catch (e) { failed++; }
+    }
+    await refreshData();
+    toast(failed ? done + ' restored, ' + failed + ' failed' : done + ' item(s) restored', failed ? 'error' : 'success');
+    renderDeletedTickets(el, opts);
+  });
+
+  // ── bulk permanent delete ────────────────────────────────
+  bulkPurge.addEventListener('click', async function () {
+    var sel = selected();
+    var purgeable = sel.filter(function (t) { return t.entity_type !== 'space'; });
+    if (!purgeable.length) return;
+    var skippedSpaces = sel.length - purgeable.length;
+    var single = purgeable.length === 1;
+    var ok = await typedConfirmDialog({
+      title: single
+        ? 'Permanently delete ' + purgeable[0].label + '?'
+        : 'Permanently delete ' + purgeable.length + ' items?',
+      intro: single
+        ? 'This destroys the item and everything attached to it:'
+        : 'These ' + purgeable.length + ' items will be destroyed for good:',
+      details: single
+        ? purgeDetails(purgeable[0])
+        : purgeable.slice(0, 10).map(function (t) {
+            var extra = [];
+            if (t.comment_count) extra.push(t.comment_count + ' comment' + (t.comment_count === 1 ? '' : 's'));
+            if (t.worklog_count) extra.push(t.worklog_count + ' work log' + (t.worklog_count === 1 ? '' : 's'));
+            if (t.attachment_count) extra.push(t.attachment_count + ' attachment' + (t.attachment_count === 1 ? '' : 's'));
+            return (t.entity_type === 'sprint' ? 'Sprint ' : '') + t.label +
+              (t.title ? ' — ' + t.title : '') + (extra.length ? ' (' + extra.join(', ') + ')' : '');
+          })
+          .concat(purgeable.length > 10 ? ['…and ' + (purgeable.length - 10) + ' more'] : [])
+          .concat(skippedSpaces
+            ? [skippedSpaces + ' archived space(s) in your selection will be SKIPPED — spaces cannot be permanently deleted']
+            : []),
+      warn: 'This cannot be undone. Comments, work logs, attachments and history are destroyed with each ticket.',
+      phrase: single ? purgeable[0].label : 'delete all',
+      phraseHint: single
+        ? (purgeable[0].entity_type === 'sprint' ? 'To confirm, type the sprint name' : 'To confirm, type the ticket number')
+        : 'To confirm, type',
+      confirmLabel: single ? 'Delete forever' : 'Delete ' + purgeable.length + ' forever'
+    });
+    if (!ok) return;
+    bulkPurge.disabled = true; bulkPurge.textContent = 'Deleting…';
+    try {
+      var out = await api('/api/bin/purge', 'POST', {
+        items: purgeable.map(function (t) { return { type: t.entity_type, id: t.id }; })
+      }, { silent: true });
+      toast((out.purged || 0) + ' item(s) permanently deleted' +
+        (out.skipped ? ', ' + out.skipped + ' already gone' : ''), 'success');
+      await refreshData();
+      renderDeletedTickets(el, opts);
+    } catch (e) {
+      toast(e.message || 'Failed to permanently delete items', 'error');
+      syncSel();
+    }
+  });
 }
 
 window._filterUsers = function(query) {

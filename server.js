@@ -174,11 +174,14 @@ const {
 const { runMigrations } = require('./lib/migrate');
 const {
   buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin,
-  UPDATE_WHITELIST, validateSpaceRoleAssignment,
+  UPDATE_WHITELIST, validateSpaceRoleAssignment, canRemoveSpaceMember, getSpaceMemberRole,
   getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId,
   getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed
 } = require('./lib/permissions');
 const { seedBuiltinIssueFields } = require('./lib/builtin-issue-fields');
+const { startRetentionSweeper, retentionDays, purgeIssueRows: purgeIssueCascade } = require('./lib/retention');
+// One shared cascade for every issue purge — manual, bulk, and the retention sweep.
+const purgeIssueRows = (id) => purgeIssueCascade(q, id);
 const https = require('https');
 
 // ── Microsoft OAuth2 state store (CSRF) ───────────────────
@@ -225,7 +228,7 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
   const sf1 = sid ? ' WHERE space_id=$1' : '';
   const p = sid ? [sid] : [];
   const queries = [
-    q('SELECT * FROM sprints' + sf1, p),
+    q('SELECT * FROM sprints' + (sf1 ? sf1 + ' AND deleted_at IS NULL' : ' WHERE deleted_at IS NULL'), p),
     q('SELECT id,space_id,sprint_id,parent_id,key,title,type,status,priority,assignee_id,reporter_id,story_points,labels,position,start_date,due_date,original_estimate,time_spent,team,product_type,created_at,updated_at FROM issues' + (sf1 ? sf1 + ' AND deleted_at IS NULL' : ' WHERE deleted_at IS NULL'), p),
     q('SELECT * FROM custom_fields' + sf1, p),
     q('SELECT * FROM saved_filters' + sf1, p),
@@ -267,7 +270,9 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
     sprints: filteredSprints,
     issues: filteredIssues, worklogs: [], comments: [],
     custom_fields: cf.rows, saved_filters: filters.rows, notifications: notifs.rows,
-    issue_field_values: ifv ? ifv.rows : []
+    issue_field_values: ifv ? ifv.rows : [],
+    // So delete dialogs can state the real retention window instead of hardcoding "30 days".
+    bin_retention_days: retentionDays()
   });
 }));
 
@@ -386,7 +391,7 @@ app.get('/api/spaces', requireAuth, wrap(async (req, res) => {
 }));
 
 app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
-  if (!requireOrgAdmin(req.user, res)) return;
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can create a space.')) return;
   const { name, key, description, icon, color, space_type, visibility, owner_id } = req.body;
   const id = uid();
   const r = await q(`INSERT INTO spaces(id,name,key,description,icon,color,space_type,visibility,owner_id)
@@ -447,7 +452,7 @@ app.put('/api/spaces/:id', requireAuth, wrap(async (req, res) => {
 }));
 
 app.delete('/api/spaces/:id', requireAuth, wrap(async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'owner') return res.status(403).json({ error: 'Not authorized' });
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can delete a space.')) return;
   await q('UPDATE spaces SET is_archived=true,updated_at=NOW() WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
@@ -503,7 +508,8 @@ app.put('/api/space-members/:id', requireAuth, wrap(async (req, res) => {
   const rec = await getSpaceMemberRecord(q, req.params.id);
   if (!rec) return res.status(404).json({ error: 'Not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, rec.space_id, 'space_member.manage'))) return;
-  const validated = await validateSpaceRoleAssignment(q, req.user, rec.space_id, req.body.role);
+  // rec.role = the target's CURRENT role, so a space admin can't demote a peer.
+  const validated = await validateSpaceRoleAssignment(q, req.user, rec.space_id, req.body.role, rec.role);
   if (!validated.ok) return res.status(403).json({ error: validated.error });
   const r = await q('UPDATE space_members SET role=$1 WHERE id=$2 RETURNING *', [validated.role, req.params.id]);
   res.json(r.rows[0]);
@@ -513,6 +519,9 @@ app.delete('/api/space-members/:id', requireAuth, wrap(async (req, res) => {
   const rec = await getSpaceMemberRecord(q, req.params.id);
   if (!rec) return res.status(404).json({ error: 'Not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, rec.space_id, 'space_member.manage'))) return;
+  // A space admin may not remove a peer space admin (may remove themselves).
+  const allowed = await canRemoveSpaceMember(q, req.user, rec);
+  if (!allowed.ok) return res.status(403).json({ error: allowed.error });
   await q('DELETE FROM space_members WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
@@ -522,7 +531,7 @@ app.get('/api/sprints', requireAuth, wrap(async (req, res) => {
   const spaceId = req.query.space_id;
   if (!spaceId) return res.status(400).json({ error: 'space_id is required' });
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'sprint.read'))) return;
-  const r = await q('SELECT * FROM sprints WHERE space_id=$1 ORDER BY created_at DESC', [spaceId]);
+  const r = await q('SELECT * FROM sprints WHERE space_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC', [spaceId]);
   res.json(r.rows);
 }));
 
@@ -549,13 +558,18 @@ app.delete('/api/sprints/:id', requireAuth, wrap(async (req, res) => {
   const spaceId = await getSprintSpaceId(q, req.params.id);
   if (!spaceId) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'sprint.manage'))) return;
-  await q('UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1', [req.params.id]);
-  await q('DELETE FROM sprints WHERE id=$1', [req.params.id]);
+  // Soft delete so the sprint lands in Deleted Items and an org admin can restore
+  // it. Its issues are still detached to the backlog (unchanged behaviour) — a
+  // binned sprint must not keep tickets out of the backlog — but former_sprint_id
+  // remembers where they came from so a restore can put them back.
+  await q('UPDATE issues SET sprint_id=NULL, former_sprint_id=$1 WHERE sprint_id=$1', [req.params.id]);
+  await q('UPDATE sprints SET deleted_at=NOW(), deleted_by=$2 WHERE id=$1 AND deleted_at IS NULL',
+    [req.params.id, req.user.id]);
   res.json({ ok: true });
 }));
 
 app.post('/api/sprints/:id/start', requireAuth, wrap(async (req, res) => {
-  const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [req.params.id])).rows[0];
+  const sprint = (await q('SELECT * FROM sprints WHERE id=$1 AND deleted_at IS NULL', [req.params.id])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'sprint.manage'))) return;
   const r = await q("UPDATE sprints SET status='active' WHERE id=$1 RETURNING *", [req.params.id]);
@@ -573,7 +587,7 @@ app.post('/api/sprints/:id/start', requireAuth, wrap(async (req, res) => {
 
 app.post('/api/sprints/:id/complete', requireAuth, wrap(async (req, res) => {
   const sid = req.params.id;
-  const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
+  const sprint = (await q('SELECT * FROM sprints WHERE id=$1 AND deleted_at IS NULL', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'sprint.manage'))) return;
   const done = await q("SELECT COALESCE(SUM(story_points),0)::int AS pts FROM issues WHERE sprint_id=$1 AND status='Done'", [sid]);
@@ -621,7 +635,10 @@ app.get('/api/issues', requireAuth, wrap(async (req, res) => {
   } else if (!isOrgAdmin(req.user.role)) {
     return res.status(400).json({ error: 'space_id is required' });
   }
-  let where = [], params = [], n = 1;
+  // Binned (soft-deleted) issues must never appear in a normal list. Every other
+  // read path already filters this; this one did not, so deleted tickets still
+  // showed up in All Work and anything else backed by GET /api/issues.
+  let where = ['i.deleted_at IS NULL'], params = [], n = 1;
   const add = (col, val) => { where.push(`${col}=$${n++}`); params.push(val); };
   if (space_id) add('i.space_id', space_id);
   else if (!isOrgAdmin(req.user.role)) {
@@ -651,28 +668,225 @@ app.get('/api/issues', requireAuth, wrap(async (req, res) => {
   res.json(r.rows);
 }));
 
+// Delete bin — org admin sees every space; a space admin sees only the spaces
+// they administer (read-only: restore and permanent delete below are admin-only).
+// `can_restore` tells the UI whether to render the action buttons at all, so the
+// client never has to re-derive the rule.
 app.get('/api/issues/deleted', requireAuth, wrap(async (req, res) => {
-  if (!requireOrgAdmin(req.user, res)) return;
-  const r = await q(`SELECT i.id, i.key, i.title, i.status, i.space_id, i.deleted_at, i.deleted_by,
-      s.name AS space_name, u.name AS deleted_by_name
+  const orgAdmin = isOrgAdmin(req.user.role);
+  let scopeIds = null;
+  if (!orgAdmin) {
+    const userId = req.user.id || req.user.user_id;
+    const rows = (await q(
+      `SELECT space_id FROM space_members WHERE user_id=$1 AND role IN ('site_admin','manager','owner','admin')`,
+      [userId]
+    )).rows;
+    scopeIds = rows.map(function (r) { return r.space_id; });
+    if (!scopeIds.length) {
+      return res.status(403).json({ error: 'Only a space admin can view the deleted items bin.' });
+    }
+  }
+  // Typed bin: tickets, sprints, and archived spaces in one list. `entity_type`
+  // tells the UI which restore/purge route to call, so adding a future type only
+  // means adding a branch here and in the two handlers below.
+  const params = orgAdmin ? [] : [scopeIds];
+  const scope = orgAdmin ? '' : ' AND i.space_id = ANY($1::varchar[])';
+  // The counts drive the "here is exactly what a permanent delete destroys" list in
+  // the confirm dialog. Cheap correlated subqueries — this list is capped at 500.
+  const tickets = await q(`SELECT i.id, i.key AS label, i.key, i.title, i.status, i.type,
+      i.space_id, i.deleted_at, i.deleted_by,
+      s.name AS space_name, u.name AS deleted_by_name,
+      a.name AS assignee_name,
+      (SELECT COUNT(*)::int FROM comments          c  WHERE c.issue_id  = i.id) AS comment_count,
+      (SELECT COUNT(*)::int FROM worklogs          w  WHERE w.issue_id  = i.id) AS worklog_count,
+      (SELECT COALESCE(SUM(w.time_spent),0)::int FROM worklogs w WHERE w.issue_id = i.id) AS logged_minutes,
+      (SELECT COUNT(*)::int FROM issue_attachments at WHERE at.issue_id = i.id) AS attachment_count,
+      (SELECT COUNT(*)::int FROM issues            ch WHERE ch.parent_id = i.id) AS subtask_count
     FROM issues i
     LEFT JOIN spaces s ON s.id = i.space_id
     LEFT JOIN users u ON u.id = i.deleted_by
-    WHERE i.deleted_at IS NOT NULL
-    ORDER BY i.deleted_at DESC
-    LIMIT 500`);
-  res.json(r.rows);
+    LEFT JOIN users a ON a.id = i.assignee_id
+    WHERE i.deleted_at IS NOT NULL` + scope + `
+    ORDER BY i.deleted_at DESC LIMIT 500`, params);
+
+  // restorable_issues = tickets that would come back if this sprint were restored:
+  // the ones still in the backlog carrying its breadcrumb. Shown in the bin so an
+  // admin knows what a restore will do before clicking it.
+  const sprints = await q(`SELECT sp.id, sp.name AS label, sp.goal AS title, sp.status, sp.space_id,
+      sp.deleted_at, sp.deleted_by, s.name AS space_name, u.name AS deleted_by_name,
+      (SELECT COUNT(*)::int FROM issues i2
+        WHERE i2.former_sprint_id = sp.id AND i2.sprint_id IS NULL AND i2.deleted_at IS NULL
+      ) AS restorable_issues
+    FROM sprints sp
+    LEFT JOIN spaces s ON s.id = sp.space_id
+    LEFT JOIN users u ON u.id = sp.deleted_by
+    WHERE sp.deleted_at IS NOT NULL` + (orgAdmin ? '' : ' AND sp.space_id = ANY($1::varchar[])') + `
+    ORDER BY sp.deleted_at DESC LIMIT 500`, params);
+
+  // Spaces are archived rather than tombstoned (no deleted_at column on spaces),
+  // so is_archived IS the bin state for them. updated_at is the closest thing to
+  // a deletion timestamp. Org admin only — a space admin has no business seeing
+  // other spaces, and cannot delete a space anyway.
+  const spaces = orgAdmin
+    ? await q(`SELECT sp.id, sp.key AS label, sp.name AS title, 'archived' AS status, sp.id AS space_id,
+        sp.updated_at AS deleted_at, NULL AS deleted_by, sp.name AS space_name, NULL AS deleted_by_name
+      FROM spaces sp WHERE sp.is_archived = true ORDER BY sp.updated_at DESC LIMIT 200`)
+    : { rows: [] };
+
+  // days_left = how long before the retention sweeper purges it for good. Archived
+  // spaces are never auto-purged, so they get null and the UI shows nothing.
+  const days = retentionDays();
+  const daysLeft = (deletedAt) => {
+    if (!deletedAt) return null;
+    const elapsed = (Date.now() - new Date(deletedAt).getTime()) / 86400000;
+    return Math.max(0, Math.ceil(days - elapsed));
+  };
+  const tag = (rows, type) => rows.map(function (r) {
+    return Object.assign({
+      entity_type: type,
+      days_left: type === 'space' ? null : daysLeft(r.deleted_at)
+    }, r);
+  });
+  const items = tag(tickets.rows, 'ticket')
+    .concat(tag(sprints.rows, 'sprint'))
+    .concat(tag(spaces.rows, 'space'))
+    .sort(function (a, b) { return new Date(b.deleted_at || 0) - new Date(a.deleted_at || 0); });
+
+  res.json({ can_restore: orgAdmin, retention_days: days, items: items });
 }));
 
 app.post('/api/issues/:id/restore', requireAuth, wrap(async (req, res) => {
-  if (!requireOrgAdmin(req.user, res)) return;
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can restore deleted issues.')) return;
   const row = (await q('SELECT id, key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [req.params.id])).rows[0];
   if (!row) return res.status(404).json({ error: 'Deleted issue not found' });
+  // Restores in place: space_id/status were never changed by the soft delete, so
+  // clearing the tombstone returns the issue to its original space and state.
   await q('UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1', [req.params.id]);
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
     VALUES($1,$2,$3,'restored',NULL,$4)`,
     [uid(), req.params.id, req.user.id, row.key]).catch(() => {});
   res.json({ ok: true });
+}));
+
+// ── Generic bin restore / purge (org admin only) ─────────────
+// One route per verb, typed by :type, so the UI calls the same pair for every
+// kind of binned thing. The issue-specific routes above are kept for
+// compatibility with anything already calling them.
+app.post('/api/bin/:type/:id/restore', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can restore deleted items.')) return;
+  const { type, id } = req.params;
+  if (type === 'ticket') {
+    const row = (await q('SELECT key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'That ticket is not in the bin.' });
+    await q('UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1', [id]);
+    await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+      VALUES($1,$2,$3,'restored',NULL,$4)`, [uid(), id, req.user.id, row.key]).catch(() => {});
+    return res.json({ ok: true, label: row.key });
+  }
+  if (type === 'sprint') {
+    const row = (await q('SELECT name FROM sprints WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'That sprint is not in the bin.' });
+    await q('UPDATE sprints SET deleted_at=NULL, deleted_by=NULL WHERE id=$1', [id]);
+    // Refill it with the tickets the delete pushed to the backlog — but only the
+    // ones still sitting there. `sprint_id IS NULL` is the whole safety rule: if
+    // someone re-planned a ticket into another sprint meanwhile, that decision
+    // wins and the restore leaves it alone.
+    const refilled = await q(`UPDATE issues SET sprint_id=$1, former_sprint_id=NULL, updated_at=NOW()
+      WHERE former_sprint_id=$1 AND sprint_id IS NULL
+      RETURNING id, key, deleted_at`, [id]);
+    const live = refilled.rows.filter(function (r) { return !r.deleted_at; });
+    live.forEach(function (r) {
+      q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+         VALUES($1,$2,$3,'sprint_id',NULL,$4)`, [uid(), r.id, req.user.id, String(id)]).catch(() => {});
+    });
+    // Anything left pointing at this sprint was moved elsewhere by hand; drop the
+    // breadcrumb so a future delete/restore cycle starts clean.
+    await q('UPDATE issues SET former_sprint_id=NULL WHERE former_sprint_id=$1', [id]);
+    return res.json({ ok: true, label: row.name, restored_issues: live.length });
+  }
+  if (type === 'space') {
+    const row = (await q('SELECT name FROM spaces WHERE id=$1 AND is_archived=true', [id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'That space is not archived.' });
+    await q('UPDATE spaces SET is_archived=false, updated_at=NOW() WHERE id=$1', [id]);
+    return res.json({ ok: true, label: row.name });
+  }
+  res.status(400).json({ error: 'Unknown item type: ' + type });
+}));
+
+// Bulk permanent delete — the UI's multi-select "Delete forever (N)" action.
+// Body: { items: [{ type, id }, ...] }. Spaces are rejected up front (same reason
+// as the single-item route) rather than silently skipped, so the count the admin
+// confirmed is the count that actually happens.
+app.post('/api/bin/purge', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can permanently delete items.')) return;
+  const items = Array.isArray(req.body && req.body.items) ? req.body.items : null;
+  if (!items || !items.length) return res.status(400).json({ error: 'Nothing selected to delete.' });
+  if (items.length > 500) return res.status(400).json({ error: 'Too many items in one request (max 500).' });
+  if (items.some(function (it) { return it && it.type === 'space'; })) {
+    return res.status(400).json({ error: 'Spaces cannot be permanently deleted. Deselect the archived space(s) and try again.' });
+  }
+  const bad = items.find(function (it) { return !it || !it.id || (it.type !== 'ticket' && it.type !== 'sprint'); });
+  if (bad) return res.status(400).json({ error: 'Unsupported item in selection.' });
+
+  const purged = [];
+  const skipped = [];
+  for (const it of items) {
+    if (it.type === 'sprint') {
+      const row = (await q('SELECT name FROM sprints WHERE id=$1 AND deleted_at IS NOT NULL', [it.id])).rows[0];
+      if (!row) { skipped.push(it.id); continue; }
+      await q('UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1', [it.id]);
+      await q('UPDATE issues SET former_sprint_id=NULL WHERE former_sprint_id=$1', [it.id]);
+      await q('DELETE FROM sprints WHERE id=$1', [it.id]);
+      purged.push(row.name);
+    } else {
+      const row = (await q('SELECT key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [it.id])).rows[0];
+      if (!row) { skipped.push(it.id); continue; }
+      await purgeIssueRows(it.id);
+      purged.push(row.key);
+    }
+  }
+  res.json({ ok: true, purged: purged.length, skipped: skipped.length, labels: purged });
+}));
+
+app.delete('/api/bin/:type/:id', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can permanently delete items.')) return;
+  const { type, id } = req.params;
+  if (type === 'ticket') {
+    return purgeIssue(id, req, res);
+  }
+  if (type === 'sprint') {
+    const row = (await q('SELECT name FROM sprints WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'Sprint is not in the bin — delete it first.' });
+    // Detach anything still pointing at it — including the former_sprint_id
+    // breadcrumb, which would otherwise dangle at a sprint id that no longer exists.
+    await q('UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1', [id]);
+    await q('UPDATE issues SET former_sprint_id=NULL WHERE former_sprint_id=$1', [id]);
+    await q('DELETE FROM sprints WHERE id=$1', [id]);
+    return res.json({ ok: true, label: row.name });
+  }
+  if (type === 'space') {
+    // Deliberately not implemented: purging a space would cascade through every
+    // issue, sprint, field and comment it owns. Archive is the terminal state.
+    return res.status(400).json({
+      error: 'Spaces cannot be permanently deleted from here. Restore it, or leave it archived.'
+    });
+  }
+  res.status(400).json({ error: 'Unknown item type: ' + type });
+}));
+
+// Shared by DELETE /api/bin/ticket/:id and the legacy /api/issues/:id/permanent.
+// Only ever purges something already in the bin, so one call can't destroy a live
+// issue. Callers must have already checked org-admin.
+async function purgeIssue(id, req, res) {
+  const row = (await q('SELECT id, key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
+  if (!row) return res.status(404).json({ error: 'Issue is not in the bin — restore or delete it first.' });
+  await purgeIssueRows(id);
+  return res.json({ ok: true, key: row.key, label: row.key });
+}
+
+app.delete('/api/issues/:id/permanent', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can permanently delete issues.')) return;
+  return purgeIssue(req.params.id, req, res);
 }));
 
 app.get('/api/issues/:id', requireAuth, wrap(async (req, res) => {
@@ -760,6 +974,11 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   const oldRow = (await q('SELECT * FROM issues WHERE id=$1', [req.params.id])).rows[0];
   const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
   const newRow = r.rows[0];
+  // Same rule as PUT /:id/move — deciding this ticket's sprint by hand retires the
+  // former_sprint_id breadcrumb, so restoring its old deleted sprint won't yank it back.
+  if (keys.includes('sprint_id')) {
+    await q('UPDATE issues SET former_sprint_id=NULL WHERE id=$1', [req.params.id]).catch(() => {});
+  }
   const TRACKED = ['title','status','priority','assignee_id','reporter_id','sprint_id','labels','story_points','start_date','due_date','description','fix_description'];
   if (oldRow) {
     for (const key of keys) {
@@ -833,6 +1052,10 @@ app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
   }
   const upd = buildDynamicUpdate('issues', picked, 2);
   const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=ANY($1) RETURNING *`, [ids, ...upd.vals]);
+  // A bulk sprint move is still a deliberate move — retire the breadcrumb (see PUT /api/issues/:id).
+  if (keys.includes('sprint_id')) {
+    await q('UPDATE issues SET former_sprint_id=NULL WHERE id=ANY($1)', [ids]).catch(() => {});
+  }
   res.json({ ok: true, updated: r.rowCount, issues: r.rows });
 }));
 
@@ -1245,9 +1468,13 @@ app.post('/api/custom-fields', requireAuth, wrap(async (req, res) => {
   }
   // options must be JSON-stringified for jsonb column (pg binds arrays as PG arrays otherwise)
   const opts = b.options != null ? JSON.stringify(Array.isArray(b.options) ? b.options : []) : '[]';
-  const r = await q(`INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position)
-    VALUES($1,$2,$3,$4,$5::jsonb,$6,$7) RETURNING *`,
-    [uid(), b.space_id, b.name, b.field_type, opts, b.is_required || false, b.position || 0]);
+  // show_in was omitted here, so the column default ('{drawer}') always won and a
+  // field created with "Create issue" ticked silently became drawer-only.
+  const showIn = Array.isArray(b.show_in) && b.show_in.length ? b.show_in : ['drawer'];
+  const reqTypes = Array.isArray(b.required_types) ? b.required_types : null;
+  const r = await q(`INSERT INTO custom_fields(id,space_id,name,field_type,options,is_required,position,show_in,required_types)
+    VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING *`,
+    [uid(), b.space_id, b.name, b.field_type, opts, b.is_required || false, b.position || 0, showIn, reqTypes]);
   res.status(201).json(r.rows[0]);
 }));
 
@@ -1256,7 +1483,7 @@ app.post('/api/custom-fields', requireAuth, wrap(async (req, res) => {
 // apply-to-all below, which copies one that already exists on some board).
 // Skips any space that already has a field with the same name.
 app.post('/api/custom-fields/create-for-all', requireAuth, wrap(async (req, res) => {
-  if (!requireOrgAdmin(req.user, res)) return;
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can add a field to every space.')) return;
   const b = req.body;
   if (!b.name || !b.field_type) return res.status(400).json({ error: 'name and field_type are required' });
   if (isReservedFieldName(b.name)) {
@@ -1318,7 +1545,7 @@ app.put('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
 // name. Returns which boards it was actually added to and which were
 // skipped (and why) so the UI can show something more useful than a count.
 app.post('/api/custom-fields/:id/apply-to-all', requireAuth, wrap(async (req, res) => {
-  if (!requireOrgAdmin(req.user, res)) return;
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can push a field to every space.')) return;
   const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
   if (!field) return res.status(404).json({ error: 'Field not found' });
   // is_archived defaults to false, but treat NULL the same way defensively
@@ -1438,7 +1665,9 @@ app.put('/api/issues/:id/move', requireAuth, wrap(async (req, res) => {
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'issue.move'))) return;
   const { sprint_id } = req.body;
   const oldRow = (await q('SELECT sprint_id FROM issues WHERE id=$1', [req.params.id])).rows[0];
-  const r = await q('UPDATE issues SET sprint_id=$1,updated_at=NOW() WHERE id=$2 RETURNING *',
+  // Clearing former_sprint_id: an explicit move is the user's decision about where
+  // this ticket belongs, so restoring its old deleted sprint must not undo it.
+  const r = await q('UPDATE issues SET sprint_id=$1,former_sprint_id=NULL,updated_at=NOW() WHERE id=$2 RETURNING *',
     [sprint_id || null, req.params.id]);
   if (oldRow) {
     await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value) VALUES($1,$2,$3,$4,$5,$6)`,
@@ -1469,7 +1698,7 @@ app.get('/api/reports/velocity', requireAuth, wrap(async (req, res) => {
   if (!req.query.space_id) return res.status(400).json({ error: 'space_id is required' });
   if (!(await denyUnlessCanAct(q, req.user, res, req.query.space_id, 'report.view'))) return;
   const r = await q(`SELECT id, name, velocity, start_date, end_date
-    FROM sprints WHERE space_id=$1 AND status='completed' ORDER BY end_date`,
+    FROM sprints WHERE space_id=$1 AND status='completed' AND deleted_at IS NULL ORDER BY end_date`,
     [req.query.space_id]);
   res.json(r.rows);
 }));
@@ -2509,6 +2738,8 @@ app.get('/space/:key/:tab?', (req, res) => {
     app.listen(PORT, () => {
       console.log('  Listening on http://localhost:' + PORT);
       console.log('==================================================');
+      // Started after listen so a slow first sweep never delays accepting traffic.
+      startRetentionSweeper(q);
     });
   } catch (e) {
     console.error('Failed to connect to database:', e.message);

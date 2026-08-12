@@ -667,6 +667,7 @@
             <button class="tab-btn active" data-stab="general" onclick="window._switchSettingsTab('general')">General</button>
             <button class="tab-btn" data-stab="people" onclick="window._switchSettingsTab('people')">People</button>
             <button class="tab-btn" data-stab="customfields" onclick="window._switchSettingsTab('customfields')">Custom Fields</button>
+            <button class="tab-btn" data-stab="deleted" onclick="window._switchSettingsTab('deleted')">Deleted Items</button>
           </div>
           <div id="settingsTabContent"></div>
         </div>
@@ -894,8 +895,7 @@
                   <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option><option value="Dev">Dev</option><option value="QA">QA</option><option value="Infra">Infra</option><option value="Manage">Manage</option><option value="Product_Team">Product Team</option></select></td></tr>
                   <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option><option value="Message">Message Type</option><option value="Email">Mail Type</option><option value="Content">Content Type</option><option value="Manage">Manage</option><option value="Infra">Infra</option></select></td></tr>
                   <tr id="drawerCombinationRow" hidden data-builtin-field="combination">
-                    <td class="dfl">Product Type</td>
-                    <td class="dfv"><div id="drawerCombinationField"></div></td>
+                    <td class="dfv pt-combo-cell" colspan="2"><div id="drawerCombinationField"></div></td>
                   </tr>
                 </tbody>
                 <tbody id="drawerCustomFields"></tbody>
@@ -1159,7 +1159,6 @@
             </div>
           </div>
           <div class="form-group" id="issueCombinationGroup" hidden data-builtin-field="combination">
-            <label class="form-label">Product Type &amp; Combinations</label>
             <div id="issueCombinationField"></div>
           </div>
           <div class="form-group" data-builtin-field="description">
@@ -1310,6 +1309,16 @@
           </div>
           <div class="form-group form-check">
             <label><input type="checkbox" id="customFieldRequired"> Required</label>
+          </div>
+          <!-- Only shown while Required is ticked: which issue types the rule applies
+               to, so e.g. Story Points can be mandatory for stories and tasks but
+               not for bugs. -->
+          <div class="form-group" id="customFieldRequiredTypesGroup" hidden>
+            <label class="form-label">Required for which issue types?</label>
+            <div id="customFieldRequiredTypes" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+            <p style="font-size:12px;color:var(--text2);margin:8px 0 0">
+              Tick every type that must have this field filled in. Types left unticked can be saved without it.
+            </p>
           </div>
           <div class="form-group" id="customFieldShowInGroup">
             <label class="form-label">Show in</label>

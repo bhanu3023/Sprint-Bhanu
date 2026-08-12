@@ -1145,16 +1145,64 @@ body.light .sprint-lane {
 /* Backlog lanes (sprint sections in backlog) */
 .backlog-lane { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 12px; overflow: hidden; }
 body.light .backlog-lane { background: #ffffff; border-color: #d0d7de; }
-.backlog-lane-header { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; background: var(--bg3); cursor: pointer; border-bottom: 1px solid var(--border); }
+.backlog-lane-header { padding: 11px 14px; display: flex; align-items: center; gap: 12px; justify-content: space-between; background: var(--bg3); cursor: pointer; border-bottom: 1px solid var(--border); }
 body.light .backlog-lane-header { background: #f7f8fa; }
 .backlog-lane-header:hover { background: var(--bg4); }
-.lane-header-left { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; }
-.lane-header-actions { display: flex; align-items: center; gap: 4px; }
+.lane-header-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; flex-wrap: wrap; }
+.lane-header-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Sprint name carries the row; everything after it is secondary. */
+.lane-title { font-size: 14.5px; font-weight: 700; color: var(--text); letter-spacing: -.01em; white-space: nowrap; }
+
+/* Chevron rotates instead of swapping glyphs, so collapsing animates. */
+.lane-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; flex-shrink: 0; color: var(--text3);
+  transition: transform .16s ease, color .12s;
+}
+.backlog-lane-header:hover .lane-toggle { color: var(--text); }
+.lane-toggle.is-collapsed { transform: rotate(-90deg); }
+
+/* Meta group: dimmed, dot-separated, pushed away from the title. */
+.lane-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0; margin-left: 2px; min-width: 0; }
+.lane-meta-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 500; color: var(--text3);
+  white-space: nowrap; padding: 0 10px; position: relative;
+}
+.lane-meta-item + .lane-meta-item::before {
+  content: ''; position: absolute; left: 0; top: 50%;
+  width: 3px; height: 3px; margin-top: -1.5px; border-radius: 50%;
+  background: var(--text3); opacity: .5;
+}
+.lane-meta-item:first-child { padding-left: 4px; }
+.lane-meta-icon { color: var(--text3); flex-shrink: 0; opacity: .85; }
 .sprint-dates { font-size: 12px; color: var(--text3); font-weight: 400; white-space: nowrap; }
-.lane-toggle { font-size: 12px; width: 16px; cursor: pointer; }
+
 .backlog-lane-body { }
 .backlog-lane-body.collapsed { display: none; }
-.backlog-add-row { padding: 6px 14px; }
+
+/* A real button rather than bare link text, so the affordance is visible. */
+.backlog-add-row { padding: 8px 12px 10px; }
+.backlog-add-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 14px;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--text2);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.backlog-add-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  border-style: solid;
+  background: rgba(37, 99, 235, .06);
+}
+.backlog-add-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.backlog-add-btn svg { flex-shrink: 0; }
 
 /* Fixed column grid so priority / status / points / assignee line up down the
    lane instead of drifting with each title's length. Cell count and order here
@@ -1166,7 +1214,7 @@ body.light .backlog-lane-header { background: #f7f8fa; }
     76px                /* issue key   */
     minmax(0, 1fr)      /* title       */
     86px                /* priority    */
-    104px               /* status      */
+    124px               /* status — fits the fixed-width .issue-status-badge */
     38px                /* points      */
     24px;               /* assignee    */
   align-items: center;
@@ -1189,12 +1237,15 @@ body.light .backlog-lane-header { background: #f7f8fa; }
   display: block;          /* block, not flex — ellipsis needs a text box */
   line-height: 1.5;
 }
+/* Fixed-width pills centred in their tracks, so both columns read as one line. */
+.bl-priority { justify-content: center; }
+.bl-status { justify-content: center; }
 .bl-points { justify-content: flex-end; }
 .bl-assignee { justify-content: flex-end; }
 
 /* Narrow viewports: drop points, then status, before the title gets squeezed. */
 @media (max-width: 900px) {
-  .backlog-row { grid-template-columns: 18px 70px minmax(0, 1fr) 80px 100px 0 24px; }
+  .backlog-row { grid-template-columns: 18px 70px minmax(0, 1fr) 80px 124px 0 24px; }
   .bl-points { display: none; }
 }
 @media (max-width: 700px) {
@@ -2058,6 +2109,67 @@ body.light .drawer-input { background: #ffffff; }
 /* ------------------------------------------------------------
    BADGES — Status
    ------------------------------------------------------------ */
+/* Status pill emitted by statusBadge() in app.js — used on the backlog, board,
+   tables, drawer and report popups.
+   Fixed min-width so a column of them reads as one set: "DONE" and
+   "IN PROGRESS" were very different widths and the ragged edges made a list
+   hard to scan. The width matches the longest label, so nothing renders wider
+   than it already did — only the short ones grow to match. Colours stay inline
+   in the JS because they vary per status.
+   Named distinctly from .status-badge below, which is a separate older pill. */
+.issue-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-width: 116px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* Issue type icon wrapper from typeIcon(). Centres the SVG instead of letting
+   it baseline-align, which is what made the icon look raised beside its label. */
+.type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.type-icon svg { display: block; }
+
+/* Icon + label pair in the Type column of the My Work / All Work tables. */
+.type-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+.type-cell-label { font-size: 12px; color: var(--text2); }
+
+/* Priority label emitted by priorityBadge(). Fixed width for the same reason as
+   the status pill: on the dashboard the priority sits AFTER the status, so a
+   natural-width "High" vs "Highest" shifted the status pill sideways row to row.
+   Sized to the longest label so nothing renders wider than it already did. */
+.issue-priority-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-width: 72px;
+  font-size: 13px;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
 .status-badge {
   font-size: 11px;
   padding: 2px 10px;
@@ -3332,12 +3444,20 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
   line-height: 1.45;
 }
 
+/* Two columns: a narrow fixed Product Type list and a wide Combinations panel.
+   Stacked vertically these shared one cramped column, which wrapped entries
+   like "Chat - Chat" onto two lines. */
 .pt-combo-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  --pt-combo-font: 14px;
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  --pt-combo-font: 13.5px;
   --pt-combo-check: 15px;
+}
+/* The drawer's detail column is narrow, so fall back to stacked there. */
+@media (max-width: 1100px) {
+  .pt-combo-picker { grid-template-columns: minmax(0, 1fr); gap: 14px; }
 }
 .pt-combo-section {
   display: flex;
@@ -3364,16 +3484,17 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
 .pt-combo-panel-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding: 6px 8px 4px;
+  padding: 8px 8px 6px;
   background: transparent;
-  border-bottom: none;
+  border-bottom: 1px solid var(--border);
   min-height: 0;
 }
+/* Full width now that the panel has room — a 200px box floated right looked
+   like an afterthought against a wide list. */
 .pt-combo-search-wrap {
   position: relative;
-  flex-shrink: 0;
-  width: min(200px, 100%);
+  flex: 1;
+  min-width: 0;
 }
 .pt-combo-search-icon {
   position: absolute;
@@ -3411,22 +3532,23 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
 }
 .pt-type-list {
   max-height: none;
-  padding: 6px 8px 10px;
+  padding: 6px 6px 8px;
 }
+/* Matches the type list's height so the two panels sit as an even pair. */
 .pt-combo-list {
-  max-height: 260px;
+  max-height: 300px;
   overflow-y: auto;
-  padding: 0 8px 10px;
+  padding: 6px 6px 8px;
 }
 .pt-combo-check {
   display: grid;
   grid-template-columns: var(--pt-combo-check) minmax(0, 1fr);
-  column-gap: 14px;
+  column-gap: 10px;
   align-items: center;
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 12px;
-  min-height: calc(var(--pt-combo-check) + 16px);
+  padding: 5px 8px;
+  min-height: calc(var(--pt-combo-check) + 10px);
   border-radius: 8px;
   cursor: pointer;
   transition: background .12s;
@@ -3470,12 +3592,17 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
   min-width: 0;
   color: var(--text);
   font-size: var(--pt-combo-font);
-  line-height: var(--pt-combo-check);
+  line-height: 1.35;
   font-weight: 500;
   padding: 0;
   margin: 0;
   align-self: center;
-  white-space: normal;
+  /* One line, ellipsis if it truly can't fit — the full value is on the
+     label's title attribute. Wrapping made every row a different height and
+     turned the list into a ragged block. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .pt-combo-check:has(input:checked) .pt-combo-check-label {
   color: var(--accent);
@@ -3515,6 +3642,25 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
   gap: 9px;
 }
 #drawerCombinationField .pt-combo-search-wrap {
+  width: min(180px, 100%);
+}
+/* The Create Issue modal renders the same picker markup but never got these
+   overrides, so it fell back to the base metrics and the checkbox sat flush
+   against its label. Mirroring the drawer's values verbatim makes the two
+   surfaces identical — scoped to #issueCombinationField, so the details drawer
+   above is not affected. */
+#issueCombinationField .pt-combo-picker {
+  --pt-combo-font: 13px;
+  --pt-combo-check: 14px;
+}
+#issueCombinationField .pt-combo-list {
+  max-height: 220px;
+}
+#issueCombinationField .pt-combo-check {
+  padding: 7px 10px;
+  gap: 9px;
+}
+#issueCombinationField .pt-combo-search-wrap {
   width: min(180px, 100%);
 }
 
@@ -4989,3 +5135,60 @@ body.light .sprint-info { background: #ffffff; border-color: #d0d7de; }
 .sprint-info .sprint-goal { font-size: 13px; color: var(--text2); margin: 4px 0 10px; line-height: 1.5; }
 .sprint-info .sprint-stats-row { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; flex-wrap: wrap; }
 .sprint-info .sprint-stats-row span { font-size: 12px; color: var(--text3); }
+
+/* ── Typed confirm dialog ─────────────────────────────────────
+   "Type the ticket key to confirm" gate for destructive actions. Uses theme
+   tokens throughout so it reads correctly in both light and dark. */
+.typed-confirm { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.typed-confirm-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
+.typed-confirm-dialog {
+  position: relative; width: 100%; max-width: 460px; background: var(--bg2);
+  border: 1px solid var(--border); border-radius: 10px; padding: 22px 24px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.35); box-sizing: border-box;
+}
+.typed-confirm-title { margin: 0 0 10px; font-size: 17px; font-weight: 700; color: var(--text); }
+.typed-confirm-intro { margin: 0 0 12px; font-size: 13.5px; line-height: 1.55; color: var(--text2); }
+.typed-confirm-intro:empty { display: none; }
+.typed-confirm-warn {
+  margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: 6px; padding: 9px 11px;
+}
+.typed-confirm-note {
+  margin: 0 0 14px; font-size: 12.5px; line-height: 1.5; color: var(--text3);
+  background: var(--bg3); border-radius: 6px; padding: 9px 11px;
+}
+.typed-confirm-label { display: block; font-size: 12.5px; color: var(--text2); margin-bottom: 6px; }
+.typed-confirm-phrase {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; font-weight: 700;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 6px; color: var(--text); user-select: all;
+}
+.typed-confirm-input {
+  width: 100%; box-sizing: border-box; padding: 9px 11px; font-size: 14px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; margin-bottom: 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.typed-confirm-input:focus { outline: none; border-color: var(--accent); }
+.typed-confirm-dialog.is-armed .typed-confirm-input { border-color: var(--danger); }
+.typed-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.typed-confirm-ok:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Bin list */
+.bin-bulkbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+  padding: 9px 12px; margin-bottom: 10px; font-size: 13px; color: var(--text2);
+}
+.bin-expiry-soon { color: var(--danger); font-weight: 600; }
+.typed-confirm-details {
+  margin: 0 0 12px; padding: 10px 12px 10px 26px; list-style: disc;
+  background: var(--bg3); border-radius: 6px;
+  font-size: 12.5px; line-height: 1.65; color: var(--text2);
+  max-height: 190px; overflow-y: auto;
+}
+.typed-confirm-details li { margin: 0; }
+/* Keep the dialog usable when the details list is long: the body scrolls, the
+   buttons stay reachable. */
+.typed-confirm-dialog { max-height: calc(100vh - 40px); overflow-y: auto; }
