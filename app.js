@@ -6969,6 +6969,9 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
   }
 
   var thStyle = 'padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)';
+  // Correcting a finished sprint's record is org-admin only. The server decides
+  // (can_edit_spillover) so the button is never shown to someone it would 403 for.
+  var canEditSpillover = !!data.can_edit_spillover;
   var tableRows = issues.map(function(i) {
     var sc = SCOLORS[i.status] || '#42526e';
     var pc = PCOLORS[i.priority] || '#6b7280';
@@ -6981,6 +6984,13 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
       '<td style="padding:10px 12px"><span style="background:' + pc + '22;color:' + pc + ';border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">' + esc(i.priority||'—') + '</span></td>' +
       '<td style="padding:10px 12px;font-size:12px">' + assigneeName + '</td>' +
       '<td style="padding:10px 12px;font-size:12px;text-align:center;color:var(--text2)">' + (i.story_points != null ? i.story_points : '—') + '</td>' +
+      (canEditSpillover
+        ? '<td style="padding:10px 12px;text-align:right;white-space:nowrap">' +
+            '<button class="btn btn-sm btn-outline text-danger spill-remove-btn" ' +
+              'data-issue-id="' + escAttr(i.id) + '" data-key="' + escAttr(i.key) + '" ' +
+              'title="Remove this ticket from the sprint\'s spillover record">Remove</button>' +
+          '</td>'
+        : '') +
       '</tr>';
   }).join('');
 
@@ -7043,10 +7053,49 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
         '<th style="' + thStyle + '">Priority</th>' +
         '<th style="' + thStyle + '">Assignee</th>' +
         '<th style="' + thStyle + ';text-align:center">SP</th>' +
+        (canEditSpillover ? '<th style="' + thStyle + ';text-align:right">Actions</th>' : '') +
         '</tr></thead>' +
         '<tbody>' + tableRows + '</tbody></table></div>'
       : '') +
     '</div>';
+
+  if (canEditSpillover) bindSpilloverRemoveButtons(c, sprint);
+}
+
+// Removing a ticket from a completed sprint's spillover record. Org admin only —
+// the button is not rendered otherwise, and the endpoint enforces it again.
+function bindSpilloverRemoveButtons(container, sprint) {
+  container.querySelectorAll('.spill-remove-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      var key = btn.dataset.key;
+      var ok = await typedConfirmDialog({
+        title: 'Remove ' + key + ' from spillover?',
+        intro: 'This corrects how "' + (sprint.name || 'this sprint') + '" reads in the Spillover report.',
+        details: [
+          'The ticket itself is not changed — it keeps its status, its sprint links and its comments',
+          'Only the marker saying it spilled out of this sprint is removed',
+          'The correction is recorded in the audit log against your name'
+        ],
+        warn: 'This rewrites a completed sprint\'s record and cannot be undone from the UI.',
+        phrase: key,
+        phraseHint: 'To confirm, type the ticket number',
+        confirmLabel: 'Remove from spillover'
+      });
+      if (!ok) return;
+      btn.disabled = true;
+      btn.textContent = 'Removing…';
+      try {
+        await api('/api/sprints/' + sprint.id + '/spillover/' + btn.dataset.issueId, 'DELETE', null, { silent: true });
+        toast(key + ' removed from this sprint\'s spillover', 'success');
+        if (typeof renderReports === 'function') renderReports();
+        else if (typeof renderCurrentView === 'function') renderCurrentView();
+      } catch (e) {
+        toast(e.message || 'Could not remove it from spillover', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Remove';
+      }
+    });
+  });
 }
 
 function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {

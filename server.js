@@ -1961,11 +1961,26 @@ app.get('/api/reports/bugs/:sprintId', requireAuth, wrap(async (req, res) => {
 }));
 
 // Spillover report — issues that were in a sprint but not completed
+// Issues an org admin has removed from this sprint's spillover record. Kept in
+// audit_logs rather than issue_history: the history row is deleted (it is what the
+// report reads), and this is the permanent trail of who corrected the record.
+// Both query paths below must honour it, otherwise removing the last spillover row
+// flips the report to its legacy fallback and the removed issues reappear.
+async function spilloverExcludedIds(sprintId) {
+  const rows = (await q(
+    `SELECT entity_id FROM audit_logs
+      WHERE action='spillover.remove' AND entity_type='issue' AND details->>'sprint_id' = $1`,
+    [sprintId]
+  )).rows;
+  return rows.map(function (r) { return r.entity_id; });
+}
+
 app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) => {
   const sid = req.params.sprintId;
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
+  const excluded = await spilloverExcludedIds(sid);
 
   let spillover = [];
   if (sprint.status === 'completed') {
@@ -1984,8 +1999,9 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
         AND ih.old_value = $1
         AND (ih.new_value IS NULL OR ih.new_value = '' OR ih.new_value = 'null')
         AND i.deleted_at IS NULL
+        AND NOT (i.id = ANY($2::varchar[]))
       ORDER BY i.id, ih.created_at DESC
-    `, [sid])).rows;
+    `, [sid, excluded])).rows;
 
     if (fromHistory.length > 0) {
       spillover = fromHistory;
@@ -2002,8 +2018,9 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
           AND i.sprint_id IS NULL
           AND i.status != 'Done'
           AND i.deleted_at IS NULL
+          AND NOT (i.id = ANY($2::varchar[]))
         ORDER BY i.id, ih.created_at DESC
-      `, [sid])).rows;
+      `, [sid, excluded])).rows;
     }
   } else {
     // Active/planning sprint: projected spillover = current non-done issues
@@ -2012,8 +2029,9 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
         i.story_points, i.assignee_id, NULL AS spilled_at
       FROM issues i
       WHERE i.sprint_id = $1 AND i.status != 'Done' AND i.deleted_at IS NULL
+        AND NOT (i.id = ANY($2::varchar[]))
       ORDER BY i.key
-    `, [sid])).rows;
+    `, [sid, excluded])).rows;
   }
 
   const assigneeIds = [...new Set(spillover.map(i => i.assignee_id).filter(Boolean))];
@@ -2028,8 +2046,48 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
     sprint,
     spillover: spillover.map(i => ({ ...i, assignee: userMap[i.assignee_id] || null })),
     count: spillover.length,
-    totalPts
+    totalPts,
+    // Lets the UI show the Remove control only to those who can actually use it.
+    can_edit_spillover: isOrgAdmin(req.user.role)
   });
+}));
+
+// Take one issue out of a completed sprint's spillover record. Org admin only:
+// this rewrites how a finished sprint reads, so it is deliberately not something a
+// space admin can do. The issue itself is untouched — only the sprint's spillover
+// marker goes, and the correction is recorded in audit_logs.
+app.delete('/api/sprints/:sprintId/spillover/:issueId', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can edit a sprint\'s spillover history.')) return;
+  const { sprintId, issueId } = req.params;
+  const sprint = (await q('SELECT id, name, space_id, status FROM sprints WHERE id=$1', [sprintId])).rows[0];
+  if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
+  const issue = (await q('SELECT id, key, title FROM issues WHERE id=$1', [issueId])).rows[0];
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+
+  const already = await spilloverExcludedIds(sprintId);
+  const removed = await q(
+    `DELETE FROM issue_history
+      WHERE field_name='spillover' AND old_value=$1 AND issue_id=$2`,
+    [sprintId, issueId]
+  );
+  if (!removed.rowCount && already.indexOf(issueId) >= 0) {
+    return res.status(404).json({ error: issue.key + ' has already been removed from this sprint\'s spillover.' });
+  }
+
+  // Recorded even when no history row existed, because the legacy fallback query
+  // can surface an issue without one and the exclusion is what keeps it out.
+  await q(
+    `INSERT INTO audit_logs(id,space_id,user_id,action,entity_type,entity_id,details)
+     VALUES($1,$2,$3,'spillover.remove','issue',$4,$5::jsonb)`,
+    [uid(), sprint.space_id, req.user.id, issueId, JSON.stringify({
+      sprint_id: sprintId,
+      sprint_name: sprint.name,
+      issue_key: issue.key,
+      issue_title: issue.title,
+      history_rows_deleted: removed.rowCount
+    })]
+  );
+  res.json({ ok: true, key: issue.key, history_rows_deleted: removed.rowCount });
 }));
 
 // ── Notifications ─────────────────────────────────────────
@@ -2696,6 +2754,13 @@ app.get([
 });
 app.get('/space/:key/:tab?', (req, res) => {
   res.sendFile(SPA_HTML);
+});
+
+// /login is a clean alias for the existing login page. Without it the path fell
+// through to the 404 handler, because login.html is only reachable by its filename
+// and the SPA list above does not include it.
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'login.html'));
 });
 
 // ── Startup (read-only — no DDL) ─────────────────────────
