@@ -9039,8 +9039,15 @@ if ($('customFieldName')) {
 // Selected files for Create Issue modal (allows individual removal)
 var _selectedFiles = [];
 var _attachmentThumbUrls = [];
-var ISSUE_MAX_FILE_BYTES = 500 * 1024 * 1024;
-var ISSUE_MAX_TOTAL_ATTACH_BYTES = 200 * 1024 * 1024;
+var ISSUE_MAX_FILE_BYTES = 1024 * 1024 * 1024;            // 1 GB per file
+var ISSUE_MAX_TOTAL_ATTACH_BYTES = 1024 * 1024 * 1024;    // 1 GB per upload
+// Every "too large" message derives its number from the constants above, so the
+// text can never claim a limit the code no longer enforces.
+function fmtByteLimit(bytes) {
+  var gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return (Number.isInteger(gb) ? gb : gb.toFixed(1)) + ' GB';
+  return Math.round(bytes / (1024 * 1024)) + ' MB';
+}
 var ISSUE_MAX_ATTACHMENTS = 20;
 var ISSUE_MAX_DESC_CHARS = 500000;
 var _lastPasteFingerprint = '';
@@ -9102,7 +9109,7 @@ function _addIssueAttachmentFile(file, sourceLabel) {
   _lastPasteFingerprint = fp;
   _lastPasteTime = now;
   if (file.size > ISSUE_MAX_FILE_BYTES) {
-    toast('File too large (max 500 MB): ' + (file.name || 'file'), 'error');
+    toast('File too large (max ' + fmtByteLimit(ISSUE_MAX_FILE_BYTES) + '): ' + (file.name || 'file'), 'error');
     return false;
   }
   if (_selectedFiles.length >= ISSUE_MAX_ATTACHMENTS) {
@@ -9112,7 +9119,7 @@ function _addIssueAttachmentFile(file, sourceLabel) {
   var total = file.size;
   for (var i = 0; i < _selectedFiles.length; i++) total += _selectedFiles[i].size;
   if (total > ISSUE_MAX_TOTAL_ATTACH_BYTES) {
-    toast('Total attachment size too large (max 200 MB). Remove some files or use smaller screenshots.', 'error');
+    toast('Total attachment size too large (max ' + fmtByteLimit(ISSUE_MAX_TOTAL_ATTACH_BYTES) + '). Remove some files or use smaller screenshots.', 'error');
     return false;
   }
   _selectedFiles.push(file);
@@ -9129,13 +9136,13 @@ function _validateIssueAttachments() {
   var total = 0;
   for (var i = 0; i < _selectedFiles.length; i++) {
     if (_selectedFiles[i].size > ISSUE_MAX_FILE_BYTES) {
-      toast('File too large (max 500 MB): ' + _selectedFiles[i].name, 'error');
+      toast('File too large (max ' + fmtByteLimit(ISSUE_MAX_FILE_BYTES) + '): ' + _selectedFiles[i].name, 'error');
       return false;
     }
     total += _selectedFiles[i].size;
   }
   if (total > ISSUE_MAX_TOTAL_ATTACH_BYTES) {
-    toast('Total attachment size too large (max 200 MB)', 'error');
+    toast('Total attachment size too large (max ' + fmtByteLimit(ISSUE_MAX_TOTAL_ATTACH_BYTES) + ')', 'error');
     return false;
   }
   return true;
@@ -9213,21 +9220,94 @@ async function uploadDescImageFile(file) {
   return data.files[0];
 }
 
+// ── Word-document behaviour for Description / Fix Description ──
+// A screenshot goes in at the caret as a plain <img> in the editable flow, with a
+// line break after it, so you carry on typing underneath and remove it with
+// Backspace like any other character.
+//
+// Previously every image was appended to a contenteditable="false" tray pinned to
+// the end of the field. That meant images always jumped to the bottom whatever
+// the caret was doing, the keyboard could not delete them (hence the × button),
+// and because the non-editable tray was the last child there was no editable node
+// after it — so there was no way to type anything below a screenshot.
+function insertDescImageAtCaret(editorEl, url, alt, fp) {
+  if (!editorEl) return;
+  var img = document.createElement('img');
+  img.className = 'desc-inline-img';
+  img.src = fileApiUrl(url);
+  img.setAttribute('data-url', url);
+  if (fp) img.setAttribute('data-fp', fp);
+  img.alt = alt || 'Screenshot';
+
+  var sel = window.getSelection();
+  var range = null;
+  if (sel && sel.rangeCount) {
+    var r = sel.getRangeAt(0);
+    // Only reuse the caret if it is actually inside THIS field.
+    if (editorEl.contains(r.commonAncestorContainer)) range = r;
+  }
+  if (!range) {
+    range = document.createRange();
+    range.selectNodeContents(editorEl);
+    range.collapse(false);
+  }
+  range.deleteContents();
+  var br = document.createElement('br');
+  var frag = document.createDocumentFragment();
+  frag.appendChild(img);
+  frag.appendChild(br);
+  range.insertNode(frag);
+
+  // Park the caret after the break so the next keystroke lands below the image.
+  // focus() FIRST: focusing a contenteditable collapses the caret to the start of
+  // the element, so doing it afterwards threw the caret away — the next thing you
+  // typed (or pasted) went in above the image instead of below it.
+  editorEl.focus();
+  var after = document.createRange();
+  after.setStartAfter(br);
+  after.collapse(true);
+  var liveSel = window.getSelection();
+  if (liveSel) { liveSel.removeAllRanges(); liveSel.addRange(after); }
+}
+
+// Descriptions saved before the change hold their screenshots inside the old
+// tray markup. Convert them to inline images on load so existing content edits
+// the same way — and the per-image × button stops appearing.
+function normalizeDescInlineImages(editorEl) {
+  if (!editorEl) return;
+  var trays = editorEl.querySelectorAll('.desc-image-tray');
+  for (var t = 0; t < trays.length; t++) {
+    var tray = trays[t];
+    var frag = document.createDocumentFragment();
+    var chips = tray.querySelectorAll('.desc-image-chip');
+    for (var i = 0; i < chips.length; i++) {
+      var src = chips[i].querySelector('img');
+      if (!src) continue;
+      var img = document.createElement('img');
+      img.className = 'desc-inline-img';
+      img.src = src.getAttribute('src') || '';
+      if (chips[i].dataset.url) img.setAttribute('data-url', chips[i].dataset.url);
+      img.alt = src.getAttribute('alt') || 'Screenshot';
+      frag.appendChild(img);
+      frag.appendChild(document.createElement('br'));
+    }
+    if (tray.parentNode) tray.parentNode.replaceChild(frag, tray);
+  }
+}
+
 async function handleDescImagePaste(editorEl, file) {
   if (!editorEl || !file) return;
   var fp = _fileFingerprint(file);
-  var tray = getOrCreateDescImageTray(editorEl);
-  var chips = tray.querySelectorAll('.desc-image-chip');
-  for (var i = 0; i < chips.length; i++) {
-    if (chips[i].dataset.fp === fp) {
+  var already = editorEl.querySelectorAll('.desc-inline-img[data-fp]');
+  for (var i = 0; i < already.length; i++) {
+    if (already[i].getAttribute('data-fp') === fp) {
       toast('This screenshot is already in the description', 'warning');
       return;
     }
   }
   try {
     var uploaded = await uploadDescImageFile(file);
-    addDescInlineImageChip(tray, uploaded.url, file.name || 'Screenshot', fp);
-    bindDescImageTray(editorEl);
+    insertDescImageAtCaret(editorEl, uploaded.url, file.name || 'Screenshot', fp);
     if (editorEl.id === 'drawerDesc' || editorEl.id === 'drawerFixDesc') markDrawerDescDirty(editorEl.id);
     toast('Screenshot added to description', 'success');
   } catch (e) {
@@ -9249,7 +9329,11 @@ function getDescriptionHtmlForSave(editorEl) {
 function initDescEditorImageTrays() {
   DESC_EDITOR_IDS.forEach(function (id) {
     var el = document.getElementById(id);
-    if (el) bindDescImageTray(el);
+    if (!el) return;
+    normalizeDescInlineImages(el);
+    // Kept as a safety net for any legacy tray that reaches an editor by another
+    // path; once normalised there are no chips left for it to act on.
+    bindDescImageTray(el);
   });
 }
 
@@ -9400,7 +9484,10 @@ document.addEventListener('change', function(e) {
   if (e.target.id === 'drawerCommentAttach') {
     var files = e.target.files;
     for (var i = 0; i < files.length; i++) {
-      if (files[i].size > 500 * 1024 * 1024) { toast('File too large (max 500 MB)', 'error'); continue; }
+      if (files[i].size > ISSUE_MAX_FILE_BYTES) {
+        toast('File too large (max ' + fmtByteLimit(ISSUE_MAX_FILE_BYTES) + ')', 'error');
+        continue;
+      }
       _commentFiles.push(files[i]);
     }
     e.target.value = '';
@@ -9674,8 +9761,10 @@ async function openDrawer(issueId) {
   }
   $('drawerDesc').innerHTML = renderDesc(descText);
   $('drawerFixDesc').innerHTML = renderDesc(fixDescText);
-  bindDescImageTray($('drawerDesc'));
-  bindDescImageTray($('drawerFixDesc'));
+  // Before bindDrawerEdits() captures its dirty-state baseline, so converting old
+  // tray markup does not make an untouched description look edited.
+  normalizeDescInlineImages($('drawerDesc'));
+  normalizeDescInlineImages($('drawerFixDesc'));
   var descBtns = $('drawerDescBtns'); if (descBtns) descBtns.style.display = 'none';
   var fixBtns = $('drawerFixDescBtns'); if (fixBtns) fixBtns.style.display = 'none';
 

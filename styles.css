@@ -3633,6 +3633,10 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
 #drawerCombinationField .pt-combo-picker {
   --pt-combo-font: 13px;
   --pt-combo-check: 14px;
+  /* Stacked in the drawer: Product Type above Combinations. The details column is
+     too narrow for two columns, which squeezed the combination labels. The Create
+     Issue modal is wide, so it keeps the side-by-side layout. */
+  grid-template-columns: minmax(0, 1fr);
 }
 #drawerCombinationField .pt-combo-list {
   max-height: 220px;
@@ -3662,6 +3666,16 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
 }
 #issueCombinationField .pt-combo-search-wrap {
   width: min(180px, 100%);
+}
+/* Let a long "Source - Destination" wrap instead of being cut to "Gmail…".
+   Only the wrapping properties are touched: overriding `display` here previously
+   pulled the label out of its grid column and stacked it under the checkbox. */
+#drawerCombinationField .pt-combo-check-label,
+#issueCombinationField .pt-combo-check-label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
 .combo-box {
@@ -4377,35 +4391,49 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 .rte-content a { color: var(--accent); text-decoration: underline; }
 .rte-content > img:not(.desc-image-chip img) { max-width: 100%; height: auto; border-radius: 4px; margin: 4px 0; }
 .jira-editor-body.drawer-desc { position: relative; padding-bottom: 56px; }
+/* A pasted screenshot is a normal image in the text flow — full width, on its own
+   line, selectable and deletable with Backspace like any other content. */
+.desc-inline-img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+}
+/* Legacy tray markup, still rendered read-only in places that do not normalise.
+   They used to be 72px thumbnails cropped with object-fit:cover and pinned to the
+   bottom-left corner, so you could not actually read a screenshot without opening
+   the lightbox. Applies to Description and Fix Description alike. */
 .desc-image-tray {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
-  max-width: calc(100% - 16px);
-  z-index: 3;
+  flex-direction: column;
+  gap: 12px;
+  position: static;
+  max-width: 100%;
+  margin: 12px 0 4px;
   pointer-events: auto;
 }
 .desc-image-chip {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 100%;
+  height: auto;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--bg2);
-  flex-shrink: 0;
   cursor: zoom-in;
 }
 .desc-image-chip img {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
+  /* contain, not cover: show the whole screenshot rather than a cropped centre. */
+  object-fit: contain;
   display: block;
   margin: 0;
-  max-width: none;
+  max-width: 100%;
 }
 .desc-image-remove {
   position: absolute;

@@ -156,7 +156,9 @@ app.use('/uploads', requireAuthFile, wrap(async (req, res, next) => {
   next();
 }), express.static(uploadsDir));
 
-// Multer storage config — max 500 MB
+// Multer storage config. No artificial size cap here — the practical ceiling is
+// the upload routes below, which buffer the file in memory and store the bytes in
+// file_storage.data (bytea, hard-capped at 1GB per value by Postgres).
 const storage = multer ? multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, uid() + '-' + file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_'))
