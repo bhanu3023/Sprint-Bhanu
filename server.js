@@ -2034,6 +2034,22 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
     `, [sid, excluded])).rows;
   }
 
+  // Per-space toggle (Settings > General), on by default: only count tickets
+  // assigned to a Developer on this sprint's team, so a QA-assigned ticket
+  // that spilled doesn't skew "who's carrying spilled work" for the dev
+  // team. Only applies when the sprint actually has a developer list to
+  // filter against — otherwise every assignee would be silently excluded.
+  const space = (await q('SELECT spillover_developers_only FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
+  const devOnly = space ? space.spillover_developers_only !== false : true;
+  const devIds = sprint.developer_ids || [];
+  let hiddenNonDevCount = 0;
+  if (devOnly && devIds.length) {
+    const devSet = new Set(devIds);
+    const before = spillover.length;
+    spillover = spillover.filter(i => i.assignee_id && devSet.has(i.assignee_id));
+    hiddenNonDevCount = before - spillover.length;
+  }
+
   const assigneeIds = [...new Set(spillover.map(i => i.assignee_id).filter(Boolean))];
   let userMap = {};
   if (assigneeIds.length) {
@@ -2047,6 +2063,8 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
     spillover: spillover.map(i => ({ ...i, assignee: userMap[i.assignee_id] || null })),
     count: spillover.length,
     totalPts,
+    developers_only_filter_active: devOnly && devIds.length > 0,
+    hidden_non_developer_count: hiddenNonDevCount,
     // Lets the UI show the Remove control only to those who can actually use it.
     can_edit_spillover: isOrgAdmin(req.user.role)
   });

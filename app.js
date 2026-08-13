@@ -6889,16 +6889,25 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
     return;
   }
 
-  // Count by type
-  var storiesArr = issues.filter(function(i){ return i.type === 'story'; });
-  var tasksBugsArr = issues.filter(function(i){ return i.type === 'task' || i.type === 'bug'; });
-  var stories = storiesArr.length;
-  var tasks = issues.filter(function(i){ return i.type === 'task'; }).length;
-  var bugs = issues.filter(function(i){ return i.type === 'bug'; }).length;
+  // Broken down by type, and stories further split by whether they actually
+  // carry story points — a story with no points spilling is a different
+  // signal (estimation gap) from a pointed one (capacity gap), so lumping
+  // them together as one "Stories" number hid that distinction. Each
+  // category gets its own drill-down key so clicking one only opens that
+  // subset, never the full spilled list.
+  var hasPoints = function(i) { return Number(i.story_points) > 0; };
+  var storiesWithPtsArr = issues.filter(function(i){ return i.type === 'story' && hasPoints(i); });
+  var storiesNoPtsArr   = issues.filter(function(i){ return i.type === 'story' && !hasPoints(i); });
+  var tasksArr = issues.filter(function(i){ return i.type === 'task'; });
+  var bugsArr  = issues.filter(function(i){ return i.type === 'bug'; });
+  var otherArr = issues.filter(function(i){ return ['story','task','bug'].indexOf(i.type) === -1; });
   Object.assign(window._reportDrillData, {
-    sp_all:       { label: 'Spilled Issues',   issues: issues },
-    sp_stories:   { label: 'Spilled Stories',  issues: storiesArr },
-    sp_tasksbugs: { label: 'Spilled Tasks / Bugs', issues: tasksBugsArr }
+    sp_all:           { label: 'Spilled Issues',                  issues: issues },
+    sp_stories_pts:   { label: 'Spilled Stories (with points)',    issues: storiesWithPtsArr },
+    sp_stories_nopts: { label: 'Spilled Stories (no points)',      issues: storiesNoPtsArr },
+    sp_tasks:         { label: 'Spilled Tasks',                    issues: tasksArr },
+    sp_bugs:          { label: 'Spilled Bugs',                     issues: bugsArr },
+    sp_other:         { label: 'Spilled Other Issues',             issues: otherArr }
   });
 
   var kpi = function(label, val, color, desc, key) {
@@ -6998,6 +7007,18 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
     ? '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:12px 16px;font-size:13px;color:#065f46;margin-bottom:16px">🎉 No spillover — all issues were completed before the sprint ended!</div>'
     : '<div style="background:#dc262622;border:1px solid #dc262644;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b;margin-bottom:16px">📋 <strong>' + count + ' issue' + (count !== 1 ? 's' : '') + '</strong> spilled over when this sprint was completed and moved back to the backlog.</div>';
 
+  // Dynamic, per-space toggle (Settings > General) — on by default. Note it
+  // here so it's obvious the count above isn't "everything that spilled",
+  // and link straight to where it's changed.
+  var devFilterBanner = data.developers_only_filter_active
+    ? '<div style="background:#0052cc11;border:1px solid #0052cc33;border-radius:8px;padding:10px 16px;font-size:12px;color:var(--text2);margin-bottom:16px;display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap">' +
+      '<span>👤 Showing only tickets assigned to a Developer on this sprint\'s team' +
+      (data.hidden_non_developer_count ? ' — <strong>' + data.hidden_non_developer_count + '</strong> non-developer-assigned ticket' + (data.hidden_non_developer_count !== 1 ? 's' : '') + ' hidden.' : '.') +
+      '</span>' +
+      '<a href="#" onclick="event.preventDefault();navigateToSpace(S.currentSpace,\'settings\');window._switchSettingsTab(\'general\');" style="color:var(--accent);white-space:nowrap">Change in Settings</a>' +
+      '</div>'
+    : '';
+
   // ── Spillover by Developer — who's carrying the spilled-over work ──
   var devGroups = {};
   issues.forEach(function(i) {
@@ -7035,11 +7056,15 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
     '<h4 style="margin:0 0 4px">Spillover — ' + esc(sprint.name || 'Sprint') + '</h4>' +
     '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Issues not completed at sprint end</p>' +
     banner +
+    devFilterBanner +
     '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
     kpi('Spilled Issues', count, count > 0 ? '#dc2626' : '#10b981', 'Total not completed', 'sp_all') +
     kpi('Story Points Lost', totalPts, totalPts > 0 ? '#f59e0b' : '#10b981', 'Points not delivered', 'sp_all') +
-    kpi('Stories', stories, '#0052cc', 'User stories spilled', 'sp_stories') +
-    kpi('Tasks / Bugs', tasks + bugs, '#7c3aed', 'Tasks & bugs spilled', 'sp_tasksbugs') +
+    kpi('Stories (w/ Pts)', storiesWithPtsArr.length, '#0052cc', 'Pointed stories spilled', 'sp_stories_pts') +
+    kpi('Stories (no Pts)', storiesNoPtsArr.length, '#6b7280', 'Unpointed stories spilled', 'sp_stories_nopts') +
+    kpi('Tasks', tasksArr.length, '#7c3aed', 'Tasks spilled', 'sp_tasks') +
+    kpi('Bugs', bugsArr.length, '#dc2626', 'Bugs spilled', 'sp_bugs') +
+    (otherArr.length ? kpi('Other', otherArr.length, '#f59e0b', 'Epics/subtasks spilled', 'sp_other') : '') +
     '</div>' +
     (statusDonutHtml || devChartHtml
       ? '<div style="display:flex;gap:20px;margin-bottom:20px;flex-wrap:wrap">' + statusDonutHtml + devChartHtml + '</div>'
@@ -8159,6 +8184,7 @@ window._switchSettingsTab = function (tab) {
 function renderSettingsGeneral(space) {
   var canManage = canManageSpace(space.id);
   var canDelete = canDeleteSpace();
+  var spilloverDevOnly = space.spillover_developers_only !== false; // default true
   $('settingsTabContent').innerHTML =
     '<div class="settings-section"><h3>General</h3>' +
     '<p><strong>Name:</strong> ' + esc(space.name) + '</p>' +
@@ -8171,8 +8197,28 @@ function renderSettingsGeneral(space) {
     '<div class="settings-actions">' +
     (canManage ? '<button class="btn btn-outline" onclick="window._editSpaceSettings()">Edit Space</button>' : '') +
     (canDelete ? '<button class="btn btn-danger" onclick="window._deleteSpace(\'' + space.id + '\')">Delete Space</button>' : '') +
-    '</div></div>';
+    '</div></div>' +
+    '<div class="settings-section"><h3>Reports</h3>' +
+    '<label style="display:flex;align-items:flex-start;gap:8px;cursor:' + (canManage ? 'pointer' : 'default') + '">' +
+    '<input type="checkbox" id="spilloverDevOnlyToggle"' + (spilloverDevOnly ? ' checked' : '') + (canManage ? '' : ' disabled') +
+    ' onchange="window._toggleSpilloverDevOnly(this.checked)" style="margin-top:3px">' +
+    '<span><strong>Spillover: only show Developer-assigned tickets</strong>' +
+    '<div style="font-size:12px;color:var(--text3);margin-top:2px">When on (default), the Spillover report only counts tickets assigned to someone in that sprint\'s Developer list — QA or other assignees are excluded. Turn off to see every spilled ticket regardless of assignee.</div>' +
+    '</span></label></div>';
 }
+
+window._toggleSpilloverDevOnly = async function (checked) {
+  try {
+    var updated = await api('/api/spaces/' + S.currentSpace, 'PUT', { spillover_developers_only: checked });
+    var cached = (S.data.spaces || []).find(function (s) { return s.id === S.currentSpace; });
+    if (cached) cached.spillover_developers_only = updated.spillover_developers_only;
+    toast('Spillover setting updated', 'success');
+  } catch (e) {
+    toast(e.message || 'Could not update setting', 'error');
+    var box = $('spilloverDevOnlyToggle');
+    if (box) box.checked = !checked; // revert the visible toggle on failure
+  }
+};
 
 // Settings-tab table search. Rows carry a data-search haystack and are shown or
 // hidden in place rather than re-rendered, so role selects and Remove buttons
