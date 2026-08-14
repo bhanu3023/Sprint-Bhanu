@@ -8230,8 +8230,8 @@ function renderSettingsReports(space) {
   function toggleRow(key, label, desc) {
     return '<label style="display:flex;align-items:flex-start;gap:8px;cursor:' + (canManage ? 'pointer' : 'default') + ';margin-bottom:14px">' +
       '<input type="checkbox" class="spillover-setting-toggle" data-key="' + escAttr(key) + '"' + (s[key] ? ' checked' : '') + (canManage ? '' : ' disabled') +
-      ' onchange="window._updateSpilloverSetting(this.dataset.key, this.checked)" style="margin-top:3px">' +
-      '<span><strong>' + esc(label) + '</strong>' +
+      ' onchange="window._updateSpilloverSetting(this.dataset.key, this.checked)" style="width:14px;height:14px;padding:0;flex-shrink:0;accent-color:var(--accent);margin-top:3px">' +
+      '<span style="flex:1"><strong>' + esc(label) + '</strong>' +
       (desc ? '<div style="font-size:12px;color:var(--text3);margin-top:2px">' + esc(desc) + '</div>' : '') +
       '</span></label>';
   }
@@ -8249,9 +8249,13 @@ function renderSettingsReports(space) {
 }
 
 window._updateSpilloverSetting = async function (key, checked) {
-  var space = getSpace(S.currentSpace);
-  var next = getSpilloverSettings(space);
-  next[key] = checked;
+  // Read every checkbox's live DOM state rather than the cached space object —
+  // toggling two settings back-to-back would otherwise race: the second save
+  // could read a stale pre-first-toggle value and overwrite it.
+  var next = {};
+  document.querySelectorAll('.spillover-setting-toggle').forEach(function (box) {
+    next[box.dataset.key] = box.checked;
+  });
   try {
     var updated = await api('/api/spaces/' + S.currentSpace, 'PUT', { spillover_settings: next });
     var cached = (S.data.spaces || []).find(function (sp) { return sp.id === S.currentSpace; });
