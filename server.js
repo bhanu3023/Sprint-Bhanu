@@ -2063,7 +2063,7 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
     if (i.type === 'story') typeIncluded = hasPts ? settings.show_stories_with_points : settings.show_stories_without_points;
     else if (i.type === 'task') typeIncluded = settings.show_tasks;
     else if (i.type === 'bug') typeIncluded = settings.show_bugs;
-    else typeIncluded = true; // epics/subtasks aren't covered by any type toggle
+    else typeIncluded = false; // epics/subtasks have no dedicated toggle — only the QA/unassigned opt-ins can surface them
     if (typeIncluded) return true;
     if (!i.assignee_id) return !!settings.include_unassigned;
     if (qaOnlySet.has(i.assignee_id)) return !!settings.include_qa_assigned;
