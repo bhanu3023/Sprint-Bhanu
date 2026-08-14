@@ -2120,6 +2120,7 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
 
   const allIds = sprints.map(s => s.id);
   const completedIds = sprints.filter(s => s.status === 'completed').map(s => s.id);
+  const activeIds = sprints.filter(s => s.status === 'active').map(s => s.id);
   const ISSUE_COLS = 'i.id, i.key, i.title, i.status, i.priority, i.type, i.story_points, i.assignee_id, i.sprint_id';
 
   // Done issues across every sprint (completed sprints keep sprint_id pointing
@@ -2132,6 +2133,19 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
       WHERE i.sprint_id = ANY($1::varchar[]) AND i.status='Done' AND i.deleted_at IS NULL
     `, [allIds])).rows;
   }
+
+  // Live full scope for any active sprint (typically 0 or 1) — its
+  // "committed" figure until it closes is just everything currently in it.
+  let activeAllRows = [];
+  if (activeIds.length) {
+    activeAllRows = (await q(`
+      SELECT sprint_id, story_points FROM issues WHERE sprint_id = ANY($1::varchar[]) AND deleted_at IS NULL
+    `, [activeIds])).rows;
+  }
+  const activeCommittedBySprintId = {};
+  activeAllRows.forEach(r => {
+    activeCommittedBySprintId[r.sprint_id] = (activeCommittedBySprintId[r.sprint_id] || 0) + (Number(r.story_points) || 0);
+  });
 
   // Spillover across every completed sprint at once — same detection the
   // single-sprint Spillover report uses (issue_history field_name='spillover'),
@@ -2167,9 +2181,14 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   // finished yet.
   const allSprintRows = sprints.map(sp => {
     const completedIssues = doneBySprintId[sp.id] || [];
+    const completedPts = completedIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
+    const spillIssues = spilloverBySprintId[sp.id] || [];
+    const committedPts = sp.status === 'active'
+      ? (activeCommittedBySprintId[sp.id] || 0)
+      : completedPts + spillIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
     return {
       id: sp.id, name: sp.name, status: sp.status, start_date: sp.start_date, end_date: sp.end_date,
-      completed_points: completedIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0),
+      completed_points: completedPts, committed_points: committedPts,
       completed_issues: completedIssues
     };
   });
@@ -2191,17 +2210,6 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     };
   });
 
-  const now = new Date();
-  const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const last30 = completedSprintRows.filter(s => s.end_date && new Date(s.end_date) >= cutoff);
-  const last30Days = {
-    from: cutoff.toISOString().slice(0, 10),
-    to: now.toISOString().slice(0, 10),
-    sprints_completed: last30.length,
-    total_points_completed: last30.reduce((s, r) => s + r.completed_points, 0),
-    breakdown: last30.map(r => ({ id: r.id, name: r.name, end_date: r.end_date, completed_points: r.completed_points }))
-  };
-
   // Previous vs last completed sprint — the two most recent by end_date.
   const completedSorted = completedSprintRows.slice().sort((a, b) => new Date(b.end_date) - new Date(a.end_date));
   const previousVsLast = {
@@ -2209,30 +2217,33 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     previous: completedSorted[1] || null
   };
 
-  // Per-user spillover across every completed sprint.
-  const assigneeIds = [...new Set(completedSprintRows.flatMap(sp => sp.spillover_issues.map(i => i.assignee_id).filter(Boolean)))];
-  let userMap = {};
-  if (assigneeIds.length) {
-    const users = (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [assigneeIds])).rows;
-    users.forEach(u => { userMap[u.id] = u; });
-  }
+  // Per-user spillover across every completed sprint — seeded with every
+  // space member (not just people who happen to have spilled something), so
+  // a user with zero spillover still shows up with 0s instead of vanishing.
+  const members = (await q(
+    `SELECT u.id, u.name, u.color FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1`,
+    [spaceId]
+  )).rows;
   const byUser = {};
+  members.forEach(u => { byUser[u.id] = { name: u.name, color: u.color, per_sprint: {} }; });
   completedSprintRows.forEach(sp => {
     sp.spillover_issues.forEach(i => {
       if (!i.assignee_id) return;
-      const u = (byUser[i.assignee_id] = byUser[i.assignee_id] || { per_sprint: {} });
+      if (!byUser[i.assignee_id]) byUser[i.assignee_id] = { name: 'Unknown', color: '#6b7280', per_sprint: {} };
+      const u = byUser[i.assignee_id];
       const ps = (u.per_sprint[sp.id] = u.per_sprint[sp.id] || { sprint_id: sp.id, sprint_name: sp.name, points: 0, count: 0, issues: [] });
       ps.points += Number(i.story_points) || 0;
       ps.count += 1;
       ps.issues.push(i);
     });
   });
-  const spilloverByUser = Object.keys(byUser).map(uid => {
-    const perSprintArr = Object.values(byUser[uid].per_sprint);
+  const spilloverByUser = Object.keys(byUser).map(userId => {
+    const u = byUser[userId];
+    const perSprintArr = Object.values(u.per_sprint);
     return {
-      user_id: uid,
-      name: (userMap[uid] && userMap[uid].name) || 'Unknown',
-      color: (userMap[uid] && userMap[uid].color) || '#6b7280',
+      user_id: userId,
+      name: u.name,
+      color: u.color,
       total_points: perSprintArr.reduce((s, p) => s + p.points, 0),
       total_count: perSprintArr.reduce((s, p) => s + p.count, 0),
       per_sprint: perSprintArr
@@ -2242,7 +2253,6 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   res.json({
     sprints: allSprintRows,
     completed_sprints: completedSprintRows,
-    last_30_days: last30Days,
     previous_vs_last: previousVsLast,
     spillover_by_user: spilloverByUser
   });
