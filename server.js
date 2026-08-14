@@ -2101,6 +2101,12 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
 // rather than the single-sprint scope every other report above uses. One
 // endpoint serves both the Overview and Comparison Trends tabs so switching
 // between them never needs a second round-trip.
+//
+// Spillover/committed-vs-completed/comparison numbers only ever cover
+// COMPLETED sprints — an in-flight sprint hasn't spilled anything yet, so
+// showing a "projected" figure for it next to real, closed-sprint numbers
+// was misleading. The Overview trend is the one place an active sprint still
+// shows up, as its live completed-so-far points, clearly distinct in color.
 app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   const spaceId = req.params.spaceId;
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'report.view'))) return;
@@ -2112,8 +2118,20 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     ORDER BY COALESCE(end_date, start_date, created_at)
   `, [spaceId])).rows;
 
+  const allIds = sprints.map(s => s.id);
   const completedIds = sprints.filter(s => s.status === 'completed').map(s => s.id);
-  const activeSprints = sprints.filter(s => s.status === 'active');
+  const ISSUE_COLS = 'i.id, i.key, i.title, i.status, i.priority, i.type, i.story_points, i.assignee_id, i.sprint_id';
+
+  // Done issues across every sprint (completed sprints keep sprint_id pointing
+  // at themselves for Done issues even after completion — see sprint-lifecycle
+  // rules) — this is what "completed_points" drills down into everywhere.
+  let doneRows = [];
+  if (allIds.length) {
+    doneRows = (await q(`
+      SELECT ${ISSUE_COLS} FROM issues i
+      WHERE i.sprint_id = ANY($1::varchar[]) AND i.status='Done' AND i.deleted_at IS NULL
+    `, [allIds])).rows;
+  }
 
   // Spillover across every completed sprint at once — same detection the
   // single-sprint Spillover report uses (issue_history field_name='spillover'),
@@ -2128,7 +2146,7 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     const excludedSet = new Set(excludedRows.map(r => r.sprint_id + '::' + r.entity_id));
 
     spilloverRows = (await q(`
-      SELECT DISTINCT ON (i.id, ih.old_value) ih.old_value AS sprint_id, i.id, i.assignee_id, i.story_points
+      SELECT DISTINCT ON (i.id, ih.old_value) ih.old_value AS spilled_from_sprint_id, ${ISSUE_COLS}
       FROM issue_history ih
       JOIN issues i ON i.id = ih.issue_id
       WHERE ih.field_name = 'spillover'
@@ -2136,59 +2154,46 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
         AND (ih.new_value IS NULL OR ih.new_value = '' OR ih.new_value = 'null')
         AND i.deleted_at IS NULL
       ORDER BY i.id, ih.old_value, ih.created_at DESC
-    `, [completedIds])).rows.filter(r => !excludedSet.has(r.sprint_id + '::' + r.id));
+    `, [completedIds])).rows.filter(r => !excludedSet.has(r.spilled_from_sprint_id + '::' + r.id));
   }
 
-  // Live projection for any active sprint (typically 0 or 1) — same
-  // "current non-Done issues" logic the single-sprint report uses for
-  // in-flight sprints.
-  let liveRows = [];
-  if (activeSprints.length) {
-    liveRows = (await q(`
-      SELECT sprint_id, status, assignee_id, story_points
-      FROM issues WHERE sprint_id = ANY($1::varchar[]) AND deleted_at IS NULL
-    `, [activeSprints.map(s => s.id)])).rows;
-  }
-
+  const doneBySprintId = {};
+  doneRows.forEach(r => { (doneBySprintId[r.sprint_id] = doneBySprintId[r.sprint_id] || []).push(r); });
   const spilloverBySprintId = {};
-  spilloverRows.forEach(r => {
-    (spilloverBySprintId[r.sprint_id] = spilloverBySprintId[r.sprint_id] || []).push(r);
-  });
-  const liveBySprintId = {};
-  liveRows.forEach(r => {
-    (liveBySprintId[r.sprint_id] = liveBySprintId[r.sprint_id] || []).push(r);
-  });
+  spilloverRows.forEach(r => { (spilloverBySprintId[r.spilled_from_sprint_id] = spilloverBySprintId[r.spilled_from_sprint_id] || []).push(r); });
 
-  const sprintRows = sprints.map(sp => {
-    let completedPts, committedPts, spillCount, spillPts, spillIssues;
-    if (sp.status === 'completed') {
-      spillIssues = spilloverBySprintId[sp.id] || [];
-      spillPts = spillIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
-      completedPts = Number(sp.velocity) || 0;
-      committedPts = completedPts + spillPts;
-    } else {
-      const issues = liveBySprintId[sp.id] || [];
-      spillIssues = issues.filter(i => i.status !== 'Done');
-      completedPts = issues.filter(i => i.status === 'Done').reduce((s, i) => s + (Number(i.story_points) || 0), 0);
-      committedPts = issues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
-      spillPts = spillIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
-    }
-    spillCount = spillIssues.length;
+  // All sprints (completed + active) — feeds the Overview trend only, which
+  // just needs "how many points landed", regardless of whether the sprint is
+  // finished yet.
+  const allSprintRows = sprints.map(sp => {
+    const completedIssues = doneBySprintId[sp.id] || [];
     return {
-      id: sp.id, name: sp.name, status: sp.status,
-      start_date: sp.start_date, end_date: sp.end_date,
-      committed_points: committedPts, completed_points: completedPts,
-      spillover_count: spillCount, spillover_points: spillPts,
-      completion_pct: committedPts > 0 ? Math.round((completedPts / committedPts) * 100) : 0,
-      _spillIssues: spillIssues
+      id: sp.id, name: sp.name, status: sp.status, start_date: sp.start_date, end_date: sp.end_date,
+      completed_points: completedIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0),
+      completed_issues: completedIssues
     };
   });
 
-  const stripInternal = r => { const { _spillIssues, ...rest } = r; return rest; };
+  // Completed sprints only — feeds every Comparison Trends chart.
+  const completedSprintRows = sprints.filter(sp => sp.status === 'completed').map(sp => {
+    const completedIssues = doneBySprintId[sp.id] || [];
+    const spillIssues = spilloverBySprintId[sp.id] || [];
+    const completedPts = Number(sp.velocity) || 0; // authoritative, never recomputed
+    const spillPts = spillIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
+    const committedPts = completedPts + spillPts;
+    return {
+      id: sp.id, name: sp.name, end_date: sp.end_date,
+      committed_points: committedPts, completed_points: completedPts,
+      spillover_count: spillIssues.length, spillover_points: spillPts,
+      completion_pct: committedPts > 0 ? Math.round((completedPts / committedPts) * 100) : 0,
+      completed_issues: completedIssues,
+      spillover_issues: spillIssues
+    };
+  });
 
   const now = new Date();
   const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const last30 = sprintRows.filter(s => s.status === 'completed' && s.end_date && new Date(s.end_date) >= cutoff);
+  const last30 = completedSprintRows.filter(s => s.end_date && new Date(s.end_date) >= cutoff);
   const last30Days = {
     from: cutoff.toISOString().slice(0, 10),
     to: now.toISOString().slice(0, 10),
@@ -2198,29 +2203,28 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   };
 
   // Previous vs last completed sprint — the two most recent by end_date.
-  const completedSorted = sprintRows.filter(s => s.status === 'completed')
-    .slice().sort((a, b) => new Date(b.end_date) - new Date(a.end_date));
+  const completedSorted = completedSprintRows.slice().sort((a, b) => new Date(b.end_date) - new Date(a.end_date));
   const previousVsLast = {
-    last: completedSorted[0] ? stripInternal(completedSorted[0]) : null,
-    previous: completedSorted[1] ? stripInternal(completedSorted[1]) : null
+    last: completedSorted[0] || null,
+    previous: completedSorted[1] || null
   };
 
-  // Per-user spillover across every sprint — driven by the same issue set
-  // computed per-sprint above, so it always matches the per-sprint numbers.
-  const assigneeIds = [...new Set(sprintRows.flatMap(r => r._spillIssues.map(i => i.assignee_id).filter(Boolean)))];
+  // Per-user spillover across every completed sprint.
+  const assigneeIds = [...new Set(completedSprintRows.flatMap(sp => sp.spillover_issues.map(i => i.assignee_id).filter(Boolean)))];
   let userMap = {};
   if (assigneeIds.length) {
     const users = (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [assigneeIds])).rows;
     users.forEach(u => { userMap[u.id] = u; });
   }
   const byUser = {};
-  sprintRows.forEach(r => {
-    r._spillIssues.forEach(i => {
+  completedSprintRows.forEach(sp => {
+    sp.spillover_issues.forEach(i => {
       if (!i.assignee_id) return;
       const u = (byUser[i.assignee_id] = byUser[i.assignee_id] || { per_sprint: {} });
-      const ps = (u.per_sprint[r.id] = u.per_sprint[r.id] || { sprint_id: r.id, sprint_name: r.name, points: 0, count: 0 });
+      const ps = (u.per_sprint[sp.id] = u.per_sprint[sp.id] || { sprint_id: sp.id, sprint_name: sp.name, points: 0, count: 0, issues: [] });
       ps.points += Number(i.story_points) || 0;
       ps.count += 1;
+      ps.issues.push(i);
     });
   });
   const spilloverByUser = Object.keys(byUser).map(uid => {
@@ -2236,7 +2240,8 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   }).sort((a, b) => b.total_points - a.total_points);
 
   res.json({
-    sprints: sprintRows.map(stripInternal),
+    sprints: allSprintRows,
+    completed_sprints: completedSprintRows,
     last_30_days: last30Days,
     previous_vs_last: previousVsLast,
     spillover_by_user: spilloverByUser

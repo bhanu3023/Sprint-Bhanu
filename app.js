@@ -7182,8 +7182,10 @@ function renderMBROverview(c, data) {
     var v = sp.completed_points || 0;
     var pct = Math.round((v / max) * 100);
     var color = sp.status === 'active' ? '#f59e0b' : '#0129ac';
+    var key = 'mbr_ov_' + sp.id;
+    window._reportDrillData[key] = { label: sp.name + ' — Completed Issues', issues: sp.completed_issues || [], points: true };
     return '<div class="velocity-bar-group" style="flex:0 0 64px">' +
-      '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + color + '" title="' + esc(sp.name) + ': ' + v + ' pts' + (sp.status === 'active' ? ' (in progress)' : '') + '"></div>' +
+      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + key + '\')" style="height:' + Math.max(pct, 4) + '%;background:' + color + ';cursor:pointer" title="' + esc(sp.name) + ': ' + v + ' pts' + (sp.status === 'active' ? ' (in progress)' : '') + '"></div>' +
       '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + v + ' pts</span>' +
       '</div>';
@@ -7219,26 +7221,36 @@ function renderMBROverview(c, data) {
     '</div>';
 }
 
+// Comparison Trends is scoped to CLOSED sprints only — an in-flight sprint
+// hasn't spilled anything yet, so it has no place in a spillover/committed
+// comparison (the Overview tab is where its live progress shows instead).
 function renderMBRComparison(c, data) {
-  var sprints = (data && data.sprints) || [];
+  var sprints = (data && data.completed_sprints) || [];
   var prevLast = (data && data.previous_vs_last) || { previous: null, last: null };
   var byUser = (data && data.spillover_by_user) || [];
 
   if (!sprints.length) {
     c.innerHTML = '<div class="report-chart"><h4 style="margin:0 0 4px">Comparison Trends</h4>' +
-      '<p class="placeholder-text">No completed or active sprints yet. Complete a sprint to see comparisons here.</p></div>';
+      '<p class="placeholder-text">No completed sprints yet. Complete a sprint to see comparisons here.</p></div>';
     return;
+  }
+
+  function drill(key, label, issues) {
+    window._reportDrillData[key] = { label: label, issues: issues || [], points: true };
+    return key;
   }
 
   var maxCommitted = Math.max.apply(null, sprints.map(function (sp) { return sp.committed_points || 0; })) || 1;
   var committedBars = sprints.map(function (sp) {
     var committed = sp.committed_points || 0, completed = sp.completed_points || 0;
+    var cKey = drill('mbr_cc_committed_' + sp.id, sp.name + ' — Committed Issues', (sp.completed_issues || []).concat(sp.spillover_issues || []));
+    var dKey = drill('mbr_cc_completed_' + sp.id, sp.name + ' — Completed Issues', sp.completed_issues);
     var cPct = Math.round((committed / maxCommitted) * 100);
     var dPct = Math.round((completed / maxCommitted) * 100);
     return '<div class="velocity-bar-group" style="flex:0 0 64px">' +
       '<div style="display:flex;gap:3px;align-items:flex-end;width:100%;height:100%">' +
-      '<div class="velocity-bar" style="flex:1;height:' + Math.max(cPct, 4) + '%;background:#94a3b8" title="' + esc(sp.name) + ' — Committed: ' + committed + ' pts"></div>' +
-      '<div class="velocity-bar" style="flex:1;height:' + Math.max(dPct, 4) + '%;background:#0129ac" title="' + esc(sp.name) + ' — Completed: ' + completed + ' pts"></div>' +
+      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + cKey + '\')" style="flex:1;height:' + Math.max(cPct, 4) + '%;background:#94a3b8;cursor:pointer" title="' + esc(sp.name) + ' — Committed: ' + committed + ' pts"></div>' +
+      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + dKey + '\')" style="flex:1;height:' + Math.max(dPct, 4) + '%;background:#0129ac;cursor:pointer" title="' + esc(sp.name) + ' — Completed: ' + completed + ' pts"></div>' +
       '</div>' +
       '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + completed + '/' + committed + '</span>' +
@@ -7248,48 +7260,77 @@ function renderMBRComparison(c, data) {
   var maxSpill = Math.max.apply(null, sprints.map(function (sp) { return sp.spillover_points || 0; })) || 1;
   var spillBars = sprints.map(function (sp) {
     var v = sp.spillover_points || 0;
+    var key = drill('mbr_sp_' + sp.id, sp.name + ' — Spilled Issues', sp.spillover_issues);
     var pct = Math.round((v / maxSpill) * 100);
     return '<div class="velocity-bar-group" style="flex:0 0 64px">' +
-      '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + (v > 0 ? '#dc2626' : '#10b981') + '" title="' + esc(sp.name) + ': ' + v + ' pts spilled"></div>' +
+      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + key + '\')" style="height:' + Math.max(pct, 4) + '%;background:' + (v > 0 ? '#dc2626' : '#10b981') + ';cursor:pointer" title="' + esc(sp.name) + ': ' + v + ' pts spilled"></div>' +
       '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + v + ' pts</span>' +
       '</div>';
   }).join('');
 
-  function comparisonCard(label, sp) {
-    if (!sp) return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;flex:1;min-width:220px">' +
-      '<div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:10px">' + esc(label) + '</div>' +
-      '<p style="font-size:12px;color:var(--text3)">Not enough completed sprints yet</p></div>';
-    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;flex:1;min-width:220px">' +
-      '<div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:2px">' + esc(label) + '</div>' +
-      '<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:12px">' + esc(sp.name) + '</div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span style="color:var(--text2)">Committed</span><strong>' + sp.committed_points + ' pts</strong></div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span style="color:var(--text2)">Completed</span><strong style="color:#10b981">' + sp.completed_points + ' pts</strong></div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span style="color:var(--text2)">Spillover</span><strong style="color:#dc2626">' + sp.spillover_points + ' pts (' + sp.spillover_count + ' issues)</strong></div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span style="color:var(--text2)">Completion</span><strong>' + sp.completion_pct + '%</strong></div>' +
+  // Previous vs Last — a stacked bar per sprint (completed at the base,
+  // spillover stacked on top, so the full bar height reads as "committed").
+  var pvlMax = Math.max(
+    (prevLast.previous && prevLast.previous.committed_points) || 0,
+    (prevLast.last && prevLast.last.committed_points) || 0
+  ) || 1;
+  function pvlBar(label, sp) {
+    if (!sp) return '<div class="velocity-bar-group" style="flex:0 0 100px">' +
+      '<div class="velocity-bar" style="height:4%;background:var(--border)"></div>' +
+      '<span class="velocity-label">' + esc(label) + '</span>' +
+      '<span class="velocity-value" style="color:var(--text3)">No data</span>' +
+      '</div>';
+    var completedPct = Math.round((sp.completed_points / pvlMax) * 100);
+    var spillPct = Math.round((sp.spillover_points / pvlMax) * 100);
+    var dKey = drill('mbr_pvl_completed_' + sp.id, sp.name + ' — Completed Issues', sp.completed_issues);
+    var sKey = drill('mbr_pvl_spill_' + sp.id, sp.name + ' — Spilled Issues', sp.spillover_issues);
+    return '<div class="velocity-bar-group" style="flex:0 0 100px">' +
+      '<div style="width:100%;height:100%;display:flex;flex-direction:column;justify-content:flex-end;border-radius:4px 4px 0 0;overflow:hidden">' +
+      (sp.spillover_points > 0
+        ? '<div onclick="window._showReportIssues(\'' + sKey + '\')" style="height:' + Math.max(spillPct, 3) + '%;background:#dc2626;cursor:pointer" title="' + esc(sp.name) + ' — Spillover: ' + sp.spillover_points + ' pts"></div>'
+        : '') +
+      '<div onclick="window._showReportIssues(\'' + dKey + '\')" style="height:' + Math.max(completedPct, 3) + '%;background:#10b981;cursor:pointer" title="' + esc(sp.name) + ' — Completed: ' + sp.completed_points + ' pts"></div>' +
+      '</div>' +
+      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(label) + ': ' + esc(shortSprintLabel(sp.name)) + '</span>' +
+      '<span class="velocity-value">' + sp.completed_points + '/' + sp.committed_points + ' pts (' + sp.completion_pct + '%)</span>' +
       '</div>';
   }
+  var pvlBars = pvlBar('Previous', prevLast.previous) + pvlBar('Last', prevLast.last);
 
+  // Spillover by user, sprint-wise — a stacked bar per sprint, one colored
+  // segment per user, capped to the last 8 sprints so the chart stays legible.
   var sprintCols = sprints.slice(Math.max(0, sprints.length - 8));
   var userTruncNote = sprints.length > 8
     ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints.</p>' : '';
-  var userRows = byUser.length
-    ? byUser.map(function (u) {
-        var cells = sprintCols.map(function (sp) {
-          var ps = u.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
-          return '<td style="padding:8px 12px;text-align:right;font-size:12px;color:' + (ps ? 'var(--text)' : 'var(--text3)') + '">' + (ps ? ps.points : '—') + '</td>';
-        }).join('');
-        return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + esc(u.name) + '</td>' +
-          cells + '<td style="padding:8px 12px;text-align:right;font-weight:700">' + u.total_points + '</td></tr>';
-      }).join('')
-    : '<tr><td colspan="' + (sprintCols.length + 2) + '" style="padding:16px;color:var(--text3);text-align:center">No spillover recorded across these sprints</td></tr>';
-  var userHeaderCols = sprintCols.map(function (sp) {
-    return '<th title="' + esc(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
+  var maxSprintSpill = Math.max.apply(null, sprintCols.map(function (sp) { return sp.spillover_points || 0; })) || 1;
+  var userBars = sprintCols.map(function (sp) {
+    var segments = byUser.map(function (u) {
+      var ps = u.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
+      if (!ps || !ps.points) return '';
+      var key = drill('mbr_su_' + sp.id + '_' + u.user_id, sp.name + ' — ' + u.name + ' Spillover', ps.issues);
+      var pct = Math.round((ps.points / maxSprintSpill) * 100);
+      return '<div onclick="window._showReportIssues(\'' + key + '\')" style="height:' + Math.max(pct, 2) + '%;background:' + (u.color || '#6b7280') + ';cursor:pointer" title="' + esc(u.name) + ': ' + ps.points + ' pts"></div>';
+    }).join('');
+    return '<div class="velocity-bar-group" style="flex:0 0 64px">' +
+      '<div style="width:100%;height:100%;display:flex;flex-direction:column;justify-content:flex-end;border-radius:4px 4px 0 0;overflow:hidden">' +
+      (segments || '<div style="height:4%;background:#10b981"></div>') +
+      '</div>' +
+      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
+      '<span class="velocity-value">' + (sp.spillover_points || 0) + ' pts</span>' +
+      '</div>';
   }).join('');
+  var userLegend = byUser.length
+    ? '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px">' + byUser.map(function (u) {
+        return '<span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)">' +
+          '<span style="width:10px;height:10px;border-radius:2px;background:' + (u.color || '#6b7280') + ';display:inline-block;flex-shrink:0"></span>' +
+          esc(u.name) + ' (' + u.total_points + ' pts)</span>';
+      }).join('') + '</div>'
+    : '';
 
   c.innerHTML = '<div class="report-chart">' +
     '<h4 style="margin:0 0 4px">Comparison Trends</h4>' +
-    '<p style="font-size:12px;color:var(--text3);margin:0 0 20px">Sprint-over-sprint comparisons for this board</p>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 20px">Sprint-over-sprint comparisons for this board — completed sprints only. Click any bar to see its tickets.</p>' +
 
     '<h4 style="margin:0 0 8px;font-size:13px">Story Points — Committed vs Completed</h4>' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
@@ -7301,19 +7342,17 @@ function renderMBRComparison(c, data) {
     '<h4 style="margin:0 0 8px;font-size:13px">Spillover Points Per Sprint</h4>' +
     '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:flex-start;margin-bottom:28px">' + spillBars + '</div></div>' +
 
-    '<h4 style="margin:0 0 12px;font-size:13px">Previous Sprint vs Last Sprint</h4>' +
-    '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:28px">' +
-    comparisonCard('Previous Sprint', prevLast.previous) +
-    comparisonCard('Last Sprint', prevLast.last) +
+    '<h4 style="margin:0 0 8px;font-size:13px">Previous Sprint vs Last Sprint</h4>' +
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
+    '<span style="display:inline-block;width:12px;height:12px;background:#10b981;border-radius:2px"></span> Completed' +
+    '<span style="display:inline-block;width:12px;height:12px;background:#dc2626;border-radius:2px;margin-left:8px"></span> Spillover' +
     '</div>' +
+    '<div class="velocity-bars" style="height:110px;margin-bottom:28px;gap:24px">' + pvlBars + '</div>' +
 
     '<h4 style="margin:0 0 4px;font-size:13px">Spillover by User, Sprint-wise</h4>' +
     userTruncNote +
-    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
-    '<thead><tr><th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">User</th>' +
-    userHeaderCols +
-    '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th></tr></thead>' +
-    '<tbody>' + userRows + '</tbody></table></div>' +
+    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:flex-start">' + userBars + '</div></div>' +
+    userLegend +
     '</div>';
 }
 
