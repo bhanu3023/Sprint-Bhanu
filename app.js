@@ -8198,8 +8198,7 @@ function renderSettingsGeneral(space) {
 // setting existed, so turning the feature on doesn't change anyone's report
 // until they actually touch a toggle.
 var SPILLOVER_SETTINGS_DEFAULTS = {
-  show_stories_with_points: true,
-  show_stories_without_points: true,
+  show_issues_with_points: true,
   show_tasks: true,
   show_bugs: true,
   include_qa_assigned: false,
@@ -8207,7 +8206,14 @@ var SPILLOVER_SETTINGS_DEFAULTS = {
 };
 
 function getSpilloverSettings(space) {
-  return Object.assign({}, SPILLOVER_SETTINGS_DEFAULTS, (space && space.spillover_settings) || {});
+  var raw = (space && space.spillover_settings) || {};
+  var merged = Object.assign({}, SPILLOVER_SETTINGS_DEFAULTS, raw);
+  // Carry forward a board's prior "stories with points" choice the first time
+  // it's read under the new, type-agnostic key.
+  if (raw.show_issues_with_points === undefined && raw.show_stories_with_points !== undefined) {
+    merged.show_issues_with_points = raw.show_stories_with_points;
+  }
+  return merged;
 }
 
 function renderSettingsReports(space) {
@@ -8226,8 +8232,7 @@ function renderSettingsReports(space) {
   $('settingsTabContent').innerHTML =
     '<div class="settings-section"><h3>Spillover Report</h3>' +
     '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Choose which spilled tickets show up in the Spillover report for this board.</p>' +
-    toggleRow('show_stories_with_points', 'Display spilled stories with story points', 'Stories that carry story points and were not completed when the sprint ended.') +
-    toggleRow('show_stories_without_points', 'Display spilled stories without story points', 'Stories with no story points set.') +
+    toggleRow('show_issues_with_points', 'Spilled Issues (With Points)', 'Any spilled ticket that carries story points — story, task, or bug alike — regardless of type.') +
     toggleRow('show_tasks', 'Display spilled tasks', '') +
     toggleRow('show_bugs', 'Display spilled bugs', '') +
     toggleRow('include_qa_assigned', 'Include tickets assigned to Test Engineers (QA)', 'Off by default — only Developer-assigned tickets count. Turn on to also see tickets assigned to someone in the sprint\'s QA list.') +

@@ -2038,32 +2038,38 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
   // what the report always showed before this setting existed, so adding the
   // feature doesn't change anyone's numbers until they touch a toggle.
   const spaceRow = (await q('SELECT spillover_settings FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
+  const rawSettings = (spaceRow && spaceRow.spillover_settings) || {};
   const settings = Object.assign({
-    show_stories_with_points: true,
-    show_stories_without_points: true,
+    show_issues_with_points: true,
     show_tasks: true,
     show_bugs: true,
     include_qa_assigned: false,
     include_unassigned: true
-  }, (spaceRow && spaceRow.spillover_settings) || {});
+  }, rawSettings);
+  // Carry forward a space's prior "stories with points" choice the first time
+  // it's read under the new, type-agnostic key — otherwise a board that had
+  // deliberately turned this off would see it silently flip back on.
+  if (rawSettings.show_issues_with_points === undefined && rawSettings.show_stories_with_points !== undefined) {
+    settings.show_issues_with_points = rawSettings.show_stories_with_points;
+  }
   const devIds = sprint.developer_ids || [];
   const qaIds = sprint.qa_ids || [];
   const qaOnlySet = new Set(qaIds.filter(id => !devIds.includes(id)));
 
-  // A type toggle (stories w/ points, stories w/o points, tasks, bugs) is a
-  // standalone yes/no for that category — checking it must be sufficient on
-  // its own, regardless of who the ticket is assigned to. The QA/unassigned
-  // toggles only ADD tickets whose type toggle is off (e.g. "hide bugs in
-  // general, but still surface ones sitting with QA") — they never take
-  // away a ticket its type toggle already includes.
+  // "Spilled Issues (With Points)" is type-agnostic — a pointed story, task,
+  // or bug all count. It's checked first: any ticket with points shows if
+  // it's on, no matter its type. Tasks/bugs without points fall to their own
+  // toggle. The QA/unassigned toggles only ADD tickets nothing else covers
+  // (e.g. an unpointed story, or an epic/subtask) — they never take away a
+  // ticket already included above.
   const beforeFilter = spillover.length;
   spillover = spillover.filter(i => {
     const hasPts = Number(i.story_points) > 0;
+    if (hasPts && settings.show_issues_with_points) return true;
     let typeIncluded;
-    if (i.type === 'story') typeIncluded = hasPts ? settings.show_stories_with_points : settings.show_stories_without_points;
-    else if (i.type === 'task') typeIncluded = settings.show_tasks;
+    if (i.type === 'task') typeIncluded = settings.show_tasks;
     else if (i.type === 'bug') typeIncluded = settings.show_bugs;
-    else typeIncluded = false; // epics/subtasks have no dedicated toggle — only the QA/unassigned opt-ins can surface them
+    else typeIncluded = false; // unpointed stories, epics/subtasks have no dedicated toggle
     if (typeIncluded) return true;
     if (!i.assignee_id) return !!settings.include_unassigned;
     if (qaOnlySet.has(i.assignee_id)) return !!settings.include_qa_assigned;
