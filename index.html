@@ -604,6 +604,15 @@
           <div id="reportContent" class="report-content"></div>
         </div>
 
+        <!-- Space: MBR (Monthly Business Review) — cross-sprint trends -->
+        <div class="view" id="view-mbr" hidden>
+          <div class="settings-tabs" id="mbrTabBar">
+            <button class="tab-btn active" data-mtab="overview" onclick="window._switchMbrTab('overview')">Overview</button>
+            <button class="tab-btn" data-mtab="comparison" onclick="window._switchMbrTab('comparison')">Comparison Trends</button>
+          </div>
+          <div id="mbrTabContent"></div>
+        </div>
+
         <!-- Space: All Work -->
         <div class="view" id="view-allwork" hidden>
           <!-- Filter bar -->
