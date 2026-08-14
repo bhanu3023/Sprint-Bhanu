@@ -7167,6 +7167,62 @@ function shortSprintLabel(name) {
   return short.length > 18 ? short.slice(0, 16) + '…' : short;
 }
 
+// A points-based drill-down popup should only list the tickets actually
+// carrying the points it's showing — an unpointed ticket that also spilled
+// contributes 0 to the number on screen and just dilutes the list.
+function mbrHasPts(i) { return Number(i && i.story_points) > 0; }
+
+// Shared SVG bar chart for every MBR chart — real X/Y axes (numeric grid on
+// Y, category labels on X) instead of the CSS-flexbox bars used elsewhere in
+// the app, so a category with only a couple of points doesn't look
+// identical to one with zero once bars share more than one series.
+function mbrBarChart(categories) {
+  if (!categories.length) return '<p class="placeholder-text">No data yet.</p>';
+  var maxVal = Math.max.apply(null, categories.reduce(function (acc, c) {
+    return acc.concat(c.bars.map(function (b) { return b.value; }));
+  }, []).concat([1])) || 1;
+
+  var H = 220, pL = 40, pR = 20, pT = 20, pB = 40;
+  var catWidth = 84;
+  var n = categories.length;
+  var W = Math.max(480, pL + pR + n * catWidth);
+  var plotW = W - pL - pR, plotH = H - pT - pB;
+  function catCenter(i) { return pL + (plotW / n) * (i + 0.5); }
+  function yFor(v) { return pT + plotH - (maxVal > 0 ? (v / maxVal) * plotH : 0); }
+
+  var gridSteps = Math.min(Math.max(Math.round(maxVal), 1), 5);
+  var grid = '';
+  for (var g = 0; g <= gridSteps; g++) {
+    var gv = Math.round((g / gridSteps) * maxVal);
+    var gy = yFor(gv);
+    grid += '<line x1="' + pL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pR) + '" y2="' + gy.toFixed(1) + '" stroke="var(--border)" stroke-dasharray="3,3" stroke-width="1"/>' +
+      '<text x="' + (pL - 8) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--text3)">' + gv + '</text>';
+  }
+
+  var body = categories.map(function (cat, i) {
+    var cx = catCenter(i);
+    var barCount = cat.bars.length;
+    var groupW = Math.min(catWidth - 16, barCount * 28);
+    var barW = groupW / barCount;
+    var barsHtml = cat.bars.map(function (b, bi) {
+      var bx = cx - groupW / 2 + bi * barW;
+      var by = yFor(b.value);
+      var bh = Math.max((pT + plotH) - by, 2);
+      var clickAttr = b.key ? ' onclick="window._showReportIssues(\'' + b.key + '\')" style="cursor:pointer"' : '';
+      return '<rect x="' + bx.toFixed(1) + '" y="' + by.toFixed(1) + '" width="' + Math.max(barW - 4, 4).toFixed(1) + '" height="' + bh.toFixed(1) + '" fill="' + b.color + '" rx="2"' + clickAttr + '><title>' + esc(b.title) + '</title></rect>' +
+        (b.value > 0 ? '<text x="' + (bx + barW / 2).toFixed(1) + '" y="' + (by - 4).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="700" fill="var(--text)">' + b.value + '</text>' : '');
+    }).join('');
+    return barsHtml + '<text x="' + cx.toFixed(1) + '" y="' + (H - pB + 20) + '" text-anchor="middle" font-size="10" fill="var(--text2)" title="' + esc(cat.title || cat.label) + '">' + esc(cat.label) + '</text>';
+  }).join('');
+
+  return '<div style="overflow-x:auto"><svg width="' + W + '" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:100%">' +
+    grid +
+    '<line x1="' + pL + '" y1="' + pT + '" x2="' + pL + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+    '<line x1="' + pL + '" y1="' + (pT + plotH) + '" x2="' + (W - pR) + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+    body +
+    '</svg></div>';
+}
+
 // How many sprints of history to show, editable via the selector at the top
 // of the Overview tab. 'all' shows everything.
 var _mbrSprintWindow = '5';
@@ -7195,19 +7251,16 @@ function renderMBROverview(c, data) {
       return '<option value="' + v + '"' + (v === _mbrSprintWindow ? ' selected' : '') + '>' + (v === 'all' ? 'All sprints' : 'Last ' + v + ' sprints') + '</option>';
     }).join('') + '</select></div>';
 
-  var max = Math.max.apply(null, sprints.map(function (sp) { return sp.completed_points || 0; })) || 1;
-  var bars = sprints.map(function (sp) {
+  var trendChartHtml = mbrBarChart(sprints.map(function (sp) {
     var v = sp.completed_points || 0;
-    var pct = Math.round((v / max) * 100);
     var color = sp.status === 'active' ? '#f59e0b' : '#0129ac';
     var key = 'mbr_ov_' + sp.id;
-    window._reportDrillData[key] = { label: sp.name + ' — Completed Issues', issues: sp.completed_issues || [], points: true };
-    return '<div class="velocity-bar-group" style="flex:0 0 56px">' +
-      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + key + '\')" style="height:' + Math.max(pct, 4) + '%;background:' + color + ';cursor:pointer" title="' + esc(sp.name) + ': ' + v + ' pts' + (sp.status === 'active' ? ' (in progress)' : '') + '"></div>' +
-      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
-      '<span class="velocity-value">' + v + ' pts</span>' +
-      '</div>';
-  }).join('');
+    window._reportDrillData[key] = { label: sp.name + ' — Completed Issues', issues: (sp.completed_issues || []).filter(mbrHasPts), points: true };
+    return {
+      label: shortSprintLabel(sp.name), title: sp.name,
+      bars: [{ value: v, color: color, key: key, title: sp.name + (sp.status === 'active' ? ' (in progress)' : '') + ': ' + v + ' pts' }]
+    };
+  }));
 
   var breakdownRows = completedInWindow.length
     ? completedInWindow.map(function (r) {
@@ -7235,7 +7288,7 @@ function renderMBROverview(c, data) {
     '<span style="display:inline-block;width:12px;height:12px;background:#0129ac;border-radius:2px"></span> Completed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#f59e0b;border-radius:2px;margin-left:8px"></span> In progress (live)' +
     '</div>' +
-    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:space-evenly">' + bars + '</div></div>' +
+    trendChartHtml +
     '<h4 style="margin:24px 0 12px">' + esc(windowLabel) + ' — Breakdown</h4>' +
     '<table style="width:100%;border-collapse:collapse">' +
     '<thead><tr>' +
@@ -7262,68 +7315,50 @@ function renderMBRComparison(c, data) {
   }
 
   function drill(key, label, issues) {
-    window._reportDrillData[key] = { label: label, issues: issues || [], points: true };
+    window._reportDrillData[key] = { label: label, issues: (issues || []).filter(mbrHasPts), points: true };
     return key;
   }
 
-  var maxCommitted = Math.max.apply(null, sprints.map(function (sp) { return sp.committed_points || 0; })) || 1;
-  var committedBars = sprints.map(function (sp) {
+  var committedChartHtml = mbrBarChart(sprints.map(function (sp) {
     var committed = sp.committed_points || 0, completed = sp.completed_points || 0;
     var cKey = drill('mbr_cc_committed_' + sp.id, sp.name + ' — Committed Issues', (sp.completed_issues || []).concat(sp.spillover_issues || []));
     var dKey = drill('mbr_cc_completed_' + sp.id, sp.name + ' — Completed Issues', sp.completed_issues);
-    var cPct = Math.round((committed / maxCommitted) * 100);
-    var dPct = Math.round((completed / maxCommitted) * 100);
-    return '<div class="velocity-bar-group" style="flex:0 0 56px">' +
-      '<div style="display:flex;gap:3px;align-items:flex-end;width:100%;height:100%">' +
-      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + cKey + '\')" style="flex:1;height:' + Math.max(cPct, 4) + '%;background:#94a3b8;cursor:pointer" title="' + esc(sp.name) + ' — Committed: ' + committed + ' pts"></div>' +
-      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + dKey + '\')" style="flex:1;height:' + Math.max(dPct, 4) + '%;background:#0129ac;cursor:pointer" title="' + esc(sp.name) + ' — Completed: ' + completed + ' pts"></div>' +
-      '</div>' +
-      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
-      '<span class="velocity-value">' + committed + '/' + completed + '</span>' +
-      '</div>';
-  }).join('');
+    return {
+      label: shortSprintLabel(sp.name), title: sp.name,
+      bars: [
+        { value: committed, color: '#94a3b8', key: cKey, title: sp.name + ' — Committed: ' + committed + ' pts' },
+        { value: completed, color: '#0129ac', key: dKey, title: sp.name + ' — Completed: ' + completed + ' pts' }
+      ]
+    };
+  }));
 
-  var maxSpill = Math.max.apply(null, sprints.map(function (sp) { return sp.spillover_points || 0; })) || 1;
-  var spillBars = sprints.map(function (sp) {
+  var spillChartHtml = mbrBarChart(sprints.map(function (sp) {
     var v = sp.spillover_points || 0;
     var key = drill('mbr_sp_' + sp.id, sp.name + ' — Spilled Issues', sp.spillover_issues);
-    var pct = Math.round((v / maxSpill) * 100);
-    return '<div class="velocity-bar-group" style="flex:0 0 56px">' +
-      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + key + '\')" style="height:' + Math.max(pct, 4) + '%;background:' + (v > 0 ? '#dc2626' : '#10b981') + ';cursor:pointer" title="' + esc(sp.name) + ': ' + v + ' pts spilled"></div>' +
-      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
-      '<span class="velocity-value">' + v + ' pts</span>' +
-      '</div>';
-  }).join('');
+    return {
+      label: shortSprintLabel(sp.name), title: sp.name,
+      bars: [{ value: v, color: v > 0 ? '#dc2626' : '#10b981', key: key, title: sp.name + ': ' + v + ' pts spilled' }]
+    };
+  }));
 
   // Previous vs Last — Completed and Spillover as two separate adjacent
   // bars per sprint (not stacked), so a small spillover value next to a
   // large completed value is still clearly visible on its own.
-  var pvlMax = Math.max(
-    (prevLast.previous && prevLast.previous.completed_points) || 0,
-    (prevLast.previous && prevLast.previous.spillover_points) || 0,
-    (prevLast.last && prevLast.last.completed_points) || 0,
-    (prevLast.last && prevLast.last.spillover_points) || 0
-  ) || 1;
-  function pvlBar(label, sp) {
-    if (!sp) return '<div class="velocity-bar-group" style="flex:0 0 100px">' +
-      '<div class="velocity-bar" style="height:4%;background:var(--border)"></div>' +
-      '<span class="velocity-label">' + esc(label) + '</span>' +
-      '<span class="velocity-value" style="color:var(--text3)">No data</span>' +
-      '</div>';
-    var completedPct = Math.round((sp.completed_points / pvlMax) * 100);
-    var spillPct = Math.round((sp.spillover_points / pvlMax) * 100);
+  var pvlCategories = [];
+  [['Previous', prevLast.previous], ['Last', prevLast.last]].forEach(function (pair) {
+    var label = pair[0], sp = pair[1];
+    if (!sp) { pvlCategories.push({ label: label, title: label, bars: [{ value: 0, color: 'var(--border)' }] }); return; }
     var dKey = drill('mbr_pvl_completed_' + sp.id, sp.name + ' — Completed Issues', sp.completed_issues);
     var sKey = drill('mbr_pvl_spill_' + sp.id, sp.name + ' — Spilled Issues', sp.spillover_issues);
-    return '<div class="velocity-bar-group" style="flex:0 0 100px">' +
-      '<div style="display:flex;gap:4px;align-items:flex-end;width:100%;height:100%">' +
-      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + dKey + '\')" style="flex:1;height:' + Math.max(completedPct, 4) + '%;background:#10b981;cursor:pointer" title="' + esc(sp.name) + ' — Completed: ' + sp.completed_points + ' pts"></div>' +
-      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + sKey + '\')" style="flex:1;height:' + Math.max(spillPct, 4) + '%;background:#dc2626;cursor:pointer" title="' + esc(sp.name) + ' — Spillover: ' + sp.spillover_points + ' pts"></div>' +
-      '</div>' +
-      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(label) + ': ' + esc(shortSprintLabel(sp.name)) + '</span>' +
-      '<span class="velocity-value">' + sp.completed_points + ' / ' + sp.spillover_points + ' pts</span>' +
-      '</div>';
-  }
-  var pvlBars = pvlBar('Previous', prevLast.previous) + pvlBar('Last', prevLast.last);
+    pvlCategories.push({
+      label: label + ': ' + shortSprintLabel(sp.name), title: sp.name,
+      bars: [
+        { value: sp.completed_points, color: '#10b981', key: dKey, title: sp.name + ' — Completed: ' + sp.completed_points + ' pts' },
+        { value: sp.spillover_points, color: '#dc2626', key: sKey, title: sp.name + ' — Spillover: ' + sp.spillover_points + ' pts' }
+      ]
+    });
+  });
+  var pvlChartHtml = mbrBarChart(pvlCategories);
 
   // Spillover by user, sprint-wise — a table (every space member, 0 where
   // they had no spillover), capped to the last 8 sprints as columns so it
@@ -7343,7 +7378,7 @@ function renderMBRComparison(c, data) {
           '<td style="padding:8px 12px;font-weight:600;white-space:nowrap"><span style="width:10px;height:10px;border-radius:2px;background:' + (u.color || '#6b7280') + ';display:inline-block;margin-right:8px"></span>' + esc(u.name) + '</td>' +
           cells + '<td style="padding:8px 12px;text-align:right;font-weight:700">' + u.total_points + '</td></tr>';
       }).join('')
-    : '<tr><td colspan="' + (sprintCols.length + 2) + '" style="padding:16px;color:var(--text3);text-align:center">No members in this space</td></tr>';
+    : '<tr><td colspan="' + (sprintCols.length + 2) + '" style="padding:16px;color:var(--text3);text-align:center">No developers or QA assigned to these sprints</td></tr>';
   var userHeaderCols = sprintCols.map(function (sp) {
     return '<th title="' + esc(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
   }).join('');
@@ -7357,17 +7392,17 @@ function renderMBRComparison(c, data) {
     '<span style="display:inline-block;width:12px;height:12px;background:#94a3b8;border-radius:2px"></span> Committed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#0129ac;border-radius:2px;margin-left:8px"></span> Completed' +
     '</div>' +
-    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:space-evenly;margin-bottom:28px">' + committedBars + '</div></div>' +
+    committedChartHtml +
 
-    '<h4 style="margin:0 0 8px;font-size:13px">Spillover Points Per Sprint</h4>' +
-    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:space-evenly;margin-bottom:28px">' + spillBars + '</div></div>' +
+    '<h4 style="margin:24px 0 8px;font-size:13px">Spillover Points Per Sprint</h4>' +
+    spillChartHtml +
 
-    '<h4 style="margin:0 0 8px;font-size:13px">Previous Sprint vs Last Sprint</h4>' +
+    '<h4 style="margin:24px 0 8px;font-size:13px">Previous Sprint vs Last Sprint</h4>' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
     '<span style="display:inline-block;width:12px;height:12px;background:#10b981;border-radius:2px"></span> Completed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#dc2626;border-radius:2px;margin-left:8px"></span> Spillover' +
     '</div>' +
-    '<div class="velocity-bars" style="height:110px;justify-content:space-evenly;margin-bottom:28px">' + pvlBars + '</div>' +
+    pvlChartHtml +
 
     '<h4 style="margin:0 0 4px;font-size:13px">Spillover by User, Sprint-wise</h4>' +
     userTruncNote +
@@ -7424,7 +7459,7 @@ window._showMbrUserTrend = function (userId) {
     var clickAttr = '';
     if (ps && ps.points) {
       var key = 'mbr_ut_' + sp.id + '_' + userId;
-      window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' Spillover', issues: ps.issues, points: true };
+      window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' Spillover', issues: ps.issues.filter(mbrHasPts), points: true };
       clickAttr = ' onclick="window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
     }
     return '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="transparent"' + clickAttr + '><title>' + esc(sp.name) + ': ' + v + ' pts</title></circle>' +

@@ -2112,7 +2112,7 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'report.view'))) return;
 
   const sprints = (await q(`
-    SELECT id, name, status, start_date, end_date, velocity
+    SELECT id, name, status, start_date, end_date, velocity, developer_ids, qa_ids
     FROM sprints
     WHERE space_id=$1 AND status IN ('completed','active') AND deleted_at IS NULL
     ORDER BY COALESCE(end_date, start_date, created_at)
@@ -2217,13 +2217,18 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     previous: completedSorted[1] || null
   };
 
-  // Per-user spillover across every completed sprint — seeded with every
-  // space member (not just people who happen to have spilled something), so
-  // a user with zero spillover still shows up with 0s instead of vanishing.
-  const members = (await q(
-    `SELECT u.id, u.name, u.color FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1`,
-    [spaceId]
-  )).rows;
+  // Per-user spillover across every completed sprint — seeded with everyone
+  // tagged as a Developer or QA on any of these sprints (not the whole
+  // space roster, and not just people who happen to have spilled
+  // something), so a sprint participant with zero spillover still shows up
+  // with 0s instead of vanishing or dragging in unrelated space members.
+  const rosterIds = [...new Set(
+    sprints.filter(sp => sp.status === 'completed')
+      .flatMap(sp => [...(sp.developer_ids || []), ...(sp.qa_ids || [])])
+  )];
+  const members = rosterIds.length
+    ? (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [rosterIds])).rows
+    : [];
   const byUser = {};
   members.forEach(u => { byUser[u.id] = { name: u.name, color: u.color, per_sprint: {} }; });
   completedSprintRows.forEach(sp => {
