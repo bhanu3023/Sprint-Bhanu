@@ -7012,18 +7012,6 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
     ? '<div style="background:#10b98122;border:1px solid #10b98144;border-radius:8px;padding:12px 16px;font-size:13px;color:#065f46;margin-bottom:16px">🎉 No spillover — all issues were completed before the sprint ended!</div>'
     : '<div style="background:#dc262622;border:1px solid #dc262644;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b;margin-bottom:16px">📋 <strong>' + count + ' issue' + (count !== 1 ? 's' : '') + '</strong> spilled over when this sprint was completed and moved back to the backlog.</div>';
 
-  // Dynamic, per-type/per-role settings (Settings > Reports). Note it here so
-  // it's obvious the count above isn't "everything that spilled", and link
-  // straight to where it's changed.
-  var hiddenBySettings = Number(data.hidden_by_settings_count) || 0;
-  var devFilterBanner = hiddenBySettings > 0
-    ? '<div style="background:#0052cc11;border:1px solid #0052cc33;border-radius:8px;padding:10px 16px;font-size:12px;color:var(--text2);margin-bottom:16px;display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap">' +
-      '<span>🔧 <strong>' + hiddenBySettings + '</strong> ticket' + (hiddenBySettings !== 1 ? 's' : '') + ' hidden by this board\'s Spillover report settings.' +
-      '</span>' +
-      '<a href="#" onclick="event.preventDefault();navigateToSpace(S.currentSpace,\'settings\');window._switchSettingsTab(\'reports\');" style="color:var(--accent);white-space:nowrap">Change in Settings</a>' +
-      '</div>'
-    : '';
-
   // ── Spillover by Developer — who's carrying the spilled-over work ──
   var devGroups = {};
   issues.forEach(function(i) {
@@ -7061,7 +7049,6 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
     '<h4 style="margin:0 0 4px">Spillover — ' + esc(sprint.name || 'Sprint') + '</h4>' +
     '<p style="font-size:12px;color:var(--text3);margin:0 0 16px">Issues not completed at sprint end</p>' +
     banner +
-    devFilterBanner +
     '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
     kpi('Spilled Issues', count, count > 0 ? '#dc2626' : '#10b981', 'Total not completed', 'sp_all') +
     kpi('Story Points Lost', totalPts, totalPts > 0 ? '#f59e0b' : '#10b981', 'Points not delivered', 'sp_withpts') +

@@ -2050,23 +2050,24 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
   const qaIds = sprint.qa_ids || [];
   const qaOnlySet = new Set(qaIds.filter(id => !devIds.includes(id)));
 
+  // A type toggle (stories w/ points, stories w/o points, tasks, bugs) is a
+  // standalone yes/no for that category — checking it must be sufficient on
+  // its own, regardless of who the ticket is assigned to. The QA/unassigned
+  // toggles only ADD tickets whose type toggle is off (e.g. "hide bugs in
+  // general, but still surface ones sitting with QA") — they never take
+  // away a ticket its type toggle already includes.
   const beforeFilter = spillover.length;
   spillover = spillover.filter(i => {
     const hasPts = Number(i.story_points) > 0;
-    if (i.type === 'story') {
-      if (hasPts && !settings.show_stories_with_points) return false;
-      if (!hasPts && !settings.show_stories_without_points) return false;
-    } else if (i.type === 'task' && !settings.show_tasks) {
-      return false;
-    } else if (i.type === 'bug' && !settings.show_bugs) {
-      return false;
-    }
-    if (!i.assignee_id) {
-      if (!settings.include_unassigned) return false;
-    } else if (qaOnlySet.has(i.assignee_id) && !settings.include_qa_assigned) {
-      return false;
-    }
-    return true;
+    let typeIncluded;
+    if (i.type === 'story') typeIncluded = hasPts ? settings.show_stories_with_points : settings.show_stories_without_points;
+    else if (i.type === 'task') typeIncluded = settings.show_tasks;
+    else if (i.type === 'bug') typeIncluded = settings.show_bugs;
+    else typeIncluded = true; // epics/subtasks aren't covered by any type toggle
+    if (typeIncluded) return true;
+    if (!i.assignee_id) return !!settings.include_unassigned;
+    if (qaOnlySet.has(i.assignee_id)) return !!settings.include_qa_assigned;
+    return false;
   });
   const hiddenByFilterCount = beforeFilter - spillover.length;
 
