@@ -7182,7 +7182,7 @@ function renderMBROverview(c, data) {
     var v = sp.completed_points || 0;
     var pct = Math.round((v / max) * 100);
     var color = sp.status === 'active' ? '#f59e0b' : '#0129ac';
-    return '<div class="velocity-bar-group">' +
+    return '<div class="velocity-bar-group" style="flex:0 0 64px">' +
       '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + color + '" title="' + esc(sp.name) + ': ' + v + ' pts' + (sp.status === 'active' ? ' (in progress)' : '') + '"></div>' +
       '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + v + ' pts</span>' +
@@ -7208,7 +7208,7 @@ function renderMBROverview(c, data) {
     '<span style="display:inline-block;width:12px;height:12px;background:#0129ac;border-radius:2px"></span> Completed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#f59e0b;border-radius:2px;margin-left:8px"></span> In progress (live)' +
     '</div>' +
-    '<div class="velocity-bars">' + bars + '</div>' +
+    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:flex-start">' + bars + '</div></div>' +
     '<h4 style="margin:24px 0 12px">Last 30 Days — Sprint Breakdown</h4>' +
     '<table style="width:100%;border-collapse:collapse">' +
     '<thead><tr>' +
@@ -7235,7 +7235,7 @@ function renderMBRComparison(c, data) {
     var committed = sp.committed_points || 0, completed = sp.completed_points || 0;
     var cPct = Math.round((committed / maxCommitted) * 100);
     var dPct = Math.round((completed / maxCommitted) * 100);
-    return '<div class="velocity-bar-group">' +
+    return '<div class="velocity-bar-group" style="flex:0 0 64px">' +
       '<div style="display:flex;gap:3px;align-items:flex-end;width:100%;height:100%">' +
       '<div class="velocity-bar" style="flex:1;height:' + Math.max(cPct, 4) + '%;background:#94a3b8" title="' + esc(sp.name) + ' — Committed: ' + committed + ' pts"></div>' +
       '<div class="velocity-bar" style="flex:1;height:' + Math.max(dPct, 4) + '%;background:#0129ac" title="' + esc(sp.name) + ' — Completed: ' + completed + ' pts"></div>' +
@@ -7249,7 +7249,7 @@ function renderMBRComparison(c, data) {
   var spillBars = sprints.map(function (sp) {
     var v = sp.spillover_points || 0;
     var pct = Math.round((v / maxSpill) * 100);
-    return '<div class="velocity-bar-group">' +
+    return '<div class="velocity-bar-group" style="flex:0 0 64px">' +
       '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + (v > 0 ? '#dc2626' : '#10b981') + '" title="' + esc(sp.name) + ': ' + v + ' pts spilled"></div>' +
       '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + v + ' pts</span>' +
@@ -7296,10 +7296,10 @@ function renderMBRComparison(c, data) {
     '<span style="display:inline-block;width:12px;height:12px;background:#94a3b8;border-radius:2px"></span> Committed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#0129ac;border-radius:2px;margin-left:8px"></span> Completed' +
     '</div>' +
-    '<div class="velocity-bars" style="margin-bottom:28px">' + committedBars + '</div>' +
+    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:flex-start;margin-bottom:28px">' + committedBars + '</div></div>' +
 
     '<h4 style="margin:0 0 8px;font-size:13px">Spillover Points Per Sprint</h4>' +
-    '<div class="velocity-bars" style="margin-bottom:28px">' + spillBars + '</div>' +
+    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:flex-start;margin-bottom:28px">' + spillBars + '</div></div>' +
 
     '<h4 style="margin:0 0 12px;font-size:13px">Previous Sprint vs Last Sprint</h4>' +
     '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:28px">' +
