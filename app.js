@@ -7235,7 +7235,7 @@ function renderMBROverview(c, data) {
     '<span style="display:inline-block;width:12px;height:12px;background:#0129ac;border-radius:2px"></span> Completed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#f59e0b;border-radius:2px;margin-left:8px"></span> In progress (live)' +
     '</div>' +
-    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:center">' + bars + '</div></div>' +
+    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:space-evenly">' + bars + '</div></div>' +
     '<h4 style="margin:24px 0 12px">' + esc(windowLabel) + ' — Breakdown</h4>' +
     '<table style="width:100%;border-collapse:collapse">' +
     '<thead><tr>' +
@@ -7356,17 +7356,17 @@ function renderMBRComparison(c, data) {
     '<span style="display:inline-block;width:12px;height:12px;background:#94a3b8;border-radius:2px"></span> Committed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#0129ac;border-radius:2px;margin-left:8px"></span> Completed' +
     '</div>' +
-    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:center;margin-bottom:28px">' + committedBars + '</div></div>' +
+    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:space-evenly;margin-bottom:28px">' + committedBars + '</div></div>' +
 
     '<h4 style="margin:0 0 8px;font-size:13px">Spillover Points Per Sprint</h4>' +
-    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:center;margin-bottom:28px">' + spillBars + '</div></div>' +
+    '<div style="overflow-x:auto"><div class="velocity-bars" style="height:110px;justify-content:space-evenly;margin-bottom:28px">' + spillBars + '</div></div>' +
 
     '<h4 style="margin:0 0 8px;font-size:13px">Previous Sprint vs Last Sprint</h4>' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
     '<span style="display:inline-block;width:12px;height:12px;background:#10b981;border-radius:2px"></span> Completed' +
     '<span style="display:inline-block;width:12px;height:12px;background:#dc2626;border-radius:2px;margin-left:8px"></span> Spillover' +
     '</div>' +
-    '<div class="velocity-bars" style="height:110px;justify-content:center;margin-bottom:28px;gap:24px">' + pvlBars + '</div>' +
+    '<div class="velocity-bars" style="height:110px;justify-content:space-evenly;margin-bottom:28px">' + pvlBars + '</div>' +
 
     '<h4 style="margin:0 0 4px;font-size:13px">Spillover by User, Sprint-wise</h4>' +
     userTruncNote +
@@ -7420,7 +7420,7 @@ window._showMbrUserTrend = function (userId) {
     '<button id="_mbrUserTrendClose" style="width:28px;height:28px;border:none;background:var(--bg3);border-radius:8px;cursor:pointer;font-size:16px;color:var(--text3)">&times;</button>' +
     '</div>' +
     '<div style="padding:20px;overflow-x:auto">' +
-    (store.sprints.length ? '<div class="velocity-bars" style="height:130px;justify-content:center">' + bars + '</div>' : '<p class="placeholder-text">No completed sprints yet.</p>') +
+    (store.sprints.length ? '<div class="velocity-bars" style="height:130px;justify-content:space-evenly">' + bars + '</div>' : '<p class="placeholder-text">No completed sprints yet.</p>') +
     '</div></div>';
 
   document.body.appendChild(overlay);
