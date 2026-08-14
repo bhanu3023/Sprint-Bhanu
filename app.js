@@ -7295,11 +7295,14 @@ function renderMBRComparison(c, data) {
       '</div>';
   }).join('');
 
-  // Previous vs Last — a stacked bar per sprint (completed at the base,
-  // spillover stacked on top, so the full bar height reads as "committed").
+  // Previous vs Last — Completed and Spillover as two separate adjacent
+  // bars per sprint (not stacked), so a small spillover value next to a
+  // large completed value is still clearly visible on its own.
   var pvlMax = Math.max(
-    (prevLast.previous && prevLast.previous.committed_points) || 0,
-    (prevLast.last && prevLast.last.committed_points) || 0
+    (prevLast.previous && prevLast.previous.completed_points) || 0,
+    (prevLast.previous && prevLast.previous.spillover_points) || 0,
+    (prevLast.last && prevLast.last.completed_points) || 0,
+    (prevLast.last && prevLast.last.spillover_points) || 0
   ) || 1;
   function pvlBar(label, sp) {
     if (!sp) return '<div class="velocity-bar-group" style="flex:0 0 100px">' +
@@ -7312,14 +7315,12 @@ function renderMBRComparison(c, data) {
     var dKey = drill('mbr_pvl_completed_' + sp.id, sp.name + ' — Completed Issues', sp.completed_issues);
     var sKey = drill('mbr_pvl_spill_' + sp.id, sp.name + ' — Spilled Issues', sp.spillover_issues);
     return '<div class="velocity-bar-group" style="flex:0 0 100px">' +
-      '<div style="width:100%;height:100%;display:flex;flex-direction:column;justify-content:flex-end;border-radius:4px 4px 0 0;overflow:hidden">' +
-      (sp.spillover_points > 0
-        ? '<div onclick="window._showReportIssues(\'' + sKey + '\')" style="height:' + Math.max(spillPct, 3) + '%;background:#dc2626;cursor:pointer" title="' + esc(sp.name) + ' — Spillover: ' + sp.spillover_points + ' pts"></div>'
-        : '') +
-      '<div onclick="window._showReportIssues(\'' + dKey + '\')" style="height:' + Math.max(completedPct, 3) + '%;background:#10b981;cursor:pointer" title="' + esc(sp.name) + ' — Completed: ' + sp.completed_points + ' pts"></div>' +
+      '<div style="display:flex;gap:4px;align-items:flex-end;width:100%;height:100%">' +
+      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + dKey + '\')" style="flex:1;height:' + Math.max(completedPct, 4) + '%;background:#10b981;cursor:pointer" title="' + esc(sp.name) + ' — Completed: ' + sp.completed_points + ' pts"></div>' +
+      '<div class="velocity-bar" onclick="window._showReportIssues(\'' + sKey + '\')" style="flex:1;height:' + Math.max(spillPct, 4) + '%;background:#dc2626;cursor:pointer" title="' + esc(sp.name) + ' — Spillover: ' + sp.spillover_points + ' pts"></div>' +
       '</div>' +
       '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(label) + ': ' + esc(shortSprintLabel(sp.name)) + '</span>' +
-      '<span class="velocity-value">' + sp.completed_points + '/' + sp.committed_points + ' pts (' + sp.completion_pct + '%)</span>' +
+      '<span class="velocity-value">' + sp.completed_points + ' / ' + sp.spillover_points + ' pts</span>' +
       '</div>';
   }
   var pvlBars = pvlBar('Previous', prevLast.previous) + pvlBar('Last', prevLast.last);
@@ -7389,26 +7390,57 @@ window._showMbrUserTrend = function (userId) {
   var existing = document.getElementById('_mbrUserTrendOverlay');
   if (existing) existing.remove();
 
-  var max = Math.max.apply(null, store.sprints.map(function (sp) {
+  var sprints = store.sprints;
+  var n = sprints.length;
+  var values = sprints.map(function (sp) {
     var ps = u.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
     return ps ? ps.points : 0;
-  })) || 1;
-  var bars = store.sprints.map(function (sp) {
+  });
+  var maxVal = Math.max.apply(null, values.concat([1]));
+  var H = 220, pL = 40, pR = 24, pT = 20, pB = 40;
+  var W = Math.max(480, pL + pR + Math.max(n - 1, 1) * 80);
+  var plotW = W - pL - pR, plotH = H - pT - pB;
+  function xp(i) { return pL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2); }
+  function yp(v) { return pT + plotH - (maxVal > 0 ? (v / maxVal) * plotH : 0); }
+
+  var gridSteps = Math.min(maxVal, 5);
+  var grid = '';
+  for (var g = 0; g <= gridSteps; g++) {
+    var gv = Math.round((g / gridSteps) * maxVal);
+    var gy = yp(gv);
+    grid += '<line x1="' + pL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pR) + '" y2="' + gy.toFixed(1) + '" stroke="var(--border)" stroke-dasharray="3,3" stroke-width="1"/>' +
+      '<text x="' + (pL - 8) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--text3)">' + gv + '</text>';
+  }
+
+  var lineColor = u.color || '#0129ac';
+  var linePoints = values.map(function (v, i) { return xp(i).toFixed(1) + ',' + yp(v).toFixed(1); }).join(' ');
+  var xLabels = sprints.map(function (sp, i) {
+    return '<text x="' + xp(i).toFixed(1) + '" y="' + (H - pB + 20) + '" text-anchor="middle" font-size="10" fill="var(--text2)">' + esc(shortSprintLabel(sp.name)) + '</text>';
+  }).join('');
+  var dots = sprints.map(function (sp, i) {
+    var v = values[i];
     var ps = u.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
-    var v = ps ? ps.points : 0;
-    var pct = Math.round((v / max) * 100);
+    var cx = xp(i).toFixed(1), cy = yp(v).toFixed(1);
     var clickAttr = '';
     if (ps && ps.points) {
       var key = 'mbr_ut_' + sp.id + '_' + userId;
       window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' Spillover', issues: ps.issues, points: true };
       clickAttr = ' onclick="window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
     }
-    return '<div class="velocity-bar-group" style="flex:0 0 56px">' +
-      '<div class="velocity-bar"' + clickAttr + ' style="height:' + Math.max(pct, 4) + '%;background:' + (u.color || '#6b7280') + (clickAttr ? '' : ';opacity:0.35') + '" title="' + esc(sp.name) + ': ' + v + ' pts"></div>' +
-      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
-      '<span class="velocity-value">' + v + ' pts</span>' +
-      '</div>';
+    return '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="transparent"' + clickAttr + '><title>' + esc(sp.name) + ': ' + v + ' pts</title></circle>' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + lineColor + '" stroke="var(--bg)" stroke-width="1.5" style="pointer-events:none"/>' +
+      '<text x="' + cx + '" y="' + (Number(cy) - 10) + '" text-anchor="middle" font-size="10" font-weight="700" fill="var(--text)" style="pointer-events:none">' + v + '</text>';
   }).join('');
+
+  var chartHtml = n
+    ? '<div style="overflow-x:auto"><svg width="' + W + '" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:100%">' +
+      grid +
+      '<polyline points="' + linePoints + '" fill="none" stroke="' + lineColor + '" stroke-width="2"/>' +
+      '<line x1="' + pL + '" y1="' + pT + '" x2="' + pL + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      '<line x1="' + pL + '" y1="' + (pT + plotH) + '" x2="' + (W - pR) + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      xLabels + dots +
+      '</svg></div>'
+    : '<p class="placeholder-text">No completed sprints yet.</p>';
 
   var overlay = document.createElement('div');
   overlay.id = '_mbrUserTrendOverlay';
@@ -7419,9 +7451,7 @@ window._showMbrUserTrend = function (userId) {
     '<div style="font-size:15px;font-weight:700;color:var(--text)">' + esc(u.name) + ' — Spillover Trend (' + u.total_points + ' pts across ' + u.total_count + ' issue' + (u.total_count === 1 ? '' : 's') + ')</div>' +
     '<button id="_mbrUserTrendClose" style="width:28px;height:28px;border:none;background:var(--bg3);border-radius:8px;cursor:pointer;font-size:16px;color:var(--text3)">&times;</button>' +
     '</div>' +
-    '<div style="padding:20px;overflow-x:auto">' +
-    (store.sprints.length ? '<div class="velocity-bars" style="height:130px;justify-content:space-evenly">' + bars + '</div>' : '<p class="placeholder-text">No completed sprints yet.</p>') +
-    '</div></div>';
+    '<div style="padding:20px">' + chartHtml + '</div></div>';
 
   document.body.appendChild(overlay);
   var close = function () { if (document.body.contains(overlay)) overlay.remove(); };
