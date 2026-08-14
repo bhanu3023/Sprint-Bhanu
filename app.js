@@ -7155,6 +7155,18 @@ window._switchMbrTab = function (tab) {
   renderMBR(tab);
 };
 
+// Sprint names in this app tend to be long descriptive titles ("Sprint-2:
+// 350 TB from SharePoint OnPrem 2016 to SharePoint Online"), which don't fit
+// under a bar. The team's naming convention puts the short identifier before
+// a colon, so that's what shows under bars/columns — the full name is still
+// in the hover tooltip and in the tables below.
+function shortSprintLabel(name) {
+  var s = String(name || '').trim();
+  var idx = s.indexOf(':');
+  var short = idx > 0 ? s.slice(0, idx).trim() : s;
+  return short.length > 18 ? short.slice(0, 16) + '…' : short;
+}
+
 function renderMBROverview(c, data) {
   var sprints = (data && data.sprints) || [];
   var last30 = (data && data.last_30_days) || { sprints_completed: 0, total_points_completed: 0, breakdown: [] };
@@ -7172,7 +7184,7 @@ function renderMBROverview(c, data) {
     var color = sp.status === 'active' ? '#f59e0b' : '#0129ac';
     return '<div class="velocity-bar-group">' +
       '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + color + '" title="' + esc(sp.name) + ': ' + v + ' pts' + (sp.status === 'active' ? ' (in progress)' : '') + '"></div>' +
-      '<span class="velocity-label">' + esc(sp.name) + '</span>' +
+      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + v + ' pts</span>' +
       '</div>';
   }).join('');
@@ -7228,7 +7240,7 @@ function renderMBRComparison(c, data) {
       '<div class="velocity-bar" style="flex:1;height:' + Math.max(cPct, 4) + '%;background:#94a3b8" title="' + esc(sp.name) + ' — Committed: ' + committed + ' pts"></div>' +
       '<div class="velocity-bar" style="flex:1;height:' + Math.max(dPct, 4) + '%;background:#0129ac" title="' + esc(sp.name) + ' — Completed: ' + completed + ' pts"></div>' +
       '</div>' +
-      '<span class="velocity-label">' + esc(sp.name) + '</span>' +
+      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + completed + '/' + committed + '</span>' +
       '</div>';
   }).join('');
@@ -7239,7 +7251,7 @@ function renderMBRComparison(c, data) {
     var pct = Math.round((v / maxSpill) * 100);
     return '<div class="velocity-bar-group">' +
       '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + (v > 0 ? '#dc2626' : '#10b981') + '" title="' + esc(sp.name) + ': ' + v + ' pts spilled"></div>' +
-      '<span class="velocity-label">' + esc(sp.name) + '</span>' +
+      '<span class="velocity-label" title="' + esc(sp.name) + '">' + esc(shortSprintLabel(sp.name)) + '</span>' +
       '<span class="velocity-value">' + v + ' pts</span>' +
       '</div>';
   }).join('');
@@ -7272,7 +7284,7 @@ function renderMBRComparison(c, data) {
       }).join('')
     : '<tr><td colspan="' + (sprintCols.length + 2) + '" style="padding:16px;color:var(--text3);text-align:center">No spillover recorded across these sprints</td></tr>';
   var userHeaderCols = sprintCols.map(function (sp) {
-    return '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(sp.name) + '</th>';
+    return '<th title="' + esc(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
   }).join('');
 
   c.innerHTML = '<div class="report-chart">' +
