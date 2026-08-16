@@ -2112,7 +2112,7 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'report.view'))) return;
 
   const sprints = (await q(`
-    SELECT id, name, status, start_date, end_date, velocity, developer_ids, qa_ids
+    SELECT id, name, status, start_date, end_date, velocity, developer_ids, qa_ids, achievements
     FROM sprints
     WHERE space_id=$1 AND status IN ('completed','active') AND deleted_at IS NULL
     ORDER BY COALESCE(end_date, start_date, created_at)
@@ -2206,7 +2206,8 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
       spillover_count: spillIssues.length, spillover_points: spillPts,
       completion_pct: committedPts > 0 ? Math.round((completedPts / committedPts) * 100) : 0,
       completed_issues: completedIssues,
-      spillover_issues: spillIssues
+      spillover_issues: spillIssues,
+      achievements: Array.isArray(sp.achievements) ? sp.achievements : []
     };
   });
 

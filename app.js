@@ -5226,6 +5226,7 @@ window._completeSprint = async function (id) {
   await refreshData();
   renderBacklog();
   toast('Sprint completed');
+  if (typeof window._openAchievementsModal === 'function') window._openAchievementsModal(id);
 };
 
 window._deleteSprint = async function (id) {
@@ -7148,6 +7149,7 @@ async function renderMBR(subTab) {
     }
   }
   if (_mbrActiveTab === 'comparison') renderMBRComparison(c, _mbrData);
+  else if (_mbrActiveTab === 'achievements') renderMBRAchievements(c, _mbrData);
   else renderMBROverview(c, _mbrData);
 }
 
@@ -7492,6 +7494,140 @@ window._showMbrUserTrend = function (userId) {
   var close = function () { if (document.body.contains(overlay)) overlay.remove(); };
   overlay.querySelector('#_mbrUserTrendClose').onclick = close;
   overlay.onclick = function (e) { if (e.target === overlay) close(); };
+};
+
+// ── MBR Achievements tab — sprint-wise highlights, entered manually ──
+// (typically prompted right after a sprint is completed, but editable any
+// time from this tab too, since forcing entry only at completion would
+// strand sprints completed before this feature existed).
+function renderMBRAchievements(c, data) {
+  var sprints = ((data && data.completed_sprints) || []).slice().reverse(); // most recent first
+  var canManage = canManageSpace(S.currentSpace);
+
+  if (!sprints.length) {
+    c.innerHTML = '<div class="report-chart"><h4 style="margin:0 0 4px">Achievements</h4>' +
+      '<p class="placeholder-text">No completed sprints yet. Achievements can be added once a sprint is completed.</p></div>';
+    return;
+  }
+
+  var cards = sprints.map(function (sp) {
+    var achievements = Array.isArray(sp.achievements) ? sp.achievements : [];
+    var body = achievements.length
+      ? achievements.map(function (cat) {
+          var items = Array.isArray(cat.items) ? cat.items.filter(function (t) { return t && t.trim(); }) : [];
+          return '<div style="margin-bottom:14px">' +
+            '<div style="font-weight:700;font-size:13px;color:var(--text);margin-bottom:6px">' + esc(cat.category || 'Highlights') + '</div>' +
+            (items.length
+              ? '<ul style="margin:0;padding-left:20px">' + items.map(function (t) { return '<li style="font-size:13px;color:var(--text2);margin-bottom:4px">' + esc(t) + '</li>'; }).join('') + '</ul>'
+              : '<p style="font-size:12px;color:var(--text3);margin:0">No items</p>') +
+            '</div>';
+        }).join('')
+      : '<p style="font-size:12px;color:var(--text3)">No achievements entered yet for this sprint.</p>';
+
+    return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px 24px;margin-bottom:16px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
+      '<div><div style="font-size:15px;font-weight:700;color:var(--text)">' + esc(sp.name) + '</div>' +
+      '<div style="font-size:12px;color:var(--text3)">Completed ' + fmtDate(sp.end_date) + '</div></div>' +
+      (canManage ? '<button class="btn btn-sm btn-outline" onclick="window._openAchievementsModal(\'' + sp.id + '\')">' + (achievements.length ? 'Edit' : '+ Add') + ' Achievements</button>' : '') +
+      '</div>' +
+      body +
+      '</div>';
+  }).join('');
+
+  c.innerHTML = '<div class="report-chart">' +
+    '<h4 style="margin:0 0 4px">Achievements</h4>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 20px">Sprint-wise highlights, entered manually per completed sprint</p>' +
+    cards +
+    '</div>';
+}
+
+function achItemRowHtml(text) {
+  return '<div class="ach-item-row" style="display:flex;gap:8px;margin-bottom:6px;align-items:center">' +
+    '<input type="text" class="input input-sm ach-item-text" placeholder="Achievement detail" value="' + escAttr(text || '') + '" style="flex:1">' +
+    '<button type="button" onclick="this.closest(\'.ach-item-row\').remove()" title="Remove" style="width:26px;height:26px;border:none;background:var(--bg3);border-radius:6px;cursor:pointer;color:var(--text3);flex-shrink:0">✕</button>' +
+    '</div>';
+}
+
+function achCategoryBlockHtml(cat) {
+  cat = cat || { category: '', items: [''] };
+  var items = (Array.isArray(cat.items) && cat.items.length) ? cat.items : [''];
+  return '<div class="ach-category-block" style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px">' +
+    '<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">' +
+    '<input type="text" class="input ach-category-name" placeholder="Category (e.g. New Features)" value="' + escAttr(cat.category || '') + '" style="flex:1;font-weight:600">' +
+    '<button type="button" onclick="this.closest(\'.ach-category-block\').remove()" title="Remove category" style="width:26px;height:26px;border:none;background:var(--bg3);border-radius:6px;cursor:pointer;color:#dc2626;flex-shrink:0">✕</button>' +
+    '</div>' +
+    '<div class="ach-items-container">' + items.map(achItemRowHtml).join('') + '</div>' +
+    '<button type="button" class="btn btn-sm btn-outline" onclick="window._achAddItem(this)">+ Add bullet</button>' +
+    '</div>';
+}
+
+window._achAddItem = function (btn) {
+  var container = btn.closest('.ach-category-block').querySelector('.ach-items-container');
+  container.insertAdjacentHTML('beforeend', achItemRowHtml(''));
+};
+
+window._achAddCategory = function () {
+  $('_achCategoriesContainer').insertAdjacentHTML('beforeend', achCategoryBlockHtml());
+};
+
+window._openAchievementsModal = function (sprintId) {
+  var sprint = (S.data.sprints || []).find(function (sp) { return sp.id === sprintId; });
+  var existing = (sprint && Array.isArray(sprint.achievements)) ? sprint.achievements : [];
+  var existingClosure = existing.length ? existing : [{ category: '', items: [''] }];
+
+  var existing2 = document.getElementById('_achModalOverlay');
+  if (existing2) existing2.remove();
+
+  var overlay = document.createElement('div');
+  overlay.id = '_achModalOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+  overlay.innerHTML =
+    '<div style="background:var(--bg);border-radius:12px;width:100%;max-width:640px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden">' +
+    '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">' +
+    '<div style="font-size:15px;font-weight:700;color:var(--text)">Sprint Achievements' + (sprint ? ' — ' + esc(sprint.name) : '') + '</div>' +
+    '<button id="_achModalClose" style="width:28px;height:28px;border:none;background:var(--bg3);border-radius:8px;cursor:pointer;font-size:16px;color:var(--text3)">&times;</button>' +
+    '</div>' +
+    '<div style="padding:20px;overflow-y:auto;flex:1" id="_achCategoriesContainer">' +
+    existingClosure.map(achCategoryBlockHtml).join('') +
+    '</div>' +
+    '<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0">' +
+    '<button type="button" class="btn btn-sm btn-outline" onclick="window._achAddCategory()">+ Add Category</button>' +
+    '<div style="margin-left:auto;display:flex;gap:8px">' +
+    '<button type="button" class="btn btn-outline" id="_achModalCancel">Cancel</button>' +
+    '<button type="button" class="btn btn-primary" id="_achModalSave">Save</button>' +
+    '</div></div></div>';
+
+  document.body.appendChild(overlay);
+  var close = function () { if (document.body.contains(overlay)) overlay.remove(); };
+  overlay.querySelector('#_achModalClose').onclick = close;
+  overlay.querySelector('#_achModalCancel').onclick = close;
+  overlay.onclick = function (e) { if (e.target === overlay) close(); };
+
+  overlay.querySelector('#_achModalSave').onclick = async function () {
+    var achievements = [];
+    qsa('#_achCategoriesContainer .ach-category-block').forEach(function (block) {
+      var category = block.querySelector('.ach-category-name').value.trim();
+      var items = Array.from(block.querySelectorAll('.ach-item-text')).map(function (inp) { return inp.value.trim(); }).filter(Boolean);
+      if (category || items.length) achievements.push({ category: category || 'Highlights', items: items });
+    });
+    var btn = overlay.querySelector('#_achModalSave');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      var updated = await api('/api/sprints/' + sprintId, 'PUT', { achievements: achievements });
+      var cached = (S.data.sprints || []).find(function (sp) { return sp.id === sprintId; });
+      if (cached) cached.achievements = updated.achievements;
+      if (_mbrData) {
+        var mbrSp = (_mbrData.completed_sprints || []).find(function (sp) { return sp.id === sprintId; });
+        if (mbrSp) mbrSp.achievements = updated.achievements;
+      }
+      toast('Achievements saved', 'success');
+      close();
+      if (_mbrActiveTab === 'achievements') renderMBRAchievements($('mbrTabContent'), _mbrData);
+    } catch (e) {
+      toast(e.message || 'Could not save achievements', 'error');
+      btn.disabled = false; btn.textContent = 'Save';
+    }
+  };
 };
 
 function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {
