@@ -2171,10 +2171,23 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     `, [completedIds])).rows.filter(r => !excludedSet.has(r.spilled_from_sprint_id + '::' + r.id));
   }
 
+  // Bugs across every completed sprint (any status, not just Done/spilled) —
+  // feeds the Bug Summary section: overall totals plus per-sprint,
+  // per-assignee, and per-reporter breakdowns.
+  let bugRows = [];
+  if (completedIds.length) {
+    bugRows = (await q(`
+      SELECT id, key, title, status, priority, assignee_id, reporter_id, sprint_id
+      FROM issues WHERE sprint_id = ANY($1::varchar[]) AND type='bug' AND deleted_at IS NULL
+    `, [completedIds])).rows;
+  }
+
   const doneBySprintId = {};
   doneRows.forEach(r => { (doneBySprintId[r.sprint_id] = doneBySprintId[r.sprint_id] || []).push(r); });
   const spilloverBySprintId = {};
   spilloverRows.forEach(r => { (spilloverBySprintId[r.spilled_from_sprint_id] = spilloverBySprintId[r.spilled_from_sprint_id] || []).push(r); });
+  const bugsBySprintId = {};
+  bugRows.forEach(r => { (bugsBySprintId[r.sprint_id] = bugsBySprintId[r.sprint_id] || []).push(r); });
 
   // All sprints (completed + active) — feeds the Overview trend only, which
   // just needs "how many points landed", regardless of whether the sprint is
@@ -2200,6 +2213,7 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     const completedPts = Number(sp.velocity) || 0; // authoritative, never recomputed
     const spillPts = spillIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
     const committedPts = completedPts + spillPts;
+    const bugs = bugsBySprintId[sp.id] || [];
     return {
       id: sp.id, name: sp.name, end_date: sp.end_date,
       committed_points: committedPts, completed_points: completedPts,
@@ -2207,7 +2221,11 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
       completion_pct: committedPts > 0 ? Math.round((completedPts / committedPts) * 100) : 0,
       completed_issues: completedIssues,
       spillover_issues: spillIssues,
-      achievements: Array.isArray(sp.achievements) ? sp.achievements : []
+      achievements: Array.isArray(sp.achievements) ? sp.achievements : [],
+      bug_count: bugs.length,
+      bugs_open: bugs.filter(b => b.status !== 'Done').length,
+      bugs_closed: bugs.filter(b => b.status === 'Done').length,
+      bugs: bugs
     };
   });
 
@@ -2256,11 +2274,55 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     };
   }).sort((a, b) => b.total_points - a.total_points);
 
+  // Bug Summary breakdowns — by assignee and by reporter, sprint-wise. Anyone
+  // who assigned/reported a bug can show up here (not scoped to a sprint's
+  // Developer/QA lists like spillover is, since a bug's assignee or reporter
+  // can genuinely be anyone).
+  const bugUserIds = [...new Set(bugRows.flatMap(r => [r.assignee_id, r.reporter_id]).filter(Boolean))];
+  const bugUserMap = {};
+  if (bugUserIds.length) {
+    const users = (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [bugUserIds])).rows;
+    users.forEach(u => { bugUserMap[u.id] = u; });
+  }
+  const sprintNameById = {};
+  completedSprintRows.forEach(sp => { sprintNameById[sp.id] = sp.name; });
+  function buildBugBreakdown(keyField) {
+    const grouped = {};
+    bugRows.forEach(r => {
+      const uid = r[keyField];
+      if (!uid) return;
+      const u = (grouped[uid] = grouped[uid] || { per_sprint: {} });
+      const ps = (u.per_sprint[r.sprint_id] = u.per_sprint[r.sprint_id] || { sprint_id: r.sprint_id, sprint_name: sprintNameById[r.sprint_id] || '', count: 0, issues: [] });
+      ps.count += 1;
+      ps.issues.push(r);
+    });
+    return Object.keys(grouped).map(uid => {
+      const perSprintArr = Object.values(grouped[uid].per_sprint);
+      return {
+        user_id: uid,
+        name: (bugUserMap[uid] && bugUserMap[uid].name) || 'Unknown',
+        color: (bugUserMap[uid] && bugUserMap[uid].color) || '#6b7280',
+        total_count: perSprintArr.reduce((s, p) => s + p.count, 0),
+        per_sprint: perSprintArr
+      };
+    }).sort((a, b) => b.total_count - a.total_count);
+  }
+  const bugsByAssignee = buildBugBreakdown('assignee_id');
+  const bugsByReporter = buildBugBreakdown('reporter_id');
+  const bugSummaryOverall = {
+    total_bugs: bugRows.length,
+    open_bugs: bugRows.filter(r => r.status !== 'Done').length,
+    closed_bugs: bugRows.filter(r => r.status === 'Done').length
+  };
+
   res.json({
     sprints: allSprintRows,
     completed_sprints: completedSprintRows,
     previous_vs_last: previousVsLast,
-    spillover_by_user: spilloverByUser
+    spillover_by_user: spilloverByUser,
+    bug_summary: bugSummaryOverall,
+    bugs_by_assignee: bugsByAssignee,
+    bugs_by_reporter: bugsByReporter
   });
 }));
 

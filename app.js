@@ -7385,6 +7385,49 @@ function renderMBRComparison(c, data) {
     return '<th title="' + esc(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
   }).join('');
 
+  // ── Bug Summary — overall + sprint-wise + by assignee + by reporter ──
+  var bugSummary = data.bug_summary || { total_bugs: 0, open_bugs: 0, closed_bugs: 0 };
+  var bugsByAssignee = data.bugs_by_assignee || [];
+  var bugsByReporter = data.bugs_by_reporter || [];
+  window._mbrBugTrendStore = { sprints: sprints, byAssignee: bugsByAssignee, byReporter: bugsByReporter };
+
+  var bugChartHtml = mbrBarChart(sprints.map(function (sp) {
+    var v = sp.bug_count || 0;
+    // Bug counts aren't a points metric — bugs are usually unpointed, so this
+    // drill-down must NOT go through drill()'s point-carrying filter (that
+    // filter is only correct for the story-points-based charts above).
+    var key = 'mbr_bug_' + sp.id;
+    window._reportDrillData[key] = { label: sp.name + ' — Bugs', issues: sp.bugs || [] };
+    return { label: shortSprintLabel(sp.name), title: sp.name, bars: [{ value: v, color: '#ef4444', key: key, title: sp.name + ': ' + v + ' bug' + (v === 1 ? '' : 's') }] };
+  }));
+
+  function bugUserTableHtml(rows, kind, emptyLabel) {
+    var cols = sprints.slice(Math.max(0, sprints.length - 8));
+    var headerCols = cols.map(function (sp) {
+      return '<th title="' + esc(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
+    }).join('');
+    var bodyRows = rows.length
+      ? rows.map(function (u) {
+          var cells = cols.map(function (sp) {
+            var ps = u.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
+            return '<td style="padding:8px 12px;text-align:right;font-size:12px">' + (ps ? ps.count : 0) + '</td>';
+          }).join('');
+          return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window._showMbrBugTrend(\'' + u.user_id + '\',\'' + kind + '\')" title="Click to see ' + esc(u.name) + '\'s sprint-wise trend">' +
+            '<td style="padding:8px 12px;font-weight:600;white-space:nowrap"><span style="width:10px;height:10px;border-radius:2px;background:' + (u.color || '#6b7280') + ';display:inline-block;margin-right:8px"></span>' + esc(u.name) + '</td>' +
+            cells + '<td style="padding:8px 12px;text-align:right;font-weight:700">' + u.total_count + '</td></tr>';
+        }).join('')
+      : '<tr><td colspan="' + (cols.length + 2) + '" style="padding:16px;color:var(--text3);text-align:center">' + emptyLabel + '</td></tr>';
+    return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr><th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">User</th>' +
+      headerCols +
+      '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th></tr></thead>' +
+      '<tbody>' + bodyRows + '</tbody></table></div>';
+  }
+  var bugAssigneeTableHtml = bugUserTableHtml(bugsByAssignee, 'assignee', 'No bugs assigned across these sprints');
+  var bugReporterTableHtml = bugUserTableHtml(bugsByReporter, 'reporter', 'No bugs reported across these sprints');
+  var bugColTruncNote = sprints.length > 8
+    ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns — click a user to see their full trend.</p>' : '';
+
   c.innerHTML = '<div class="report-chart">' +
     '<h4 style="margin:0 0 4px">Comparison Trends</h4>' +
     '<p style="font-size:12px;color:var(--text3);margin:0 0 20px">Sprint-over-sprint comparisons for this board — completed sprints only. Click any bar to see its tickets.</p>' +
@@ -7413,8 +7456,104 @@ function renderMBRComparison(c, data) {
     userHeaderCols +
     '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th></tr></thead>' +
     '<tbody>' + userRows + '</tbody></table></div>' +
+
+    '<h4 style="margin:24px 0 4px;font-size:13px">Bug Summary</h4>' +
+    '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
+    '<div style="flex:1;min-width:160px">' + statCard('Total Bugs', bugSummary.total_bugs, '#ef4444') + '</div>' +
+    '<div style="flex:1;min-width:160px">' + statCard('Open Bugs', bugSummary.open_bugs, '#f59e0b') + '</div>' +
+    '<div style="flex:1;min-width:160px">' + statCard('Closed Bugs', bugSummary.closed_bugs, '#10b981') + '</div>' +
+    '</div>' +
+    '<h4 style="margin:0 0 8px;font-size:13px">Bugs Per Sprint</h4>' +
+    bugChartHtml +
+    '<h4 style="margin:24px 0 4px;font-size:13px">Bugs by Assignee, Sprint-wise</h4>' +
+    bugColTruncNote +
+    bugAssigneeTableHtml +
+    '<h4 style="margin:24px 0 4px;font-size:13px">Bugs Created By, Sprint-wise</h4>' +
+    bugColTruncNote +
+    bugReporterTableHtml +
     '</div>';
 }
+
+// Full sprint-wise bug trend for one user, either as assignee or reporter
+// (Bug Summary tables are capped to 8 sprint columns — this popup covers
+// every completed sprint).
+window._showMbrBugTrend = function (userId, kind) {
+  var store = window._mbrBugTrendStore;
+  if (!store) return;
+  var list = kind === 'reporter' ? store.byReporter : store.byAssignee;
+  var u = list.find(function (x) { return x.user_id === userId; });
+  if (!u) return;
+  var existingOverlay = document.getElementById('_mbrBugTrendOverlay');
+  if (existingOverlay) existingOverlay.remove();
+
+  var sprints = store.sprints;
+  var n = sprints.length;
+  var values = sprints.map(function (sp) {
+    var ps = u.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
+    return ps ? ps.count : 0;
+  });
+  var maxVal = Math.max.apply(null, values.concat([1]));
+  var H = 220, pL = 40, pR = 24, pT = 20, pB = 40;
+  var W = Math.max(480, pL + pR + Math.max(n - 1, 1) * 80);
+  var plotW = W - pL - pR, plotH = H - pT - pB;
+  function xp(i) { return pL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2); }
+  function yp(v) { return pT + plotH - (maxVal > 0 ? (v / maxVal) * plotH : 0); }
+
+  var gridSteps = Math.min(maxVal, 5);
+  var grid = '';
+  for (var g = 0; g <= gridSteps; g++) {
+    var gv = Math.round((g / gridSteps) * maxVal);
+    var gy = yp(gv);
+    grid += '<line x1="' + pL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - pR) + '" y2="' + gy.toFixed(1) + '" stroke="var(--border)" stroke-dasharray="3,3" stroke-width="1"/>' +
+      '<text x="' + (pL - 8) + '" y="' + (gy + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="var(--text3)">' + gv + '</text>';
+  }
+
+  var lineColor = u.color || '#ef4444';
+  var linePoints = values.map(function (v, i) { return xp(i).toFixed(1) + ',' + yp(v).toFixed(1); }).join(' ');
+  var xLabels = sprints.map(function (sp, i) {
+    return '<text x="' + xp(i).toFixed(1) + '" y="' + (H - pB + 20) + '" text-anchor="middle" font-size="10" fill="var(--text2)">' + esc(shortSprintLabel(sp.name)) + '</text>';
+  }).join('');
+  var dots = sprints.map(function (sp, i) {
+    var v = values[i];
+    var ps = u.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
+    var cx = xp(i).toFixed(1), cy = yp(v).toFixed(1);
+    var clickAttr = '';
+    if (ps && ps.count) {
+      var key = 'mbr_bugtrend_' + kind + '_' + sp.id + '_' + userId;
+      window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' (' + (kind === 'reporter' ? 'Reported' : 'Assigned') + ')', issues: ps.issues };
+      clickAttr = ' onclick="window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
+    }
+    return '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="transparent"' + clickAttr + '><title>' + esc(sp.name) + ': ' + v + ' bug' + (v === 1 ? '' : 's') + '</title></circle>' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + lineColor + '" stroke="var(--bg)" stroke-width="1.5" style="pointer-events:none"/>' +
+      '<text x="' + cx + '" y="' + (Number(cy) - 10) + '" text-anchor="middle" font-size="10" font-weight="700" fill="var(--text)" style="pointer-events:none">' + v + '</text>';
+  }).join('');
+
+  var chartHtml = n
+    ? '<div style="overflow-x:auto"><svg width="' + W + '" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:100%">' +
+      grid +
+      '<polyline points="' + linePoints + '" fill="none" stroke="' + lineColor + '" stroke-width="2"/>' +
+      '<line x1="' + pL + '" y1="' + pT + '" x2="' + pL + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      '<line x1="' + pL + '" y1="' + (pT + plotH) + '" x2="' + (W - pR) + '" y2="' + (pT + plotH) + '" stroke="var(--border)" stroke-width="1.5"/>' +
+      xLabels + dots +
+      '</svg></div>'
+    : '<p class="placeholder-text">No completed sprints yet.</p>';
+
+  var overlay = document.createElement('div');
+  overlay.id = '_mbrBugTrendOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+  overlay.innerHTML =
+    '<div style="background:var(--bg);border-radius:12px;width:100%;max-width:720px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden">' +
+    '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">' +
+    '<div style="font-size:15px;font-weight:700;color:var(--text)">' + esc(u.name) + ' — Bugs ' + (kind === 'reporter' ? 'Reported' : 'Assigned') + ' (' + u.total_count + ')</div>' +
+    '<button id="_mbrBugTrendClose" style="width:28px;height:28px;border:none;background:var(--bg3);border-radius:8px;cursor:pointer;font-size:16px;color:var(--text3)">&times;</button>' +
+    '</div>' +
+    '<div style="padding:20px">' + chartHtml + '</div></div>';
+
+  document.body.appendChild(overlay);
+  var close = function () { if (document.body.contains(overlay)) overlay.remove(); };
+  overlay.querySelector('#_mbrBugTrendClose').onclick = close;
+  overlay.onclick = function (e) { if (e.target === overlay) close(); };
+};
 
 // Full sprint-wise spillover trend for one user (Comparison Trends' user
 // table is capped to 8 sprint columns for readability — this popup covers
