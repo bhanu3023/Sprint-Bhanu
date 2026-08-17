@@ -6374,7 +6374,7 @@ function renderSprintSummaryReport(c, data, allSprints, sprintSelectorHtml) {
     '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px 18px;flex:1;min-width:240px">' +
     '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:.5px">Story Points Summary</div>' +
     hBar('Total Story Points', totalPts, totalPts||1, '#0052cc', 'ss_totalpts') +
-    hBar('Completing', ptsDone, totalPts||1, '#10b981', 'ss_ptsdone') +
+    hBar('Completed', ptsDone, totalPts||1, '#10b981', 'ss_ptsdone') +
     hBar('Remaining', ptsLeft, totalPts||1, '#f59e0b', 'ss_ptsleft') +
     '<div style="display:flex;gap:6px;font-size:10px;color:var(--text3);margin-top:8px">' +
     '<span>0</span><span style="flex:1;text-align:center">Story Points</span><span>' + totalPts + '</span>' +
