@@ -220,7 +220,51 @@ jobs:
 
           echo "Reverting the range ${BEFORE}..${{ github.sha }}"
           if git revert --no-commit "${BEFORE}..${{ github.sha }}"; then
-            git commit -m "[auto-revert] Deploy failed at ${{ env.commit }} -- back to $(git rev-parse --short "$BEFORE")"
+            SHORT_BEFORE="$(git rev-parse --short "$BEFORE")"
+            SHORT_TIP="$(git rev-parse --short "${{ github.sha }}")"
+            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            # Oldest first -- reads as "what happened, in order". This is the
+            # exact range that got reverted, listed by subject, so nobody has
+            # to go look it up separately.
+            REVERTED_LOG="$(git log --oneline --reverse "${BEFORE}..${{ github.sha }}")"
+
+            # Built with printf into a file rather than a heredoc: printf
+            # treats REVERTED_LOG (which can contain arbitrary commit subject
+            # text) as inert %s data, never as something to re-parse, so
+            # there is no quoting or terminator-matching risk regardless of
+            # what ends up in it. The commit message IS the incident report
+            # -- readable straight from `git log` or the GitHub UI, no
+            # digging through Actions logs required to know what happened.
+            MSGFILE="$(mktemp)"
+            {
+              printf "[auto-revert] Deploy failed for %s -- reverted back to %s\n\n" "$SHORT_TIP" "$SHORT_BEFORE"
+              printf "WHY: the commit(s) below failed during CI/CD -- either the build,\n"
+              printf "or the app's own health check after it restarted. Full logs:\n"
+              printf "%s\n\n" "$RUN_URL"
+              printf "WHAT WAS UNDONE (oldest first):\n"
+              printf "%s\n\n" "$REVERTED_LOG"
+              printf "Production is running %s again -- the last commit that\n" "$SHORT_BEFORE"
+              printf "deployed successfully. Nothing further is needed to keep it that way.\n\n"
+              printf "WHAT TO DO NEXT, locally:\n"
+              printf "1. Open the run above and check WHY it failed: the build step's\n"
+              printf "   output, or -- for a health-check failure -- the app's own\n"
+              printf "   container logs, which that run captured.\n"
+              printf "2. Recover your changes. Do NOT cherry-pick or revert just %s\n" "$SHORT_TIP"
+              printf "   on its own -- it is only that one commit's OWN diff on top of\n"
+              printf "   the commits before it, and those no longer exist in the tree\n"
+              printf "   after this revert, so it will not apply cleanly. Recover the\n"
+              printf "   WHOLE range instead:\n"
+              printf "     git cherry-pick %s..%s\n" "$SHORT_BEFORE" "$SHORT_TIP"
+              printf "   or, to grab the full code in one step instead of replaying each\n"
+              printf "   commit separately:\n"
+              printf "     git checkout %s -- .\n" "$SHORT_TIP"
+              printf "     git commit -m \"Restore code from %s\"\n" "$SHORT_TIP"
+              printf "3. Fix whatever the logs pointed at.\n"
+              printf "4. Push again -- same pipeline, auto-deploys if it passes this time.\n"
+            } > "$MSGFILE"
+
+            git commit -F "$MSGFILE"
+            rm -f "$MSGFILE"
             git push origin main
             echo "Reverted and pushed -- a new deploy of the known-good code will start automatically."
           else
