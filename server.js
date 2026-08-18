@@ -2034,6 +2034,49 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
     `, [sid, excluded])).rows;
   }
 
+  // Per-space, per-type/per-role toggles (Settings > Reports). Defaults match
+  // what the report always showed before this setting existed, so adding the
+  // feature doesn't change anyone's numbers until they touch a toggle.
+  const spaceRow = (await q('SELECT spillover_settings FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
+  const rawSettings = (spaceRow && spaceRow.spillover_settings) || {};
+  const settings = Object.assign({
+    show_issues_with_points: true,
+    show_tasks: true,
+    show_bugs: true,
+    include_qa_assigned: false,
+    include_unassigned: true
+  }, rawSettings);
+  // Carry forward a space's prior "stories with points" choice the first time
+  // it's read under the new, type-agnostic key — otherwise a board that had
+  // deliberately turned this off would see it silently flip back on.
+  if (rawSettings.show_issues_with_points === undefined && rawSettings.show_stories_with_points !== undefined) {
+    settings.show_issues_with_points = rawSettings.show_stories_with_points;
+  }
+  const devIds = sprint.developer_ids || [];
+  const qaIds = sprint.qa_ids || [];
+  const qaOnlySet = new Set(qaIds.filter(id => !devIds.includes(id)));
+
+  // "Spilled Issues (With Points)" is type-agnostic — a pointed story, task,
+  // or bug all count. It's checked first: any ticket with points shows if
+  // it's on, no matter its type. Tasks/bugs without points fall to their own
+  // toggle. The QA/unassigned toggles only ADD tickets nothing else covers
+  // (e.g. an unpointed story, or an epic/subtask) — they never take away a
+  // ticket already included above.
+  const beforeFilter = spillover.length;
+  spillover = spillover.filter(i => {
+    const hasPts = Number(i.story_points) > 0;
+    if (hasPts && settings.show_issues_with_points) return true;
+    let typeIncluded;
+    if (i.type === 'task') typeIncluded = settings.show_tasks;
+    else if (i.type === 'bug') typeIncluded = settings.show_bugs;
+    else typeIncluded = false; // unpointed stories, epics/subtasks have no dedicated toggle
+    if (typeIncluded) return true;
+    if (!i.assignee_id) return !!settings.include_unassigned;
+    if (qaOnlySet.has(i.assignee_id)) return !!settings.include_qa_assigned;
+    return false;
+  });
+  const hiddenByFilterCount = beforeFilter - spillover.length;
+
   const assigneeIds = [...new Set(spillover.map(i => i.assignee_id).filter(Boolean))];
   let userMap = {};
   if (assigneeIds.length) {
@@ -2047,8 +2090,239 @@ app.get('/api/reports/spillover/:sprintId', requireAuth, wrap(async (req, res) =
     spillover: spillover.map(i => ({ ...i, assignee: userMap[i.assignee_id] || null })),
     count: spillover.length,
     totalPts,
+    spillover_settings: settings,
+    hidden_by_settings_count: hiddenByFilterCount,
     // Lets the UI show the Remove control only to those who can actually use it.
     can_edit_spillover: isOrgAdmin(req.user.role)
+  });
+}));
+
+// MBR (Monthly Business Review) — trends across every sprint in a space,
+// rather than the single-sprint scope every other report above uses. One
+// endpoint serves both the Overview and Comparison Trends tabs so switching
+// between them never needs a second round-trip.
+//
+// Spillover/committed-vs-completed/comparison numbers only ever cover
+// COMPLETED sprints — an in-flight sprint hasn't spilled anything yet, so
+// showing a "projected" figure for it next to real, closed-sprint numbers
+// was misleading. The Overview trend is the one place an active sprint still
+// shows up, as its live completed-so-far points, clearly distinct in color.
+app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
+  const spaceId = req.params.spaceId;
+  if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'report.view'))) return;
+
+  const sprints = (await q(`
+    SELECT id, name, status, start_date, end_date, velocity, developer_ids, qa_ids, achievements
+    FROM sprints
+    WHERE space_id=$1 AND status IN ('completed','active') AND deleted_at IS NULL
+    ORDER BY COALESCE(end_date, start_date, created_at)
+  `, [spaceId])).rows;
+
+  const allIds = sprints.map(s => s.id);
+  const completedIds = sprints.filter(s => s.status === 'completed').map(s => s.id);
+  const activeIds = sprints.filter(s => s.status === 'active').map(s => s.id);
+  const ISSUE_COLS = 'i.id, i.key, i.title, i.status, i.priority, i.type, i.story_points, i.assignee_id, i.sprint_id';
+
+  // Done issues across every sprint (completed sprints keep sprint_id pointing
+  // at themselves for Done issues even after completion — see sprint-lifecycle
+  // rules) — this is what "completed_points" drills down into everywhere.
+  let doneRows = [];
+  if (allIds.length) {
+    doneRows = (await q(`
+      SELECT ${ISSUE_COLS} FROM issues i
+      WHERE i.sprint_id = ANY($1::varchar[]) AND i.status='Done' AND i.deleted_at IS NULL
+    `, [allIds])).rows;
+  }
+
+  // Live full scope for any active sprint (typically 0 or 1) — its
+  // "committed" figure until it closes is just everything currently in it.
+  let activeAllRows = [];
+  if (activeIds.length) {
+    activeAllRows = (await q(`
+      SELECT sprint_id, story_points FROM issues WHERE sprint_id = ANY($1::varchar[]) AND deleted_at IS NULL
+    `, [activeIds])).rows;
+  }
+  const activeCommittedBySprintId = {};
+  activeAllRows.forEach(r => {
+    activeCommittedBySprintId[r.sprint_id] = (activeCommittedBySprintId[r.sprint_id] || 0) + (Number(r.story_points) || 0);
+  });
+
+  // Spillover across every completed sprint at once — same detection the
+  // single-sprint Spillover report uses (issue_history field_name='spillover'),
+  // batched instead of looped, honouring the same org-admin corrections.
+  let spilloverRows = [];
+  if (completedIds.length) {
+    const excludedRows = (await q(
+      `SELECT entity_id, details->>'sprint_id' AS sprint_id FROM audit_logs
+       WHERE action='spillover.remove' AND entity_type='issue' AND details->>'sprint_id' = ANY($1::varchar[])`,
+      [completedIds]
+    )).rows;
+    const excludedSet = new Set(excludedRows.map(r => r.sprint_id + '::' + r.entity_id));
+
+    spilloverRows = (await q(`
+      SELECT DISTINCT ON (i.id, ih.old_value) ih.old_value AS spilled_from_sprint_id, ${ISSUE_COLS}
+      FROM issue_history ih
+      JOIN issues i ON i.id = ih.issue_id
+      WHERE ih.field_name = 'spillover'
+        AND ih.old_value = ANY($1::varchar[])
+        AND (ih.new_value IS NULL OR ih.new_value = '' OR ih.new_value = 'null')
+        AND i.deleted_at IS NULL
+      ORDER BY i.id, ih.old_value, ih.created_at DESC
+    `, [completedIds])).rows.filter(r => !excludedSet.has(r.spilled_from_sprint_id + '::' + r.id));
+  }
+
+  // Bugs across every completed sprint (any status, not just Done/spilled) —
+  // feeds the Bug Summary section: overall totals plus per-sprint,
+  // per-assignee, and per-reporter breakdowns.
+  let bugRows = [];
+  if (completedIds.length) {
+    bugRows = (await q(`
+      SELECT id, key, title, status, priority, assignee_id, reporter_id, sprint_id
+      FROM issues WHERE sprint_id = ANY($1::varchar[]) AND type='bug' AND deleted_at IS NULL
+    `, [completedIds])).rows;
+  }
+
+  const doneBySprintId = {};
+  doneRows.forEach(r => { (doneBySprintId[r.sprint_id] = doneBySprintId[r.sprint_id] || []).push(r); });
+  const spilloverBySprintId = {};
+  spilloverRows.forEach(r => { (spilloverBySprintId[r.spilled_from_sprint_id] = spilloverBySprintId[r.spilled_from_sprint_id] || []).push(r); });
+  const bugsBySprintId = {};
+  bugRows.forEach(r => { (bugsBySprintId[r.sprint_id] = bugsBySprintId[r.sprint_id] || []).push(r); });
+
+  // All sprints (completed + active) — feeds the Overview trend only, which
+  // just needs "how many points landed", regardless of whether the sprint is
+  // finished yet.
+  const allSprintRows = sprints.map(sp => {
+    const completedIssues = doneBySprintId[sp.id] || [];
+    const completedPts = completedIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
+    const spillIssues = spilloverBySprintId[sp.id] || [];
+    const committedPts = sp.status === 'active'
+      ? (activeCommittedBySprintId[sp.id] || 0)
+      : completedPts + spillIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
+    return {
+      id: sp.id, name: sp.name, status: sp.status, start_date: sp.start_date, end_date: sp.end_date,
+      completed_points: completedPts, committed_points: committedPts,
+      completed_issues: completedIssues
+    };
+  });
+
+  // Completed sprints only — feeds every Comparison Trends chart.
+  const completedSprintRows = sprints.filter(sp => sp.status === 'completed').map(sp => {
+    const completedIssues = doneBySprintId[sp.id] || [];
+    const spillIssues = spilloverBySprintId[sp.id] || [];
+    const completedPts = Number(sp.velocity) || 0; // authoritative, never recomputed
+    const spillPts = spillIssues.reduce((s, i) => s + (Number(i.story_points) || 0), 0);
+    const committedPts = completedPts + spillPts;
+    const bugs = bugsBySprintId[sp.id] || [];
+    return {
+      id: sp.id, name: sp.name, end_date: sp.end_date,
+      committed_points: committedPts, completed_points: completedPts,
+      spillover_count: spillIssues.length, spillover_points: spillPts,
+      completion_pct: committedPts > 0 ? Math.round((completedPts / committedPts) * 100) : 0,
+      completed_issues: completedIssues,
+      spillover_issues: spillIssues,
+      achievements: Array.isArray(sp.achievements) ? sp.achievements : [],
+      bug_count: bugs.length,
+      bugs_open: bugs.filter(b => b.status !== 'Done').length,
+      bugs_closed: bugs.filter(b => b.status === 'Done').length,
+      bugs: bugs
+    };
+  });
+
+  // Previous vs last completed sprint — the two most recent by end_date.
+  const completedSorted = completedSprintRows.slice().sort((a, b) => new Date(b.end_date) - new Date(a.end_date));
+  const previousVsLast = {
+    last: completedSorted[0] || null,
+    previous: completedSorted[1] || null
+  };
+
+  // Per-user spillover across every completed sprint — seeded with everyone
+  // tagged as a Developer or QA on any of these sprints (not the whole
+  // space roster, and not just people who happen to have spilled
+  // something), so a sprint participant with zero spillover still shows up
+  // with 0s instead of vanishing or dragging in unrelated space members.
+  const rosterIds = [...new Set(
+    sprints.filter(sp => sp.status === 'completed')
+      .flatMap(sp => [...(sp.developer_ids || []), ...(sp.qa_ids || [])])
+  )];
+  const members = rosterIds.length
+    ? (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [rosterIds])).rows
+    : [];
+  const byUser = {};
+  members.forEach(u => { byUser[u.id] = { name: u.name, color: u.color, per_sprint: {} }; });
+  completedSprintRows.forEach(sp => {
+    sp.spillover_issues.forEach(i => {
+      if (!i.assignee_id) return;
+      if (!byUser[i.assignee_id]) byUser[i.assignee_id] = { name: 'Unknown', color: '#6b7280', per_sprint: {} };
+      const u = byUser[i.assignee_id];
+      const ps = (u.per_sprint[sp.id] = u.per_sprint[sp.id] || { sprint_id: sp.id, sprint_name: sp.name, points: 0, count: 0, issues: [] });
+      ps.points += Number(i.story_points) || 0;
+      ps.count += 1;
+      ps.issues.push(i);
+    });
+  });
+  const spilloverByUser = Object.keys(byUser).map(userId => {
+    const u = byUser[userId];
+    const perSprintArr = Object.values(u.per_sprint);
+    return {
+      user_id: userId,
+      name: u.name,
+      color: u.color,
+      total_points: perSprintArr.reduce((s, p) => s + p.points, 0),
+      total_count: perSprintArr.reduce((s, p) => s + p.count, 0),
+      per_sprint: perSprintArr
+    };
+  }).sort((a, b) => b.total_points - a.total_points);
+
+  // Bug Summary breakdowns — by assignee and by reporter, sprint-wise. Anyone
+  // who assigned/reported a bug can show up here (not scoped to a sprint's
+  // Developer/QA lists like spillover is, since a bug's assignee or reporter
+  // can genuinely be anyone).
+  const bugUserIds = [...new Set(bugRows.flatMap(r => [r.assignee_id, r.reporter_id]).filter(Boolean))];
+  const bugUserMap = {};
+  if (bugUserIds.length) {
+    const users = (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [bugUserIds])).rows;
+    users.forEach(u => { bugUserMap[u.id] = u; });
+  }
+  const sprintNameById = {};
+  completedSprintRows.forEach(sp => { sprintNameById[sp.id] = sp.name; });
+  function buildBugBreakdown(keyField) {
+    const grouped = {};
+    bugRows.forEach(r => {
+      const uid = r[keyField];
+      if (!uid) return;
+      const u = (grouped[uid] = grouped[uid] || { per_sprint: {} });
+      const ps = (u.per_sprint[r.sprint_id] = u.per_sprint[r.sprint_id] || { sprint_id: r.sprint_id, sprint_name: sprintNameById[r.sprint_id] || '', count: 0, issues: [] });
+      ps.count += 1;
+      ps.issues.push(r);
+    });
+    return Object.keys(grouped).map(uid => {
+      const perSprintArr = Object.values(grouped[uid].per_sprint);
+      return {
+        user_id: uid,
+        name: (bugUserMap[uid] && bugUserMap[uid].name) || 'Unknown',
+        color: (bugUserMap[uid] && bugUserMap[uid].color) || '#6b7280',
+        total_count: perSprintArr.reduce((s, p) => s + p.count, 0),
+        per_sprint: perSprintArr
+      };
+    }).sort((a, b) => b.total_count - a.total_count);
+  }
+  const bugsByAssignee = buildBugBreakdown('assignee_id');
+  const bugsByReporter = buildBugBreakdown('reporter_id');
+  const bugSummaryOverall = {
+    total_bugs: bugRows.length,
+    open_bugs: bugRows.filter(r => r.status !== 'Done').length,
+    closed_bugs: bugRows.filter(r => r.status === 'Done').length
+  };
+
+  res.json({
+    sprints: allSprintRows,
+    completed_sprints: completedSprintRows,
+    previous_vs_last: previousVsLast,
+    spillover_by_user: spilloverByUser,
+    bug_summary: bugSummaryOverall,
+    bugs_by_assignee: bugsByAssignee,
+    bugs_by_reporter: bugsByReporter
   });
 }));
 
