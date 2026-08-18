@@ -1,20 +1,36 @@
 name: Deploy to production
 
-# Manual only, on purpose. Twelve schema migrations run when the container boots,
-# so a deploy is a database event as much as a code one and wants a human behind it.
-# Run it from Actions -> "Deploy to production" -> Run workflow.
+# Automatic on every push to main. A manual "Run workflow" button is also kept
+# for re-running the current commit without a new push (e.g. after fixing a
+# server-side issue that had nothing to do with the code).
+#
+# Safety net, two layers:
+#   1. Container rollback (seconds): the previous working image is tagged
+#      :previous before anything is touched. If the new image fails to build,
+#      or the app fails its health check after starting, that old image is put
+#      back immediately. This never touches git or GitHub.
+#   2. Commit rollback (the next minute or two): on the same failure, this
+#      workflow reverts the offending commit with `git revert` (a NEW commit,
+#      not a rewrite of history) and pushes it. That push re-triggers this same
+#      workflow, which deploys the reverted -- known-good -- code on its own.
+#      Loop guard: a commit that is itself a revert is never auto-reverted
+#      again, so a persistent infra problem fails loudly instead of
+#      flip-flopping.
+#
+# NOT covered: a database migration that partially applied before the failure.
+# Rolling back code does not undo a schema change. That is a judgement call
+# for a human -- see the job summary on a failed run.
 on:
-  workflow_dispatch:
-    inputs:
-      confirm:
-        description: 'Type DEPLOY to confirm'
-        required: true
-        default: ''
+  push:
+    branches: [main]
+  workflow_dispatch: {}
 
 concurrency:
-  # Never let two deploys touch the server at once.
   group: production-deploy
   cancel-in-progress: false
+
+permissions:
+  contents: write   # needed for the auto-revert push (layer 2)
 
 jobs:
   deploy:
@@ -22,17 +38,13 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Check the confirmation
-        run: |
-          if [ "${{ inputs.confirm }}" != "DEPLOY" ]; then
-            echo "::error::Type DEPLOY in the confirm box to run this."
-            exit 1
-          fi
-
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history -- `git revert` needs the target commit's parent
 
       - name: Syntax gate
         # The project rule: never ship without these passing (see CLAUDE.md).
+        # Fails before anything touches the server -- nothing to roll back here.
         run: |
           node --check server.js
           node --check app.js
@@ -40,9 +52,9 @@ jobs:
           echo "syntax OK"
 
       # Tracked files only. Extracting this over the deploy directory leaves
-      # untracked files alone, which is how the server's .env and uploads/ survive
-      # a deploy -- and .env matters because the Dockerfile has no .dockerignore,
-      # so `COPY . .` bakes it into the image.
+      # untracked files alone, which is how the server's .env and uploads/
+      # survive a deploy -- the Dockerfile has no .dockerignore, so `COPY . .`
+      # bakes .env into the image, and it must be there to bake in.
       - name: Build the release archive
         run: |
           git archive --format=tar HEAD | gzip -9 > /tmp/release.tar.gz
@@ -63,56 +75,61 @@ jobs:
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/tmp/release.tar.gz"
 
       - name: Back up the database
-        # Before anything is replaced. A deploy runs migrations; this dump is the
-        # only way back. An empty or failed dump stops the deploy.
+        # Before anything is replaced. A deploy runs migrations; this dump is
+        # the only way back from a schema change. An empty or failed dump
+        # stops the deploy before the server is touched at all.
         run: |
           ssh -i ~/.ssh/id_deploy -p "${{ secrets.SSH_PORT }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -euo pipefail -s' <<'REMOTE'
-            STAMP=$(date +%Y%m%d-%H%M%S)
-            mkdir -p /opt/backups
-            OUT="/opt/backups/sprintboard-${STAMP}.sql"
-            docker exec sprint-postgres pg_dump -U postgres sprintboard > "$OUT"
-            SIZE=$(stat -c%s "$OUT")
-            echo "backup: $OUT (${SIZE} bytes)"
-            if [ "$SIZE" -lt 1024 ]; then
-              echo "Backup looks empty -- refusing to deploy." >&2
-              exit 1
-            fi
-            # Keep the last 10 so /opt/backups cannot fill the disk.
-            ls -1t /opt/backups/sprintboard-*.sql | tail -n +11 | xargs -r rm --
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" bash -euo pipefail -s << 'REMOTE'
+          STAMP=$(date +%Y%m%d-%H%M%S)
+          mkdir -p /opt/backups
+          OUT="/opt/backups/sprintboard-${STAMP}.sql"
+          docker exec sprint-postgres pg_dump -U postgres sprintboard > "$OUT"
+          SIZE=$(stat -c%s "$OUT")
+          echo "backup: $OUT (${SIZE} bytes)"
+          if [ "$SIZE" -lt 1024 ]; then
+            echo "Backup looks empty -- refusing to deploy." >&2
+            exit 1
+          fi
+          ls -1t /opt/backups/sprintboard-*.sql | tail -n +11 | xargs -r rm --
           REMOTE
 
-      - name: Deploy and restart
+      - name: Build and deploy
+        id: deploy
+        # Build BEFORE touching the running container. If the build fails, the
+        # currently-running container is never stopped -- production is simply
+        # untouched, and layer 1 (below) has nothing to do. Only once the new
+        # image builds successfully do we tag the old one :previous and swap.
         run: |
           ssh -i ~/.ssh/id_deploy -p "${{ secrets.SSH_PORT }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -euo pipefail -s' <<'REMOTE'
-            cd /opt/Sprint-Board
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" bash -euo pipefail -s << 'REMOTE'
+          cd /opt/Sprint-Board
+          rm -f /opt/Sprint-Board/.deploy-swapped
 
-            # Keep the running image so a bad deploy can be rolled back to it.
-            if docker image inspect sprint-board-app >/dev/null 2>&1; then
-              docker tag sprint-board-app sprint-board-app:previous
-              echo "tagged current image as sprint-board-app:previous"
-            fi
+          tar -xzf /tmp/release.tar.gz -C /opt/Sprint-Board
+          rm -f /tmp/release.tar.gz
+          test -f /opt/Sprint-Board/.env || { echo ".env missing after extract -- aborting" >&2; exit 1; }
 
-            # Overlay tracked files. No rm -rf: .env and uploads/ are untracked and
-            # must survive, and .env is what the image build picks up.
-            tar -xzf /tmp/release.tar.gz -C /opt/Sprint-Board
-            rm -f /tmp/release.tar.gz
-            test -f /opt/Sprint-Board/.env || { echo ".env missing after extract -- aborting" >&2; exit 1; }
+          docker build -t sprint-board-app:staging .
 
-            docker stop sprint-board-app || true
-            docker rm   sprint-board-app || true
-            docker build -t sprint-board-app .
-            docker run -d --name sprint-board-app \
-              -p 8082:3000 \
-              --restart unless-stopped \
-              --network sprint-net \
-              --init \
-              sprint-board-app
+          if docker image inspect sprint-board-app >/dev/null 2>&1; then
+            docker tag sprint-board-app sprint-board-app:previous
+          fi
+          docker tag sprint-board-app:staging sprint-board-app
+          docker stop sprint-board-app || true
+          docker rm   sprint-board-app || true
+          docker run -d --name sprint-board-app \
+            -p 8082:3000 \
+            --restart unless-stopped \
+            --network sprint-net \
+            --init \
+            sprint-board-app
 
-            echo "--- migration output ---"
-            sleep 12
-            docker logs sprint-board-app 2>&1 | grep -Ei 'migrate|schema|Listening|error' | tail -30
+          touch /opt/Sprint-Board/.deploy-swapped
+
+          echo "--- migration output ---"
+          sleep 12
+          docker logs sprint-board-app 2>&1 | grep -Ei 'migrate|schema|Listening|error' | tail -30
           REMOTE
 
       - name: Health check
@@ -131,6 +148,67 @@ jobs:
             'docker logs --tail 60 sprint-board-app 2>&1' || true
           exit 1
 
+      # -- Layer 1: instant container rollback --------------------------------
+      # Runs whenever ANYTHING above failed. Only actually swaps the container
+      # back if the deploy step got far enough to swap it in the first place
+      # (the .deploy-swapped marker) -- a syntax-gate or build failure never
+      # touched the running container, so there is nothing to undo here.
+      - name: Roll back the container if the deploy failed
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" bash -s << 'REMOTE'
+          if [ ! -f /opt/Sprint-Board/.deploy-swapped ]; then
+            echo "Container was never swapped for this attempt -- nothing to roll back."
+            exit 0
+          fi
+          rm -f /opt/Sprint-Board/.deploy-swapped
+          if ! docker image inspect sprint-board-app:previous >/dev/null 2>&1; then
+            echo "::warning::No :previous image exists -- cannot auto-rollback the container. Production may be down; check manually."
+            exit 0
+          fi
+          echo "Rolling back to the previous working image..."
+          docker stop sprint-board-app || true
+          docker rm   sprint-board-app || true
+          docker run -d --name sprint-board-app \
+            -p 8082:3000 \
+            --restart unless-stopped \
+            --network sprint-net \
+            --init \
+            sprint-board-app:previous
+          echo "rolled back"
+          REMOTE
+
+      # -- Layer 2: revert the commit on GitHub --------------------------------
+      # A NEW commit that undoes this one -- history is not rewritten, and the
+      # push below re-triggers this workflow to deploy the reverted (known
+      # good) code on its own. Skipped if this commit IS a revert, so a
+      # persistent problem (e.g. the server itself being down) fails loudly
+      # instead of endlessly reverting reverts.
+      - name: Revert this commit
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SUBJECT="$(git log -1 --pretty=%s HEAD)"
+          case "$SUBJECT" in
+            'Revert "'*)
+              echo "::warning::HEAD is already a revert commit ($SUBJECT) -- not auto-reverting again."
+              echo "The container rollback above is the current safety net. A human needs to look at this."
+              exit 0
+              ;;
+          esac
+
+          if git revert --no-edit "${{ github.sha }}"; then
+            git push origin main
+            echo "Reverted ${{ env.commit }} and pushed -- a new deploy of the known-good code will start automatically."
+          else
+            echo "::error::git revert failed (likely a conflict) -- could not auto-recover on GitHub. The container-level rollback above is still in effect."
+            git revert --abort || true
+            exit 1
+          fi
+
       - name: Summary
         if: always()
         run: |
@@ -141,10 +219,21 @@ jobs:
             echo "- target: /opt/Sprint-Board on ${{ secrets.SSH_HOST }}"
             echo "- health: https://sprintboard.cftools.live"
             echo ""
-            echo "Rollback: \`docker stop sprint-board-app && docker rm sprint-board-app &&"
-            echo "docker run -d --name sprint-board-app -p 8082:3000 --restart unless-stopped"
-            echo "--network sprint-net --init sprint-board-app:previous\`"
-            echo ""
-            echo "Database restore: \`docker exec -i sprint-postgres psql -U postgres sprintboard <"
-            echo "/opt/backups/<newest>.sql\`"
+            if [ "${{ job.status }}" != "success" ]; then
+              echo "**This deploy failed.** What should have happened automatically:"
+              echo "- the previous container image was restarted (if the deploy got that far)"
+              echo "- this commit was reverted and pushed as a new commit, which will redeploy on its own"
+              echo ""
+              echo "If neither happened (check the two steps above), roll back by hand:"
+              echo '```'
+              echo "docker stop sprint-board-app && docker rm sprint-board-app &&"
+              echo "docker run -d --name sprint-board-app -p 8082:3000 --restart unless-stopped"
+              echo "--network sprint-net --init sprint-board-app:previous"
+              echo '```'
+              echo ""
+              echo "Database restore, only if a migration actually corrupted data (check first):"
+              echo '```'
+              echo "docker exec -i sprint-postgres psql -U postgres sprintboard < /opt/backups/<newest>.sql"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
