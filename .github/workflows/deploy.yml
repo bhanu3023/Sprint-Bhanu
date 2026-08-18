@@ -10,10 +10,15 @@ name: Deploy to production
 #      or the app fails its health check after starting, that old image is put
 #      back immediately. This never touches git or GitHub.
 #   2. Commit rollback (the next minute or two): on the same failure, this
-#      workflow reverts the offending commit with `git revert` (a NEW commit,
-#      not a rewrite of history) and pushes it. That push re-triggers this same
-#      workflow, which deploys the reverted -- known-good -- code on its own.
-#      Loop guard: a commit that is itself a revert is never auto-reverted
+#      workflow reverts the FULL RANGE of commits in this push (not just the
+#      tip) with `git revert` -- a NEW commit, not a rewrite of history -- and
+#      pushes it. A single push can carry several commits at once; reverting
+#      only the tip would leave earlier ones in the batch untouched even if
+#      one of THEM was the actual problem, so the range reverted is
+#      github.event.before (the last commit that deployed successfully) up to
+#      github.sha (this push's tip). The push re-triggers this same workflow,
+#      which deploys the reverted -- known-good -- code on its own.
+#      Loop guard: a commit that is itself an auto-revert is never reverted
 #      again, so a persistent infra problem fails loudly instead of
 #      flip-flopping.
 #
@@ -185,24 +190,39 @@ jobs:
       # good) code on its own. Skipped if this commit IS a revert, so a
       # persistent problem (e.g. the server itself being down) fails loudly
       # instead of endlessly reverting reverts.
-      - name: Revert this commit
+      - name: Revert the pushed commit(s)
         if: failure()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           SUBJECT="$(git log -1 --pretty=%s HEAD)"
-          case "$SUBJECT" in
-            'Revert "'*)
-              echo "::warning::HEAD is already a revert commit ($SUBJECT) -- not auto-reverting again."
-              echo "The container rollback above is the current safety net. A human needs to look at this."
-              exit 0
-              ;;
-          esac
+          if [[ "$SUBJECT" == "[auto-revert]"* ]]; then
+            echo "::warning::HEAD is already an auto-revert ($SUBJECT) -- not reverting again."
+            echo "The container rollback above is the current safety net. A human needs to look at this."
+            exit 0
+          fi
 
-          if git revert --no-edit "${{ github.sha }}"; then
+          # A single push can carry several commits (e.g. 2,3,4,5 pushed
+          # together) but this run only ever sees the final tip (github.sha).
+          # Reverting just that one commit would leave the others in place
+          # even if an EARLIER one in the batch was the actual problem.
+          # github.event.before is the SHA main was at right before this
+          # push -- i.e. the last commit that deployed successfully -- so
+          # reverting the whole range brings the tree back to that known-good
+          # state no matter how many commits were batched or which one broke it.
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # workflow_dispatch, a brand-new branch, or a force-push has no
+            # usable "before" boundary -- fall back to just the tip commit.
+            BEFORE="$(git rev-parse HEAD~1)"
+          fi
+
+          echo "Reverting the range ${BEFORE}..${{ github.sha }}"
+          if git revert --no-commit "${BEFORE}..${{ github.sha }}"; then
+            git commit -m "[auto-revert] Deploy failed at ${{ env.commit }} -- back to $(git rev-parse --short "$BEFORE")"
             git push origin main
-            echo "Reverted ${{ env.commit }} and pushed -- a new deploy of the known-good code will start automatically."
+            echo "Reverted and pushed -- a new deploy of the known-good code will start automatically."
           else
             echo "::error::git revert failed (likely a conflict) -- could not auto-recover on GitHub. The container-level rollback above is still in effect."
             git revert --abort || true
