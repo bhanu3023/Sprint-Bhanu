@@ -2,6 +2,12 @@
 // SPRINTBOARD ENTERPRISE — SPA CORE LOGIC
 // ═══════════════════════════════════════════════════════════
 
+// ── Analytics ─────────────────────────
+// Module scope, not DOMContentLoaded: recording starts as soon as this
+// script runs, so the loading overlay and any pre-auth state are covered.
+// A no-op unless HOTJAR_SITE_ID is configured — see hotjar.js.
+if (typeof initHotjar === 'function') initHotjar();
+
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
@@ -1457,6 +1463,8 @@ async function init() {
 
     S.currentUser = me.id;
     S.currentUserObj = me;
+    // First point the app knows who this is — tie the recording to them.
+    if (typeof identifyHotjarUser === 'function') identifyHotjarUser(me);
     localStorage.setItem('sb-user', JSON.stringify(me));
     // Apply DB-stored theme preference
     applyTheme('light', false);

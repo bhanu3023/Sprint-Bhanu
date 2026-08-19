@@ -126,6 +126,14 @@ When `PUT /api/issues/:id` is called:
 - `issues.labels` → PostgreSQL `text[]`
 - `custom_fields.options`, `saved_filters.conditions`, `organizations.email_settings` → `jsonb`
 
+## Analytics & Hotjar Masking (`hotjar.js`)
+- Site ID is **never hardcoded** — `HOTJAR_SITE_ID` env var → `/config.js` route in `server.js` → `window.APP_CONFIG.hotjarSiteId`. Blank/absent means no snippet is injected at all.
+- Read at **runtime**, not build time (there is no build step). Turning recording off = clear the env var + restart. No rebuild, no asset redeploy.
+- `initHotjar()` is called at module scope in `app.js` and in `login.html`. It is idempotent, guarded on the `#hotjar-loader` script element — two snippets would double-count every page view.
+- **Any new view or modal that renders issue text, emails, worklog descriptions, or uploaded filenames must carry `data-hj-suppress` on its static container in `index.html`.** app.js only replaces containers' `innerHTML`, so one attribute covers every future render inside it. `scripts/test-hotjar.js` asserts the current set — add new containers there too.
+- Overlays appended to `document.body` are covered automatically by the observer in `hotjar.js` (default-deny), so they need no attribute.
+- Run `node scripts/test-hotjar.js` after touching any of the above.
+
 ## Hard Rules
 - **Never string-interpolate SQL** — always use parameterized queries: `pool.query(sql, [p1, p2, ...])`
 - **Never return 500 with raw error text** — always `{ error: 'Internal server error' }`
