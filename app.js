@@ -1216,26 +1216,21 @@ function getSpaceSprints(spaceId) {
   return (S.data.sprints || []).filter(function (sp) { return sp.space_id == spaceId; });
 }
 
-/** True if user is on the sprint's Developer or QA roster. */
-function isUserInSprint(sp, userId) {
-  if (!sp || !userId) return false;
-  var devs = sp.developer_ids || [];
-  var qas = sp.qa_ids || [];
-  return devs.indexOf(userId) >= 0 || qas.indexOf(userId) >= 0;
-}
-
-/** Non-completed sprints the user may assign when creating an issue. */
+/** Non-completed sprints the user may assign when creating an issue.
+ * Previously also required the current user to be on the sprint's
+ * Developer/QA roster (or be a space/org admin) — per the permission
+ * matrix, any space member who can create an issue can move it into any
+ * open sprint, so a plain member not personally listed on that sprint's
+ * roster still needs to see it here. The issue drawer's own sprint field
+ * already worked this way (see its inline filter for why it deliberately
+ * avoids this function) — this brings Create Issue in line with it. */
 function getIssueFormSprints(spaceId, opts) {
   opts = opts || {};
   if (!spaceId) return [];
   var includeSprintId = opts.includeSprintId;
-  var userId = S.currentUser;
-  var adminForSpace = isOrgAdminUser() || canManageSpace(spaceId);
   return getSpaceSprints(spaceId).filter(function (sp) {
-    if (sp.status === 'completed') return false;
     if (includeSprintId && sp.id === includeSprintId) return true;
-    if (adminForSpace) return true;
-    return isUserInSprint(sp, userId);
+    return sp.status !== 'completed';
   });
 }
 
@@ -10911,9 +10906,14 @@ function bindDrawerEdits(issue) {
 
   var _drawerDescOriginal = $('drawerDesc') ? $('drawerDesc').innerHTML : (issue.description || '');
   window._drawerDescOriginalHtml = _drawerDescOriginal;
+  // Deliberately NOT re-snapshotting _drawerDescOriginal here — it's already
+  // the correct pre-edit baseline (set once above, then again only after a
+  // successful save). Re-capturing "current == current" on every focus meant
+  // that clicking away mid-edit (e.g. to review) and clicking back in before
+  // hitting Save silently rebaselined to the ALREADY-EDITED text, disabling
+  // Save with no error and no visible cause — reported as "editing the
+  // description doesn't save".
   $('drawerDesc').onfocus = function() {
-    _drawerDescOriginal = $('drawerDesc').innerHTML;
-    window._drawerDescOriginalHtml = _drawerDescOriginal;
     updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
   };
 
@@ -10975,9 +10975,9 @@ function bindDrawerEdits(issue) {
   };
   var _drawerFixDescOriginal = $('drawerFixDesc') ? $('drawerFixDesc').innerHTML : (issue.fix_description || '');
   window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
+  // Same fix as drawerDesc above — don't rebaseline the "original" snapshot
+  // on every focus, only on drawer-open and after a successful save.
   $('drawerFixDesc').onfocus = function() {
-    _drawerFixDescOriginal = $('drawerFixDesc').innerHTML;
-    window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
     updateDrawerDescEditorState('drawerFixDesc', _drawerFixDescOriginal);
   };
   var fixSaveBtn = $('drawerFixDescSave');
