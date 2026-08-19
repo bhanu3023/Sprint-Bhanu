@@ -204,6 +204,10 @@ const {
 } = require('./lib/permissions');
 const { seedBuiltinIssueFields } = require('./lib/builtin-issue-fields');
 const { startRetentionSweeper, retentionDays, purgeIssueRows: purgeIssueCascade } = require('./lib/retention');
+const { completeSprint, startSprintAutoCompleter } = require('./lib/sprint-complete');
+// createNotif is a hoisted function declaration further down, so this object can
+// be built here and still hold a live reference by the time anything calls it.
+const sprintDeps = { q, uid, createNotif: (n) => createNotif(n) };
 // One shared cascade for every issue purge — manual, bulk, and the retention sweep.
 const purgeIssueRows = (id) => purgeIssueCascade(q, id);
 const https = require('https');
@@ -414,9 +418,30 @@ app.get('/api/spaces', requireAuth, wrap(async (req, res) => {
   res.json(r.rows);
 }));
 
+// A space key is the /space/:key route segment and what getSpaceByKey() looks
+// up, so two spaces sharing one key means every link to either resolves to
+// whichever the lookup hits first. Checked case-insensitively and against
+// ARCHIVED spaces too: archiving keeps the row and its key, so handing that key
+// to a new space only defers the collision to whenever the old one comes back.
+async function findSpaceKeyConflict(key, excludeSpaceId) {
+  const params = [String(key || '').trim()];
+  let sql = 'SELECT id, name, is_archived FROM spaces WHERE UPPER(key) = UPPER($1)';
+  if (excludeSpaceId) { params.push(excludeSpaceId); sql += ' AND id <> $2'; }
+  return (await q(sql + ' LIMIT 1', params)).rows[0] || null;
+}
+
+function spaceKeyTakenMessage(clash) {
+  return 'That key is already used by the space "' + clash.name + '"' +
+    (clash.is_archived ? ' (archived)' : '') + '. Pick a different key.';
+}
+
 app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
   if (!requireOrgAdmin(req.user, res, 'Only an org admin can create a space.')) return;
-  const { name, key, description, icon, color, space_type, visibility, owner_id } = req.body;
+  const { name, description, icon, color, space_type, visibility, owner_id } = req.body;
+  const key = String(req.body.key || '').trim().toUpperCase();
+  if (!key) return res.status(400).json({ error: 'A space key is required.' });
+  const clash = await findSpaceKeyConflict(key, null);
+  if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
   const id = uid();
   const r = await q(`INSERT INTO spaces(id,name,key,description,icon,color,space_type,visibility,owner_id)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
@@ -440,8 +465,13 @@ app.get('/api/debug/spaces', requireAuth, wrap(async (req, res) => {
 app.post('/api/spaces/recover', requireAuth, wrap(async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'owner')
     return res.status(403).json({ error: 'Admin only' });
-  const { id, name, key, icon, color } = req.body;
+  const { id, name, icon, color } = req.body;
+  const key = String(req.body.key || '').trim().toUpperCase();
   if (!id || !name || !key) return res.status(400).json({ error: 'id, name, key required' });
+  // Recovery re-inserts by id, so it can hand an existing key to a different
+  // space and re-create the collision the unique index exists to prevent.
+  const clash = await findSpaceKeyConflict(key, id);
+  if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
   // Get org_id to satisfy FK if needed
   const orgR = await q(`SELECT id FROM organizations LIMIT 1`);
   const orgId = orgR.rows[0] ? orgR.rows[0].id : null;
@@ -461,6 +491,16 @@ app.post('/api/spaces/recover', requireAuth, wrap(async (req, res) => {
 app.put('/api/spaces/:id', requireAuth, wrap(async (req, res) => {
   const spaceId = req.params.id;
   let body = req.body;
+  // Renaming a key into an existing one breaks routing exactly like creating a
+  // duplicate does. Only org admins can reach `key` at all — it is absent from
+  // UPDATE_WHITELIST.spaces_space_admin — so this guard sits on that branch.
+  if (isOrgAdmin(req.user.role) && Object.prototype.hasOwnProperty.call(body, 'key')) {
+    const key = String(body.key || '').trim().toUpperCase();
+    if (!key) return res.status(400).json({ error: 'A space key is required.' });
+    const clash = await findSpaceKeyConflict(key, spaceId);
+    if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
+    body = Object.assign({}, body, { key: key });
+  }
   if (isOrgAdmin(req.user.role)) {
     const upd = buildDynamicUpdate('spaces', body, 2);
     if (!upd) return res.status(400).json({ error: 'Nothing to update' });
@@ -614,41 +654,11 @@ app.post('/api/sprints/:id/complete', requireAuth, wrap(async (req, res) => {
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1 AND deleted_at IS NULL', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'sprint.manage'))) return;
-  const done = await q("SELECT COALESCE(SUM(story_points),0)::int AS pts FROM issues WHERE sprint_id=$1 AND status='Done'", [sid]);
-  await q("UPDATE sprints SET status='completed',velocity=$2 WHERE id=$1", [sid, done.rows[0].pts]);
-  // Capture spillover issues before moving them to backlog
-  const spilloverIssues = (await q(
-    "SELECT id FROM issues WHERE sprint_id=$1 AND status!='Done' AND deleted_at IS NULL", [sid]
-  )).rows;
-  await q("UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1 AND status!='Done'", [sid]);
-  // Record this as a distinct 'spillover' history entry (not 'sprint_id') so
-  // it can't be confused with a manual mid-sprint removal — PUT /api/issues/:id
-  // already logs field_name='sprint_id' for ANY sprint change (drag to
-  // backlog, editing the Sprint dropdown, etc.), and both the Spillover and
-  // Scope Change reports read issue_history by field_name. Without a
-  // separate marker, a sprint's genuine end-of-sprint spillover and any
-  // manual backlog move made earlier in that same sprint were
-  // indistinguishable, so manually-removed tickets were showing up as
-  // "spillover" instead of under Scope Change's "Removed".
-  for (const issue of spilloverIssues) {
-    q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-       VALUES($1,$2,$3,'spillover',$4,NULL)`,
-      [uid(), issue.id, req.user ? req.user.id : null, sid]).catch(() => {});
-  }
-  const r = await q('SELECT * FROM sprints WHERE id=$1', [sid]);
-  // Notify all space members
-  if (sprint) {
-    const spaceRow = (await q('SELECT key FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
-    const sprintLink = spaceRow ? '/space/' + encodeURIComponent(spaceRow.key) + '/board' : null;
-    const members = await q('SELECT user_id FROM space_members WHERE space_id=$1', [sprint.space_id]);
-    members.rows.forEach(function(m) {
-      createNotif({ user_id: m.user_id, space_id: sprint.space_id, type: 'sprint_completed',
-        title: sprint.name + ' has been completed',
-        body: 'Sprint completed with ' + done.rows[0].pts + ' story points.',
-        link: sprintLink });
-    });
-  }
-  res.json(r.rows[0]);
+  // Every side effect lives in lib/sprint-complete.js so this route and the
+  // 23:59 auto-complete sweeper can never diverge — see the notes there.
+  const completed = await completeSprint(sprintDeps, sid, req.user ? req.user.id : null);
+  if (!completed) return res.status(400).json({ error: 'Sprint is not active' });
+  res.json(completed);
 }));
 
 // ── Issues ────────────────────────────────────────────────
@@ -3103,6 +3113,7 @@ app.get('/login', (req, res) => {
       console.log('==================================================');
       // Started after listen so a slow first sweep never delays accepting traffic.
       startRetentionSweeper(q);
+      startSprintAutoCompleter(sprintDeps);
     });
   } catch (e) {
     console.error('Failed to connect to database:', e.message);
