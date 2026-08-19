@@ -79,7 +79,7 @@
             <span class="sidebar-section-label">STARRED</span>
             <button type="button" class="btn-icon sidebar-collapse-toggle" aria-label="Toggle starred issues" aria-expanded="true">▾</button>
           </div>
-          <div id="favIssues" class="sidebar-section-content"></div>
+          <div id="favIssues" data-hj-suppress class="sidebar-section-content"></div>
         </div>
 
         <div class="sidebar-section">
@@ -93,7 +93,7 @@
         <div id="spaceNav" hidden></div>
       </nav>
 
-      <div id="sidebarUserFooter" hidden></div>
+      <div id="sidebarUserFooter" data-hj-suppress hidden></div>
     </aside>
 
     <!-- 3b. Main Content Area -->
@@ -113,7 +113,7 @@
           <svg class="topbar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="globalSearchInput" class="topbar-search-input" placeholder="Search issues, keys…" autocomplete="off">
           <kbd class="topbar-search-kbd">/</kbd>
-          <div id="globalSearchDrop" class="gs-drop" hidden></div>
+          <div id="globalSearchDrop" data-hj-suppress class="gs-drop" hidden></div>
         </div>
         <div class="topbar-right">
           <div class="notif-btn-wrap">
@@ -130,7 +130,7 @@
                 <h3>Notifications</h3>
                 <button class="btn btn-link" id="markAllReadBtn">Mark all read</button>
               </div>
-              <div id="notifList" class="notif-list"></div>
+              <div id="notifList" data-hj-suppress class="notif-list"></div>
             </div>
           </div>
           <button class="btn btn-primary btn-sm" id="createIssueBtn">+ Create Issue</button>
@@ -140,7 +140,7 @@
               <span id="topbarProfileAvatar">BS</span>
             </button>
             <div id="topbarProfileMenu" hidden style="position:absolute;right:0;top:42px;width:220px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.13);z-index:9999;overflow:hidden">
-              <div id="topbarProfileHeader" style="padding:14px 16px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px">
+              <div id="topbarProfileHeader" data-hj-suppress style="padding:14px 16px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px">
                 <div id="topbarProfileAv2" style="width:38px;height:38px;border-radius:50%;background:#0129AC;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">BS</div>
                 <div style="min-width:0">
                   <div id="topbarProfileName" style="font-size:13px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Bhanu srikakulam</div>
@@ -269,7 +269,7 @@
               </a>
             </div>
           </div>
-          <div id="yourWorkContent" class="yw-content"></div>
+          <div id="yourWorkContent" data-hj-suppress class="yw-content"></div>
         </div>
 
         <!-- Global Reports View -->
@@ -284,7 +284,7 @@
               <option value="control">Control Chart</option>
             </select>
           </div>
-          <div id="globalReportContent" class="report-content" style="padding:16px 0"></div>
+          <div id="globalReportContent" data-hj-suppress class="report-content" style="padding:16px 0"></div>
         </div>
 
         <!-- Work Log Report View -->
@@ -367,7 +367,7 @@
           </div><!-- /.wlr-sticky-top -->
 
           <!-- Results -->
-          <div id="wlrContent" class="wlr-content"></div>
+          <div id="wlrContent" data-hj-suppress class="wlr-content"></div>
 
           <!-- Pivot Field List Panel (overlay) -->
           <div id="wlrPivotPanel" class="wlr-pp-overlay" hidden>
@@ -473,7 +473,7 @@
               <button class="btn btn-primary btn-sm" onclick="window._prmOpenModal()">＋ Add Item</button>
             </div>
           </div>
-          <div id="prmContent" class="prm-content"></div>
+          <div id="prmContent" data-hj-suppress class="prm-content"></div>
         </div>
 
         <!-- Admin Settings View -->
@@ -506,7 +506,7 @@
               </div>
             </aside>
             <!-- Right content -->
-            <div class="admin-settings-content" id="adminSettingsContent"></div>
+            <div class="admin-settings-content" id="adminSettingsContent" data-hj-suppress></div>
           </div>
         </div>
 
@@ -520,7 +520,7 @@
         <div class="view" id="view-summary" hidden>
           <div id="summaryStats" class="stats-row"></div>
           <div id="summaryCharts" class="charts-row"></div>
-          <div id="summaryWidgets" class="widgets-grid"></div>
+          <div id="summaryWidgets" data-hj-suppress class="widgets-grid"></div>
         </div>
 
         <!-- Space: Backlog -->
@@ -574,13 +574,13 @@
               <button class="btn btn-primary btn-sm" id="createSprintBtn">+ Create Sprint</button>
             </div>
           </div>
-          <div id="backlogContent" class="backlog-content"></div>
+          <div id="backlogContent" data-hj-suppress class="backlog-content"></div>
         </div>
 
         <!-- Space: Active Sprint -->
         <div class="view" id="view-sprint" hidden>
           <div id="sprintHeader" class="sprint-header"></div>
-          <div id="sprintBoard" class="board-columns"></div>
+          <div id="sprintBoard" data-hj-suppress class="board-columns"></div>
         </div>
 
         <!-- Space: Reports -->
@@ -601,7 +601,7 @@
               <option value="control">Control Chart</option>
             </select>
           </div>
-          <div id="reportContent" class="report-content"></div>
+          <div id="reportContent" data-hj-suppress class="report-content"></div>
         </div>
 
         <!-- Space: MBR (Monthly Business Review) — cross-sprint trends -->
@@ -611,7 +611,7 @@
             <button class="tab-btn" data-mtab="comparison" onclick="window._switchMbrTab('comparison')">Comparison Trends</button>
             <button class="tab-btn" data-mtab="achievements" onclick="window._switchMbrTab('achievements')">Achievements</button>
           </div>
-          <div id="mbrTabContent"></div>
+          <div id="mbrTabContent" data-hj-suppress></div>
         </div>
 
         <!-- Space: All Work -->
@@ -647,7 +647,7 @@
             </div>
           </div>
 
-          <div id="allWorkTable" class="table-container"></div>
+          <div id="allWorkTable" data-hj-suppress class="table-container"></div>
         </div>
 
         <!-- Space: Calendar -->
@@ -657,7 +657,7 @@
             <span id="calendarHeader" class="calendar-header-label"></span>
             <button type="button" class="calendar-nav-btn" id="calendarNext" aria-label="Next month">&#8594;</button>
           </div>
-          <div id="calendarGrid" class="calendar-grid"></div>
+          <div id="calendarGrid" data-hj-suppress class="calendar-grid"></div>
         </div>
 
         <!-- Space: Filters -->
@@ -680,14 +680,14 @@
             <button class="tab-btn" data-stab="deleted" onclick="window._switchSettingsTab('deleted')">Deleted Items</button>
             <button class="tab-btn" data-stab="reports" onclick="window._switchSettingsTab('reports')">Reports</button>
           </div>
-          <div id="settingsTabContent"></div>
+          <div id="settingsTabContent" data-hj-suppress></div>
         </div>
 
       </div>
     </div>
 
     <!-- 3c. Issue Detail Drawer (Jira-style) -->
-    <div id="issueDrawer" class="issue-drawer" hidden>
+    <div id="issueDrawer" data-hj-suppress class="issue-drawer" hidden>
       <div class="drawer-overlay" onclick="closeDrawer()"></div>
       <div class="drawer-panel">
         <!-- Drawer Top Bar -->
@@ -706,7 +706,7 @@
               Create Issue
             </button>
             <button class="btn-icon" id="drawerStarBtn" title="Star">☆</button>
-            <button class="btn-icon" id="drawerActionsBtn" title="More actions">⋯</button>
+            <button class="btn-icon drawer-delete-btn" id="drawerDeleteBtn" title="Delete ticket" style="display:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
             <button class="btn-icon drawer-close-btn" id="closeDrawer" onclick="closeDrawer()">✕</button>
           </div>
         </div>
@@ -1063,7 +1063,7 @@
   </div>
 
   <!-- Create/Edit Issue Modal -->
-  <div id="modal-issue" class="modal" hidden>
+  <div id="modal-issue" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-issue')"></div>
     <div class="modal-dialog modal-dialog-lg">
       <div class="modal-header">
@@ -1247,7 +1247,7 @@
   </div>
 
   <!-- Add User to Space Modal -->
-  <div id="modal-invite-member" class="modal" hidden>
+  <div id="modal-invite-member" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-invite-member')"></div>
     <div class="modal-dialog">
       <div class="modal-header">
@@ -1351,7 +1351,7 @@
   </div>
 
   <!-- Worklog Modal -->
-  <div id="modal-worklog" class="modal" hidden>
+  <div id="modal-worklog" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-worklog')"></div>
     <div class="modal-dialog">
       <div class="modal-header">
@@ -1392,7 +1392,7 @@
   </div>
 
   <!-- Confirm Dialog -->
-  <div id="modal-confirm" class="modal" hidden>
+  <div id="modal-confirm" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-confirm')"></div>
     <div class="modal-dialog modal-dialog-sm">
       <div class="modal-header">
@@ -1410,7 +1410,7 @@
   </div>
 
   <!-- Invite User Modal -->
-  <div id="modal-invite-user" class="modal" hidden>
+  <div id="modal-invite-user" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-invite-user')"></div>
     <div class="modal-dialog">
       <div class="modal-header">
@@ -1448,7 +1448,7 @@
   </div>
 
   <!-- Reset Password Modal -->
-  <div id="modal-reset-pw" class="modal" hidden>
+  <div id="modal-reset-pw" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-reset-pw')"></div>
     <div class="modal-dialog modal-dialog-sm">
       <div class="modal-header">
@@ -1479,6 +1479,9 @@
   <div id="toastContainer" class="toast-container"></div>
 
   <!-- 5. Scripts -->
+  <!-- Runtime config (server-generated) must load before hotjar.js reads it -->
+  <script src="/config.js"></script>
+  <script src="/hotjar.js"></script>
   <script src="combination-options.js"></script>
   <script src="app.js"></script>
 

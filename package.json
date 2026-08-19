@@ -10,7 +10,8 @@
     "migrate:status": "node scripts/migrate.js --status",
     "setup-db": "node db/setup.js",
     "seed-qa": "node db/seed-qa-data.js",
-    "test-scenarios": "node scripts/test-scenarios.js"
+    "test-scenarios": "node scripts/test-scenarios.js",
+    "test-hotjar": "node scripts/test-hotjar.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

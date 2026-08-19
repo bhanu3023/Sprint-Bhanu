@@ -2,6 +2,12 @@
 // SPRINTBOARD ENTERPRISE — SPA CORE LOGIC
 // ═══════════════════════════════════════════════════════════
 
+// ── Analytics ─────────────────────────
+// Module scope, not DOMContentLoaded: recording starts as soon as this
+// script runs, so the loading overlay and any pre-auth state are covered.
+// A no-op unless HOTJAR_SITE_ID is configured — see hotjar.js.
+if (typeof initHotjar === 'function') initHotjar();
+
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
@@ -1452,6 +1458,8 @@ async function init() {
 
     S.currentUser = me.id;
     S.currentUserObj = me;
+    // First point the app knows who this is — tie the recording to them.
+    if (typeof identifyHotjarUser === 'function') identifyHotjarUser(me);
     localStorage.setItem('sb-user', JSON.stringify(me));
     // Apply DB-stored theme preference
     applyTheme('light', false);
@@ -11332,125 +11340,48 @@ function bindDrawerEdits(issue) {
     openModal('modal-worklog');
   };
 
-  // ⋯ Actions menu — Move to board + Delete issue
-  $('drawerActionsBtn').onclick = function (e) {
-    e.stopPropagation();
-    var existing = document.querySelector('.drawer-actions-menu');
-    if (existing) { existing.remove(); return; }
-
-    // Space role, not org role — a space admin can delete tickets in their own space.
-    var mayDelete = canDeleteIssue(issue.space_id);
-
-    var menu = document.createElement('div');
-    menu.className = 'drawer-actions-menu';
-    menu.innerHTML = mayDelete
-      ? '<div class="drawer-actions-item danger" id="drawerDeleteItem">🗑️ Delete ticket</div>'
-      : '<div class="drawer-actions-item" style="color:var(--text3);padding:8px 12px;font-size:13px">No actions available</div>';
-
-    var rect = $('drawerActionsBtn').getBoundingClientRect();
-    menu.style.cssText = 'position:fixed;right:' + (window.innerWidth - rect.right) + 'px;top:' + (rect.bottom + 4) + 'px;' +
-      'background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;min-width:180px;padding:4px;';
-
-    document.body.appendChild(menu);
-
-
-    if (isOwner) {
-      // Move to another board
-      var drawerMoveItem = document.getElementById('drawerMoveItem'); if (drawerMoveItem) drawerMoveItem.onclick = function () {
-        menu.remove();
-        // Build list of other spaces (boards) excluding current
-        var currentIssue = (S.data.issues || []).find(function(i){ return i.id === issueId; });
-        var currentSpaceId = currentIssue ? currentIssue.space_id : null;
-        var otherSpaces = (S.data.spaces || []).filter(function(sp){ return sp.id !== currentSpaceId; });
-
-        if (!otherSpaces.length) {
-          toast('No other boards available to move to', 'error');
-          return;
-        }
-
-        // Show board picker overlay
-        var overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center;';
-        var picker = document.createElement('div');
-        picker.style.cssText = 'background:var(--bg2);border-radius:12px;padding:24px;min-width:300px;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.25);';
-        picker.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:4px">Move to another board</div>' +
-          '<div style="font-size:12px;color:var(--text2);margin-bottom:16px">Select the destination board</div>' +
-          '<div id="boardPickerList" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;"></div>' +
-          '<div style="margin-top:16px;display:flex;justify-content:flex-end;">' +
-          '<button id="boardPickerCancel" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:none;cursor:pointer;font-size:13px;">Cancel</button>' +
-          '</div>';
-        overlay.appendChild(picker);
-        document.body.appendChild(overlay);
-
-        var list = picker.querySelector('#boardPickerList');
-        otherSpaces.forEach(function(sp) {
-          var btn = document.createElement('button');
-          btn.style.cssText = 'width:100%;text-align:left;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-size:13px;font-weight:500;transition:background 0.15s;';
-          btn.textContent = sp.name;
-          btn.onmouseover = function(){ btn.style.background = 'var(--accent-light, #eff6ff)'; };
-          btn.onmouseout  = function(){ btn.style.background = 'var(--bg)'; };
-          btn.onclick = async function() {
-            overlay.remove();
-            try {
-              await api('/api/issues/' + issueId, 'PUT', { space_id: sp.id, sprint_id: null });
-              goBackToSavedPage();
-              await refreshData();
-              if (S.currentTab) renderTab(S.currentTab);
-              toast('Issue moved to ' + sp.name);
-            } catch(err) {
-              toast('Failed to move issue', 'error');
-            }
-          };
-          list.appendChild(btn);
-        });
-
-        picker.querySelector('#boardPickerCancel').onclick = function(){ overlay.remove(); };
-        overlay.onclick = function(ev){ if (ev.target === overlay) overlay.remove(); };
-      };
-
-      // Delete issue
-      var drawerDeleteItem = document.getElementById('drawerDeleteItem'); if (drawerDeleteItem) drawerDeleteItem.onclick = async function () {
-        menu.remove();
-        // Gate on the SPACE role, matching the backend's 'issue.delete' rule. The
-        // old check was org-role-only, so a space admin — who the API happily lets
-        // delete — was told "only owners and admins can delete issues".
-        if (!canDeleteIssue(issue.space_id)) {
-          toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
-          return;
-        }
-        var key = issueKeyStr(issue) || issueId;
-        var ok = await typedConfirmDialog({
-          title: 'Delete ' + key + '?',
-          intro: issue.title || '',
-          note: softDeleteNote(),
-          phrase: key,
-          phraseHint: 'To confirm, type the ticket number',
-          confirmLabel: 'Delete ticket'
-        });
-        if (!ok) return;
-        try {
-          await api('/api/issues/' + issueId, 'DELETE');
-          toast(key + ' moved to Deleted Items', 'success');
-          var drawer = document.getElementById('issueDrawer');
-          if (drawer) drawer.setAttribute('hidden', '');
-          S.drawerIssueId = null;
-          window.history.replaceState({}, '', '/');
-          await refreshData();
-          renderCurrentView();
-        } catch (err) {
-          toast(err.message || 'Failed to delete ticket', 'error');
-        }
-      };
-    }
-
-    function closeMenu(ev) {
-      if (!menu.contains(ev.target) && ev.target !== $('drawerActionsBtn')) {
-        menu.remove();
-        document.removeEventListener('click', closeMenu);
+  // Delete ticket — a direct control rather than a ⋯ menu. The button is only
+  // rendered for someone the API would actually let through (canDeleteIssue ->
+  // space admin or org admin), so nobody is offered an action that then fails.
+  // This replaces a dropdown whose handler was gated on an `isOwner` variable
+  // that was never declared: the ReferenceError killed the handler mid-run, so
+  // the item bound no click AND the outside-click listener below it never
+  // registered — the menu was inert and would not dismiss.
+  var deleteBtn = $('drawerDeleteBtn');
+  if (deleteBtn) {
+    deleteBtn.style.display = canDeleteIssue(issue.space_id) ? '' : 'none';
+    deleteBtn.onclick = async function (e) {
+      e.stopPropagation();
+      // Re-checked at click time, not just at render: the drawer stays open
+      // across a refreshData(), so the role behind it can change underneath.
+      if (!canDeleteIssue(issue.space_id)) {
+        toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
+        return;
       }
-    }
-    setTimeout(function () { document.addEventListener('click', closeMenu); }, 0);
-  };
+      var key = issueKeyStr(issue) || issueId;
+      var ok = await typedConfirmDialog({
+        title: 'Delete ' + key + '?',
+        intro: issue.title || '',
+        note: softDeleteNote(),
+        phrase: key,
+        phraseHint: 'To confirm, type the ticket number',
+        confirmLabel: 'Delete ticket'
+      });
+      if (!ok) return;
+      try {
+        await api('/api/issues/' + issueId, 'DELETE');
+        toast(key + ' moved to Deleted Items', 'success');
+        var drawer = document.getElementById('issueDrawer');
+        if (drawer) drawer.setAttribute('hidden', '');
+        S.drawerIssueId = null;
+        window.history.replaceState({}, '', '/');
+        await refreshData();
+        renderCurrentView();
+      } catch (err) {
+        toast(err.message || 'Failed to delete ticket', 'error');
+      }
+    };
+  }
 }
 
 function renderDrawerSubtasks(subtasks) {
@@ -13564,9 +13495,25 @@ async function handleSpaceSubmit(e) {
   e.preventDefault();
   var id = $('spaceId').value;
   var spaceName = $('spaceName_input').value;
+  var spaceKey = $('spaceKey_input').value.trim().toUpperCase();
+
+  // Fail fast on a key that is visibly taken, so the user is told before the
+  // round-trip. The server repeats this check and is the real gate — it also
+  // sees ARCHIVED spaces, which /api/data filters out, so a clash this misses
+  // still comes back as a 409 and lands in the popup below.
+  var keyClash = (S.data.spaces || []).find(function (sp) {
+    return sp.id !== id && String(sp.key || '').toUpperCase() === spaceKey;
+  });
+  if (keyClash) {
+    popupAlert('Key already in use',
+      'The key "' + spaceKey + '" belongs to the space "' + keyClash.name + '". Space keys must be unique — pick a different one.',
+      'error');
+    return;
+  }
+
   var payload = {
     name: spaceName,
-    key: $('spaceKey_input').value.toUpperCase(),
+    key: spaceKey,
     description: $('spaceDesc').value,
     icon: $('spaceIconInput').value,
     color: $('spaceColor').value,

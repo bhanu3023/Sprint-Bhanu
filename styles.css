@@ -3321,11 +3321,9 @@ body.light .space-item.active { background: rgba(255,255,255,0.2); color: #fff; 
 body.light .space-item-menu-btn { color: rgba(255,255,255,0.5); }
 body.light .space-item-menu-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 .space-context-menu { position: fixed; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 200px; z-index: 300; padding: 4px 0; }
-/* Drawer actions menu */
-.drawer-actions-item { padding: 8px 14px; font-size: 13px; cursor: pointer; color: var(--text); border-radius: 6px; }
-.drawer-actions-item:hover { background: var(--bg3); }
-.drawer-actions-item.danger { color: var(--danger); }
-.drawer-actions-item.danger:hover { background: rgba(239,68,68,0.1); }
+/* Drawer delete ticket button — hidden entirely unless the viewer may delete */
+.drawer-delete-btn { display: inline-flex; align-items: center; justify-content: center; color: var(--text2); }
+.drawer-delete-btn:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
 .space-context-menu-item { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; color: var(--text); }
 .space-context-menu-item:hover { background: var(--bg3); }
 .space-context-menu-item.danger { color: var(--danger); }
