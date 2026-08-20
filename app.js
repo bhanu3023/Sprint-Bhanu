@@ -130,7 +130,14 @@ function updateDrawerDescEditorState(editorId, originalHtml) {
   if (!el || !btns || !saveBtn) return;
   var changed = richTextHasMeaningfulChange(originalHtml || '', el.innerHTML);
   btns.style.display = 'flex';
-  saveBtn.disabled = !changed;
+  // Dimmed look only — never the native `disabled` attribute. A browser never
+  // dispatches click on a disabled button at all, so if this recompute (fired
+  // from onfocus/oninput/a blur-triggered auto-linkify pass) landed disabled=true
+  // in the same gesture as a click on Save, that click would be silently
+  // swallowed before the handler below ever ran — no error, no save, the only
+  // visible effect being the description losing focus. The click handler
+  // re-checks richTextHasMeaningfulChange itself, so it stays a correct no-op
+  // when there is truly nothing to save; it just can never be a SILENT one.
   saveBtn.style.opacity = changed ? '1' : '0.45';
   saveBtn.style.cursor = changed ? 'pointer' : 'not-allowed';
 }
@@ -344,6 +351,28 @@ function highlightMentionsInCommentBody(body) {
     var escapedName = m.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     html = html.replace(new RegExp('@' + escapedName, 'g'),
       '<span style="color:#0052cc;font-weight:600">@' + esc(m.name) + '</span>');
+  });
+  return html;
+}
+
+// Renders a stored comment body for the EDIT box, as opposed to bodyHtml()'s
+// read-only render further down. A pasted screenshot becomes a plain <img> with
+// nothing after it to inherit a style from — bodyHtml()'s version wraps the
+// same image in a small-gray-text caption block meant for display only, and
+// pre-filling the edit box with that (as _editComment used to) left the caret
+// sitting right after that caption, so anything typed next came out in the
+// same small gray text.
+function commentBodyToEditableHtml(body) {
+  if (!body) return '';
+  if (/<[a-z][\s\S]*>/i.test(body)) {
+    return body.replace(/<script[\s\S]*?<\/script>/gi, '');
+  }
+  var html = highlightMentionsInCommentBody(body);
+  html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+    return '<img class="desc-inline-img" src="' + esc(fileApiUrl(url)) + '" alt="' + esc(fname) + '"><br>';
+  });
+  html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+    return '<a href="' + esc(fileApiUrl(url)) + '" target="_blank">' + esc(fname) + '</a>';
   });
   return html;
 }
@@ -1871,7 +1900,6 @@ var SPACE_TAB_TO_SLUG = {
   reports: 'reports',
   mbr: 'mbr',
   allwork: 'all-work',
-  filters: 'filters',
   calendar: 'calendar',
   'space-settings': 'settings'
 };
@@ -1882,17 +1910,15 @@ var SPACE_SLUG_TO_TAB = {
   reports: 'reports',
   mbr: 'mbr',
   'all-work': 'allwork',
-  filters: 'filters',
   calendar: 'calendar',
   settings: 'space-settings'
 };
 
 var SPACE_SUBNAV_ITEMS = [
   { t: 'summary', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>', l: 'Summary' },
-  { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog' },
+  { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog & Sprints' },
   { t: 'sprint', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', l: 'Active Sprint' },
   { t: 'allwork', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'All Work' },
-  { t: 'filters', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>', l: 'Saved Filters' },
   { t: 'calendar', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', l: 'Calendar' },
   { t: 'reports', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>', l: 'Reports', spaceAdminOnly: true },
   { t: 'mbr', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>', l: 'MBR', spaceAdminOnly: true },
@@ -2247,7 +2273,6 @@ function renderTab(tab, opts) {
       await _initAwMultiSelects();
       renderAllWork();
     })(); break;
-    case 'filters': renderFilters(); break;
     case 'calendar': renderCalendar(); break;
     case 'space-settings': renderSpaceSettings(); break;
   }
@@ -5085,10 +5110,22 @@ function renderBacklog() {
   // drag from it into the next sprint — whereas completed sprints are history
   // and were pushing the backlog further down the page with every sprint.
   function lanesFor(status) {
-    return sprints
-      .filter(function (sp) { return sp.status === status; })
-      .sort(function (a, b) { return (a.position || 0) - (b.position || 0); })
-      .map(sprintLaneHtml).join('');
+    var list = sprints.filter(function (sp) { return sp.status === status; });
+    if (status === 'completed') {
+      // Most-recently-completed first (sprint 3, sprint 2, sprint 1, ...) rather
+      // than the planning-order position, which would show the OLDEST completed
+      // sprint on top — the opposite of what you want once a sprint is history.
+      // completed_at is the real completion moment (set by completeSprint, not
+      // touched by the sweeper's read of end_date); end_date/created_at are
+      // just fallbacks for a sprint completed before that column existed.
+      var completionTime = function (sp) {
+        return new Date(sp.completed_at || sp.end_date || sp.created_at || 0).getTime();
+      };
+      list.sort(function (a, b) { return completionTime(b) - completionTime(a); });
+    } else {
+      list.sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+    }
+    return list.map(sprintLaneHtml).join('');
   }
   // Any sprint with an unexpected status still renders, just above the backlog,
   // rather than silently disappearing from the page.
@@ -8681,105 +8718,6 @@ window._bulkDeselect = function() {
 };
 
 // ═══════════════════════════════════════════════════════════
-// FILTERS TAB
-// ═══════════════════════════════════════════════════════════
-function renderFilters() {
-  var filters = (S.data.saved_filters || []).filter(function (f) {
-    return f.space_id == S.currentSpace || f.user_id == S.currentUser;
-  });
-
-  if (!filters.length) {
-    $('filtersList').innerHTML = '<p class="placeholder-text">No saved filters. Create one to save your search criteria.</p>';
-    return;
-  }
-
-  var html = '';
-  for (var i = 0; i < filters.length; i++) {
-    var f = filters[i];
-    var conditions = [];
-    try {
-      conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-    } catch (e) { conditions = []; }
-    var condPreview = conditions.length
-      ? conditions.map(function (c) { return c.field + ' ' + c.operator + ' ' + c.value; }).join(', ')
-      : 'No conditions';
-
-    html += '<div class="filter-card">' +
-      '<div class="filter-card-header"><h4>' + esc(f.name) + '</h4><div class="filter-card-badges">' +
-      (f.is_shared ? '<span class="badge badge-muted">Shared</span>' : '') +
-      (f.is_pinned ? '<span class="badge badge-muted">Pinned</span>' : '') +
-      '</div></div>' +
-      '<p class="text-muted">' + esc(condPreview) + '</p>' +
-      '<div class="filter-card-actions">' +
-      '<button class="btn btn-sm btn-outline" onclick="window._applyFilter(\'' + f.id + '\')">Apply</button>' +
-      '<button class="btn btn-sm btn-outline" onclick="window._editFilter(\'' + f.id + '\')">Edit</button>' +
-      '<button class="btn btn-sm btn-outline" onclick="window._deleteFilter(\'' + f.id + '\')">Delete</button>' +
-      '</div></div>';
-  }
-  $('filtersList').innerHTML = html;
-}
-
-window._applyFilter = function (filterId) {
-  var f = (S.data.saved_filters || []).find(function (x) { return x.id == filterId; });
-  if (!f) return;
-  renderTab('allwork');
-  try {
-    var conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-    if (conditions.length && conditions[0].value) {
-      $('allWorkSearch').value = conditions[0].value;
-      renderAllWork();
-    }
-  } catch (e) { /* ignore parse errors */ }
-};
-
-window._editFilter = function (filterId) {
-  var f = (S.data.saved_filters || []).find(function (x) { return x.id == filterId; });
-  if (!f) return;
-  $('filterId').value = f.id;
-  $('filterSpaceId').value = f.space_id || S.currentSpace;
-  $('filterNameInput').value = f.name || '';
-  $('filterShared').checked = !!f.is_shared;
-  $('filterPinned').checked = !!f.is_pinned;
-  $('filterModalTitle').textContent = 'Edit Filter';
-  var conditions = [];
-  try {
-    conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-  } catch (e) { /* ignore */ }
-  renderFilterConditions(conditions);
-  openModal('modal-filter');
-};
-
-window._deleteFilter = async function (filterId) {
-  var ok = await confirmDialog('Delete this filter?');
-  if (!ok) return;
-  await api('/api/filters/' + filterId, 'DELETE');
-  await refreshData();
-  renderFilters();
-  toast('Filter deleted');
-};
-
-function renderFilterConditions(conditions) {
-  var c = $('filterConditions');
-  var html = '';
-  for (var i = 0; i < conditions.length; i++) {
-    var cond = conditions[i];
-    html += '<div class="filter-condition-row" data-cond-idx="' + i + '">' +
-      '<select class="input input-sm fc-field">' +
-      '<option value="status"' + (cond.field === 'status' ? ' selected' : '') + '>Status</option>' +
-      '<option value="priority"' + (cond.field === 'priority' ? ' selected' : '') + '>Priority</option>' +
-      '<option value="type"' + (cond.field === 'type' ? ' selected' : '') + '>Type</option>' +
-      '<option value="assignee_id"' + (cond.field === 'assignee_id' ? ' selected' : '') + '>Assignee</option></select>' +
-      '<select class="input input-sm fc-op">' +
-      '<option value="equals"' + (cond.operator === 'equals' ? ' selected' : '') + '>equals</option>' +
-      '<option value="not_equals"' + (cond.operator === 'not_equals' ? ' selected' : '') + '>not equals</option>' +
-      '<option value="contains"' + (cond.operator === 'contains' ? ' selected' : '') + '>contains</option></select>' +
-      '<input type="text" class="input input-sm fc-value" value="' + esc(cond.value || '') + '">' +
-      '<button type="button" class="btn btn-sm btn-outline" onclick="this.closest(\'.filter-condition-row\').remove()">x</button></div>';
-  }
-  c.innerHTML = html;
-}
-
-// ═══════════════════════════════════════════════════════════
 // SPACE SETTINGS TAB (with sub-tabs: General, People, Custom Fields)
 // ═══════════════════════════════════════════════════════════
 var _settingsActiveTab = 'general';
@@ -11971,8 +11909,19 @@ function _renderActivityTab(tab, issue) {
     var richEl = document.getElementById('edit-rich-' + id);
     var bodyDiv = document.querySelector('.comment-body-' + id);
     if (!editArea || !richEl) return;
-    // Pre-fill with current HTML content
-    richEl.innerHTML = bodyDiv ? bodyDiv.innerHTML : '';
+    // Hide the read-only render while editing — it used to stay visible the
+    // whole time, so opening Edit just added a second copy of the comment
+    // (text + screenshot) below the original instead of replacing it in place.
+    if (bodyDiv) bodyDiv.style.display = 'none';
+    // Pre-fill from the RAW stored body, not bodyDiv.innerHTML. The read-only
+    // render wraps a pasted screenshot in a styled caption block (small gray
+    // "📷 filename" text) meant only for display — copying that HTML in put the
+    // caret right after that block, so anything typed next inherited its small
+    // gray style instead of normal text. commentBodyToEditableHtml renders the
+    // same image as a plain <img> (like the description editor does), which
+    // leaves nothing after it for typed text to inherit.
+    var cm = ((_drawerIssueData && _drawerIssueData.comments) || []).find(function(c) { return c.id === id; });
+    richEl.innerHTML = cm ? commentBodyToEditableHtml(cm.body) : (bodyDiv ? bodyDiv.innerHTML : '');
     editArea.style.display = '';
     richEl.focus();
     // Move cursor to end
@@ -11986,7 +11935,9 @@ function _renderActivityTab(tab, issue) {
 
   window._cancelEditComment = function(id) {
     var editArea = document.querySelector('.comment-edit-area-' + id);
+    var bodyDiv = document.querySelector('.comment-body-' + id);
     if (editArea) editArea.style.display = 'none';
+    if (bodyDiv) bodyDiv.style.display = '';
   };
 
   window._deleteComment = function(id) {
@@ -13813,43 +13764,6 @@ async function handleIssueSubmit(e) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// FILTER CRUD
-// ═══════════════════════════════════════════════════════════
-async function handleFilterSubmit(e) {
-  e.preventDefault();
-  var id = $('filterId').value;
-  var condRows = qsa('.filter-condition-row');
-  var conditions = [];
-  condRows.forEach(function (row) {
-    conditions.push({
-      field: row.querySelector('.fc-field').value,
-      operator: row.querySelector('.fc-op').value,
-      value: row.querySelector('.fc-value').value
-    });
-  });
-
-  var payload = {
-    space_id: $('filterSpaceId').value || S.currentSpace,
-    user_id: S.currentUser,
-    name: $('filterNameInput').value,
-    conditions: JSON.stringify(conditions),
-    is_shared: $('filterShared').checked,
-    is_pinned: $('filterPinned').checked
-  };
-
-  if (id) {
-    await api('/api/filters/' + id, 'PUT', payload);
-    toast('Filter updated');
-  } else {
-    await api('/api/filters', 'POST', payload);
-    toast('Filter created');
-  }
-  closeModal('modal-filter');
-  await refreshData();
-  renderFilters();
-}
-
-// ═══════════════════════════════════════════════════════════
 // WORKLOG MODAL
 // ═══════════════════════════════════════════════════════════
 async function handleWorklogSubmit(e) {
@@ -14412,35 +14326,7 @@ document.addEventListener('DOMContentLoaded', function () {
   $('spaceForm').addEventListener('submit', handleSpaceSubmit);
   $('sprintForm').addEventListener('submit', handleSprintSubmit);
   $('issueForm').addEventListener('submit', handleIssueSubmit);
-  $('filterForm').addEventListener('submit', handleFilterSubmit);
   $('worklogForm').addEventListener('submit', handleWorklogSubmit);
-
-  // Create filter
-  $('createFilterBtn').addEventListener('click', function () {
-    $('filterId').value = '';
-    $('filterSpaceId').value = S.currentSpace || '';
-    $('filterNameInput').value = '';
-    $('filterShared').checked = false;
-    $('filterPinned').checked = false;
-    $('filterConditions').innerHTML = '';
-    $('filterModalTitle').textContent = 'Create Filter';
-    openModal('modal-filter');
-  });
-
-  // Add filter condition
-  $('addConditionBtn').addEventListener('click', function () {
-    var row = document.createElement('div');
-    row.className = 'filter-condition-row';
-    row.innerHTML = '<select class="input input-sm fc-field">' +
-      '<option value="status">Status</option><option value="priority">Priority</option>' +
-      '<option value="type">Type</option><option value="assignee_id">Assignee</option></select>' +
-      '<select class="input input-sm fc-op">' +
-      '<option value="equals">equals</option><option value="not_equals">not equals</option>' +
-      '<option value="contains">contains</option></select>' +
-      '<input type="text" class="input input-sm fc-value" value="">' +
-      '<button type="button" class="btn btn-sm btn-outline" onclick="this.closest(\'.filter-condition-row\').remove()">x</button>';
-    $('filterConditions').appendChild(row);
-  });
 
   // Backlog search
   $('backlogSearch').addEventListener('input', function () {

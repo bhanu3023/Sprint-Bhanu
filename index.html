@@ -665,17 +665,6 @@
           <div id="calendarGrid" data-hj-suppress class="calendar-grid"></div>
         </div>
 
-        <!-- Space: Filters -->
-        <div class="view" id="view-filters" hidden>
-          <div class="view-toolbar">
-            <div class="toolbar-group"></div>
-            <div class="toolbar-group">
-              <button class="btn btn-primary btn-sm" id="createFilterBtn">+ Create Filter</button>
-            </div>
-          </div>
-          <div id="filtersList" class="filters-list"></div>
-        </div>
-
         <!-- Space: Settings (with sub-tabs: General, People, Custom Fields) -->
         <div class="view" id="view-space-settings" hidden>
           <div class="settings-tabs" id="settingsTabBar">
@@ -1209,44 +1198,6 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-issue')">Cancel</button>
         <button class="btn btn-primary" id="issueSubmitBtn" type="submit" form="issueForm">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Create/Edit Filter Modal -->
-  <div id="modal-filter" class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('modal-filter')"></div>
-    <div class="modal-dialog">
-      <div class="modal-header">
-        <h3 id="filterModalTitle">Create Filter</h3>
-        <button class="btn-icon modal-close" onclick="closeModal('modal-filter')">✕</button>
-      </div>
-      <div class="modal-body">
-        <form id="filterForm">
-          <input type="hidden" id="filterId">
-          <input type="hidden" id="filterSpaceId">
-          <div class="form-group">
-            <label class="form-label" for="filterNameInput">Name</label>
-            <input type="text" id="filterNameInput" class="input" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Conditions</label>
-            <div id="filterConditions" class="filter-conditions"></div>
-            <button type="button" class="btn btn-outline btn-sm" id="addConditionBtn">+ Add Condition</button>
-          </div>
-          <div class="form-row">
-            <div class="form-group form-check">
-              <label><input type="checkbox" id="filterShared"> Shared with team</label>
-            </div>
-            <div class="form-group form-check">
-              <label><input type="checkbox" id="filterPinned"> Pin to sidebar</label>
-            </div>
-          </div>
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-filter')">Cancel</button>
-        <button class="btn btn-primary" type="submit" form="filterForm">Save</button>
       </div>
     </div>
   </div>
