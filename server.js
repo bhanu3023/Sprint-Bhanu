@@ -789,17 +789,45 @@ app.get('/api/issues/deleted', requireAuth, wrap(async (req, res) => {
   res.json({ can_restore: orgAdmin, retention_days: days, items: items });
 }));
 
+// Shared by both restore routes below — one cascade, two callers, same reasoning
+// as purgeIssueRows in lib/retention.js. DELETE /api/issues/:id soft-deletes an
+// issue AND its subtasks (parent_id=$1) together in one UPDATE, so they share the
+// exact same deleted_at timestamp from that statement. Restoring only needs to
+// bring back subtasks whose deleted_at matches the parent's — that is precisely
+// "deleted together with this parent" and excludes a subtask that happened to
+// already be in the bin from an earlier, unrelated delete of its own.
+//
+// The match is done with a subquery INSIDE the UPDATE rather than by fetching
+// the parent's deleted_at into JS first and passing it back as a parameter.
+// issues.deleted_at is `timestamp without time zone` (local server clock), but
+// node-pg's default type parser hands it back as a JS Date assumed to be UTC —
+// so a round-tripped value silently drifts by the server's UTC offset and never
+// matches the raw column again. A subquery never leaves Postgres, so there is
+// nothing to drift: both sides of the comparison are the same on-disk value.
+async function restoreIssueRows(id, userId) {
+  const check = (await q('SELECT key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
+  if (!check) return null;
+  const restored = await q(
+    `UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW()
+     WHERE id=$1
+        OR (parent_id=$1 AND deleted_at = (SELECT deleted_at FROM issues WHERE id=$1))
+     RETURNING id, key`,
+    [id]
+  );
+  for (const r of restored.rows) {
+    q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+       VALUES($1,$2,$3,'restored',NULL,$4)`, [uid(), r.id, userId, r.key]).catch(() => {});
+  }
+  return { key: check.key, restoredSubtasks: restored.rows.length - 1 };
+}
+
 app.post('/api/issues/:id/restore', requireAuth, wrap(async (req, res) => {
   if (!requireOrgAdmin(req.user, res, 'Only an org admin can restore deleted issues.')) return;
-  const row = (await q('SELECT id, key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [req.params.id])).rows[0];
-  if (!row) return res.status(404).json({ error: 'Deleted issue not found' });
   // Restores in place: space_id/status were never changed by the soft delete, so
   // clearing the tombstone returns the issue to its original space and state.
-  await q('UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1', [req.params.id]);
-  await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-    VALUES($1,$2,$3,'restored',NULL,$4)`,
-    [uid(), req.params.id, req.user.id, row.key]).catch(() => {});
-  res.json({ ok: true });
+  const result = await restoreIssueRows(req.params.id, req.user.id);
+  if (!result) return res.status(404).json({ error: 'Deleted issue not found' });
+  res.json({ ok: true, restored_subtasks: result.restoredSubtasks });
 }));
 
 // ── Generic bin restore / purge (org admin only) ─────────────
@@ -810,12 +838,9 @@ app.post('/api/bin/:type/:id/restore', requireAuth, wrap(async (req, res) => {
   if (!requireOrgAdmin(req.user, res, 'Only an org admin can restore deleted items.')) return;
   const { type, id } = req.params;
   if (type === 'ticket') {
-    const row = (await q('SELECT key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
-    if (!row) return res.status(404).json({ error: 'That ticket is not in the bin.' });
-    await q('UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1', [id]);
-    await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-      VALUES($1,$2,$3,'restored',NULL,$4)`, [uid(), id, req.user.id, row.key]).catch(() => {});
-    return res.json({ ok: true, label: row.key });
+    const result = await restoreIssueRows(id, req.user.id);
+    if (!result) return res.status(404).json({ error: 'That ticket is not in the bin.' });
+    return res.json({ ok: true, label: result.key, restored_subtasks: result.restoredSubtasks });
   }
   if (type === 'sprint') {
     const row = (await q('SELECT name FROM sprints WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];

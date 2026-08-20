@@ -11912,7 +11912,12 @@ function _renderActivityTab(tab, issue) {
     var bodyHtml = (function(body) {
       if (/<[a-z][\s\S]*>/i.test(body)) {
         var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
-        return safe;
+        // A comment that has been through the rich-edit-and-save cycle below
+        // stores its images as real <img src="/api/files/id"> (no token, by
+        // design — see _saveComment) rather than the [img:name|url] markup the
+        // bracket branch below handles. Without this, those images would never
+        // get a token at all, on any render, ever.
+        return augmentFileUrlsInHtml(safe);
       }
       var html = highlightMentionsInCommentBody(body);
       html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
@@ -11999,7 +12004,12 @@ function _renderActivityTab(tab, issue) {
   window._saveComment = function(id) {
     var richEl = document.getElementById('edit-rich-' + id);
     if (!richEl) return;
-    var newBody = richEl.innerHTML.trim();
+    // richEl was pre-filled from the rendered comment body in _editComment,
+    // which means any pasted screenshot's <img> now carries today's live
+    // session token (bodyHtml embeds it for display). Strip it before saving
+    // — same bug and same fix as the drawer description save handlers: saving
+    // the token verbatim bakes today's token in permanently.
+    var newBody = stripFileAuthTokensFromHtml(richEl.innerHTML.trim());
     if (!newBody || newBody === '<br>') return;
     api('/api/comments/' + id, 'PUT', { body: newBody }).then(function() {
       var issueId = S.drawerIssueId;
