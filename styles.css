@@ -4111,19 +4111,6 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 .aw-col-item:hover { background: var(--bg3); }
 .aw-col-item input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); width: 14px; height: 14px; flex-shrink: 0; }
 
-/* ── Bulk Action Bar ─────────────────────────────────────── */
-.bulk-bar {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 8px 16px; background: color-mix(in srgb, var(--accent) 10%, var(--bg2));
-  border-bottom: 2px solid var(--accent); animation: slideDown .15s ease-out;
-}
-@keyframes slideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
-.bulk-count { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; }
-.bulk-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.bulk-actions .input { font-size: 12px; padding: 4px 8px; }
-.bulk-deselect { margin-left: auto; color: var(--text3); background: none; border: none; font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: var(--radius); }
-.bulk-deselect:hover { background: var(--bg3); color: var(--text1); }
-.btn-ghost { background: none; border: 1px solid var(--border); }
 
 /* Custom field inputs in issue drawer */
 .drawer-cf-input .input { width: 100%; }

@@ -8473,38 +8473,19 @@ function renderAllWork(opts) {
     return '<th class="sortable-th" data-sort-col="' + c + '">' + label + sortIcon(c) + '</th>';
   };
 
-  var hasSelected = S.allWorkSelected.size > 0;
+  // Only an admin/site_admin of this space may select tickets and bulk-delete
+  // (mirrors canDeleteIssue / the backend's ACTION_MIN_ROLE for issue.bulk).
+  // A regular member gets no checkbox column at all -- there is nothing for
+  // them to select, so an empty checkbox column would just be UI noise.
+  var canBulkDelete = canDeleteIssue(S.currentSpace);
+  var hasSelected = canBulkDelete && S.allWorkSelected.size > 0;
   var html = '';
 
-  if (hasSelected) {
-    // Build assignee options from space members
-    var memberOpts = '<option value="">Assignee\u2026</option>';
-    var spaceMembers = getSpaceMembers(S.currentSpace);
-    if (!spaceMembers.length) spaceMembers = S.data.users || [];
-    spaceMembers.forEach(function(u) { memberOpts += '<option value="' + u.id + '">' + esc(u.name) + '</option>'; });
-
-    // Build sprint options
-    var sprintOpts = '<option value="">Sprint\u2026</option><option value="__none__">None (Backlog)</option>';
-    (S.data.sprints || []).filter(function(sp){ return sp.space_id == S.currentSpace; }).forEach(function(sp) {
-      sprintOpts += '<option value="' + sp.id + '">' + esc(sp.name) + '</option>';
-    });
-
-    html += '<div class="bulk-bar">' +
-      '<span class="bulk-count">' + S.allWorkSelected.size + ' issue' + (S.allWorkSelected.size > 1 ? 's' : '') + ' selected</span>' +
-      '<div class="bulk-actions">' +
-      '<select id="bulkStatusChange" class="input input-sm" title="Change status"><option value="">Status\u2026</option>' +
-        '<option value="To Do">To Do</option><option value="In Progress">In Progress</option>' +
-        '<option value="In Review">In Review</option><option value="Done">Done</option>' +
-        '<option value="Blocked">Blocked</option></select>' +
-      '<select id="bulkPriorityChange" class="input input-sm" title="Change priority"><option value="">Priority\u2026</option>' +
-        '<option value="critical">Critical</option><option value="high">High</option>' +
-        '<option value="medium">Medium</option><option value="low">Low</option></select>' +
-      '<select id="bulkAssigneeChange" class="input input-sm" title="Change assignee">' + memberOpts + '</select>' +
-      '<select id="bulkSprintChange" class="input input-sm" title="Move to sprint">' + sprintOpts + '</select>' +
-      '<button class="btn btn-sm btn-danger" onclick="window._bulkDelete()">🗑 Delete</button>' +
-      '</div>' +
-      '<button class="btn btn-sm btn-ghost bulk-deselect" onclick="window._bulkDeselect()" title="Clear selection">✕</button>' +
-      '</div>';
+  var bulkWrap = $('awBulkDeleteWrap');
+  if (bulkWrap) {
+    bulkWrap.style.display = hasSelected ? 'flex' : 'none';
+    var bulkCountEl = $('awBulkDeleteCount');
+    if (bulkCountEl) bulkCountEl.textContent = S.allWorkSelected.size + ' selected';
   }
 
   var visCols = _awGetVisibleCols();
@@ -8514,7 +8495,7 @@ function renderAllWork(opts) {
   var pagedIssues = issues.slice(0, PAGE_SIZE * (S.allWorkPage || 1));
 
   html += '<table class="data-table" style="min-width:1200px;width:100%"><thead><tr>' +
-    '<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>' +
+    (canBulkDelete ? ('<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>') : '') +
     visCols.map(function(col) {
       return col.sortCol
         ? th(col.label, col.sortCol)
@@ -8531,7 +8512,7 @@ function renderAllWork(opts) {
     var iid = iss.id;
     var nav = 'openIssuePage(\'' + iid + '\')';
     html += '<tr class="clickable-row" onclick="' + nav + '">' +
-      '<td onclick="event.stopPropagation()"><input type="checkbox" data-issue-check="' + iid + '"' + checked + '></td>' +
+      (canBulkDelete ? ('<td onclick="event.stopPropagation()"><input type="checkbox" data-issue-check="' + iid + '"' + checked + '></td>') : '') +
       visCols.map(function(col) {
         var cell = '';
         switch(col.key) {
@@ -8619,28 +8600,6 @@ function renderAllWork(opts) {
     };
   });
 
-  // Generic bulk field change handler
-  async function doBulkUpdate(field, value) {
-    if (!value) return;
-    var ids = Array.from(S.allWorkSelected);
-    var updates = {};
-    if (field === 'sprint_id') updates.sprint_id = value === '__none__' ? null : value;
-    else updates[field] = value;
-    await api('/api/issues/bulk', 'POST', { ids: ids, updates: updates });
-    S.allWorkSelected.clear();
-    await refreshData();
-    renderAllWork();
-    toast('Updated ' + ids.length + ' issue' + (ids.length > 1 ? 's' : ''));
-  }
-
-  var bulkStatus   = $('bulkStatusChange');
-  var bulkPriority = $('bulkPriorityChange');
-  var bulkAssignee = $('bulkAssigneeChange');
-  var bulkSprint   = $('bulkSprintChange');
-  if (bulkStatus)   bulkStatus.onchange   = function() { doBulkUpdate('status',      bulkStatus.value); };
-  if (bulkPriority) bulkPriority.onchange = function() { doBulkUpdate('priority',    bulkPriority.value); };
-  if (bulkAssignee) bulkAssignee.onchange = function() { doBulkUpdate('assignee_id', bulkAssignee.value); };
-  if (bulkSprint)   bulkSprint.onchange   = function() { doBulkUpdate('sprint_id',   bulkSprint.value); };
 }
 
 window._bulkDelete = async function () {

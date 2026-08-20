@@ -630,6 +630,11 @@
               </div>
             </div>
             <button class="btn btn-outline btn-sm" id="awClearFilters" style="display:none" onclick="window._awClearFilters()">✕ Clear all</button>
+            <div id="awBulkDeleteWrap" style="display:none;align-items:center;gap:8px;margin-left:auto">
+              <span id="awBulkDeleteCount" style="font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap"></span>
+              <button class="btn btn-sm btn-danger" id="awBulkDeleteBtn" onclick="window._bulkDelete()">🗑 Delete</button>
+              <button id="awBulkDeselectBtn" onclick="window._bulkDeselect()" title="Clear selection" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:var(--radius)">✕</button>
+            </div>
           </div>
           <!-- Advanced Filter Panel -->
           <div class="aw-adv-panel" id="awAdvPanel" style="display:none">
