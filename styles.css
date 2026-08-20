@@ -2583,6 +2583,43 @@ body.light .modal-dialog {
 
 .toast-fade { opacity: 0; transition: opacity 0.5s ease; }
 
+.toast-with-actions {
+  flex-wrap: wrap;
+  max-width: 420px;
+  padding-right: 34px;   /* room for the close button, positioned absolutely */
+  position: relative;
+}
+.toast-actions {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 2px;
+}
+.toast-action-btn {
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.35);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast-action-btn:hover { background: rgba(255,255,255,0.3); }
+.toast-close-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.75);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+.toast-close-btn:hover { color: #fff; }
+
 /* Popup Alert (prominent banner) */
 .popup-alert {
   display: flex;

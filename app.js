@@ -850,6 +850,55 @@ function toast(msg, type) {
   setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 3600);
 }
 
+// A toast that offers one or more follow-up actions instead of just a message —
+// e.g. "PTM-9 created" with buttons to open it or copy its link, for the case
+// where auto-navigating away would be disruptive (a ticket is already open).
+// Stays up longer than a plain toast and only auto-dismisses if nothing was
+// clicked, since deciding takes a moment longer than reading a status line.
+// buttons: [{ label, handler, dismissOnClick }] — dismissOnClick defaults true.
+function toastWithButtons(msg, buttons, type) {
+  type = type || 'success';
+  var c = $('toastContainer');
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type + ' toast-with-actions';
+  var icon = type === 'error' ? '✕' : type === 'warning' ? '⚠️' : '✓';
+  el.innerHTML = '<span class="toast-icon">' + icon + '</span><span class="toast-msg">' + esc(msg) + '</span>';
+
+  var timers = [];
+  function dismiss() {
+    timers.forEach(clearTimeout);
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  var actionsWrap = document.createElement('div');
+  actionsWrap.className = 'toast-actions';
+  (buttons || []).forEach(function (b) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action-btn';
+    btn.textContent = b.label;
+    btn.onclick = function () {
+      if (b.handler) b.handler();
+      if (b.dismissOnClick !== false) dismiss();
+    };
+    actionsWrap.appendChild(btn);
+  });
+  el.appendChild(actionsWrap);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'toast-close-btn';
+  closeBtn.setAttribute('aria-label', 'Dismiss');
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = dismiss;
+  el.appendChild(closeBtn);
+
+  c.appendChild(el);
+  timers.push(setTimeout(function () { el.classList.add('toast-fade'); }, 8000));
+  timers.push(setTimeout(dismiss, 8600));
+  return el;
+}
+
 function popupAlert(title, msg, type) {
   type = type || 'success';
   var c = $('toastContainer');
@@ -11361,11 +11410,9 @@ function renderDrawerSubtasks(subtasks) {
       var isDone = st.status === 'Done';
       html += '<div class="subtask-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;border-bottom:1px solid var(--border)" ' +
         'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
-        '<input type="checkbox" ' + (isDone ? 'checked' : '') + ' onclick="event.stopPropagation();window._toggleSubtaskDone(\'' + st.id + '\',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--success)">' +
         '<span class="subtask-key" style="font-size:11px;font-weight:700;color:var(--accent);min-width:48px;cursor:pointer" onclick="event.stopPropagation();openIssuePage(\'' + st.id + '\')">' + esc(st.key || '') + '</span>' +
         '<span style="flex:1;font-size:13px;' + (isDone ? 'text-decoration:line-through;color:var(--text3)' : '') + '" onclick="openIssuePage(\'' + st.id + '\')">' + esc(st.title) + '</span>' +
-        statusBadge(st.status) +
-        '<button class="btn-icon" style="width:20px;height:20px;font-size:12px;opacity:0.5" onclick="event.stopPropagation();window._deleteSubtask(\'' + st.id + '\')" title="Delete subtask">\u2715</button>' +
+        statusBadge(st.status, true) +
         '</div>';
     }
   } else {
@@ -11437,43 +11484,6 @@ window._submitSubtask = async function() {
     $('subtaskTitleInput').value = '';
     // Refresh drawer
     var issue = await api('/api/issues/' + parentId);
-    renderDrawerSubtasks(issue.subtasks || []);
-    await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
-};
-
-window._toggleSubtaskDone = async function(subtaskId, checked) {
-  var newStatus = checked ? 'Done' : 'To Do';
-  try {
-    await api('/api/issues/' + subtaskId, 'PUT', { status: newStatus });
-    var issue = await api('/api/issues/' + S.drawerIssueId);
-    renderDrawerSubtasks(issue.subtasks || []);
-    await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
-};
-
-window._deleteSubtask = async function(subtaskId) {
-  var sub = (S.data.issues || []).find(function (i) { return i.id === subtaskId; }) || {};
-  var parent = (S.data.issues || []).find(function (i) { return i.id === S.drawerIssueId; }) || {};
-  var spaceId = sub.space_id || parent.space_id || S.currentSpace;
-  if (!canDeleteIssue(spaceId)) {
-    toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
-    return;
-  }
-  var key = issueKeyStr(sub) || 'this subtask';
-  var ok = await typedConfirmDialog({
-    title: 'Delete subtask ' + key + '?',
-    intro: sub.title || '',
-    note: softDeleteNote(),
-    phrase: key,
-    phraseHint: 'To confirm, type the subtask number',
-    confirmLabel: 'Delete subtask'
-  });
-  if (!ok) return;
-  try {
-    await api('/api/issues/' + subtaskId, 'DELETE');
-    toast(key + ' moved to Deleted Items', 'success');
-    var issue = await api('/api/issues/' + S.drawerIssueId);
     renderDrawerSubtasks(issue.subtasks || []);
     await refreshData();
   } catch(e) { toast(e.message, 'error'); }
@@ -13743,20 +13753,44 @@ async function handleIssueSubmit(e) {
     } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Failed to create issue: " + e.message, "error"); return; }
     closeModal('modal-issue');
     await refreshData();
-    if (parentId && S.drawerIssueId === parentId) {
+    // Captured before anything below navigates: renderCurrentView() ->
+    // navigateToSpace() unconditionally calls _exitIssuePage(), so if a ticket
+    // was open when Create Issue was launched (it opens as an overlay on top
+    // of whatever page is behind it), calling that would silently close it out
+    // from under the user even before the auto-open-new-ticket behavior below
+    // ever ran.
+    var ticketWasOpen = !!S.drawerIssueId;
+    var subtaskOfOpenTicket = parentId && S.drawerIssueId === parentId;
+    if (subtaskOfOpenTicket) {
       var parentIssue = await api('/api/issues/' + parentId);
       renderDrawerSubtasks(parentIssue.subtasks || []);
-    } else {
+    } else if (!ticketWasOpen) {
       renderCurrentView();
     }
-    if (created && created.id && !parentId) {
-      toast('Issue created — opening in new tab…');
-      // Wait for custom fields to be saved before opening
-      setTimeout(async function() {
-        await new Promise(r => setTimeout(r, 500));
-        var fresh = await api('/api/issues/' + created.id);
-        openIssuePage(created.id);
-      }, 300);
+    // else: some ticket is open that isn't this new one's parent -- leave it
+    // on screen untouched; the toast below is the only feedback.
+    if (created && created.id) {
+      if (subtaskOfOpenTicket) {
+        toast('Issue created');
+      } else if (ticketWasOpen) {
+        // Don't yank the user away from whatever they're reading. Offer a way
+        // to jump to the new ticket instead of forcing it.
+        var newKey = issueKeyStr(created) || created.id;
+        toastWithButtons(newKey + ' created', [
+          { label: 'Open', handler: function () { openIssuePage(created.id); } },
+          { label: 'Copy link', handler: function () { copyIssueLinkByKey(newKey); }, dismissOnClick: false }
+        ]);
+      } else if (!parentId) {
+        toast('Issue created — opening in new tab…');
+        // Wait for custom fields to be saved before opening
+        setTimeout(async function() {
+          await new Promise(r => setTimeout(r, 500));
+          var fresh = await api('/api/issues/' + created.id);
+          openIssuePage(created.id);
+        }, 300);
+      } else {
+        toast('Issue created');
+      }
     } else {
       toast('Issue created');
     }
@@ -15735,13 +15769,13 @@ function richInsertImage(elId) {
 }
 
 // ── Copy issue link ─────────────────────────────────────
-function copyDrawerLink() {
-  // Use current issue key saved when drawer opened
-  var issueKey = window._currentIssueKey || (window.S && S.drawerIssueId);
+// Shared by the drawer's own copy-link button and the "created while another
+// ticket was open" toast, which offers a copy-link action for the NEW ticket
+// (a different key than whatever is currently open, so it can't just reuse
+// copyDrawerLink's window._currentIssueKey).
+function copyIssueLinkByKey(issueKey) {
   var url = window.location.origin + '/?issue=' + encodeURIComponent(issueKey);
-  navigator.clipboard.writeText(url).then(function() {
-    toast('Link copied!');
-  }).catch(function() {
+  function fallbackCopy() {
     var el = document.createElement('input');
     el.value = url;
     document.body.appendChild(el);
@@ -15749,7 +15783,18 @@ function copyDrawerLink() {
     document.execCommand('copy');
     document.body.removeChild(el);
     toast('Link copied!');
-  });
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function() { toast('Link copied!'); }).catch(fallbackCopy);
+  } else {
+    fallbackCopy();
+  }
+}
+
+function copyDrawerLink() {
+  // Use current issue key saved when drawer opened
+  var issueKey = window._currentIssueKey || (window.S && S.drawerIssueId);
+  copyIssueLinkByKey(issueKey);
 }
 
 // ── Browser back button support ─────────────────────────
