@@ -477,7 +477,11 @@ function augmentFileUrlsInHtml(html) {
   if (!html || html.indexOf('/api/files/') === -1) return html;
   var t = getAuthToken();
   if (!t) return html;
-  return html.replace(/\/api\/files\/([^"'\s?]+)/g, function (_m, id) {
+  // Consumes an existing "?t=..." (if any) instead of just stopping before it,
+  // so a description saved with a stale token already baked in — see the
+  // drawer description/fix-description save handlers — gets a single fresh
+  // token here rather than a second one appended after the old one.
+  return html.replace(/\/api\/files\/([^"'\s?]+)(?:\?t=[^"'\s&]+)?/g, function (_m, id) {
     return '/api/files/' + id + '?t=' + encodeURIComponent(t);
   });
 }
@@ -10953,7 +10957,17 @@ function bindDrawerEdits(issue) {
           if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
         } catch(ex) { console.error('img upload failed', ex); }
       }
-      await saveFieldNow('description', descEl.innerHTML.trim());
+      // descEl.innerHTML still carries the LIVE session token baked into every
+      // desc-inline-img src (fileApiUrl() puts it there so the image is visible
+      // while editing) — stripping it here mirrors getDescriptionHtmlForSave(),
+      // which the Create Issue path already uses. Without this, the stored
+      // description keeps today's token forever; augmentFileUrlsInHtml() then
+      // appends a SECOND ?t=... on every later render (its regex stops at the
+      // first "?", so it can't tell the URL already has one), producing a
+      // malformed src that always 401s — the exact "screenshot goes broken
+      // after saving" bug, and re-pasting the same image then reports it as
+      // already attached because the broken <img> is still sitting in the DOM.
+      await saveFieldNow('description', stripFileAuthTokensFromHtml(descEl.innerHTML.trim()));
       _drawerDescOriginal = descEl.innerHTML;
       window._drawerDescOriginalHtml = _drawerDescOriginal;
       var b = $('drawerDescBtns'); if(b) b.style.display='none';
@@ -10988,7 +11002,8 @@ function bindDrawerEdits(issue) {
     fixSaveBtn.disabled = true;
     fixSaveBtn.textContent = 'Saving...';
     try {
-      await saveFieldNow('fix_description', fixEl.innerHTML.trim());
+      // Same token-stripping fix as the description save above.
+      await saveFieldNow('fix_description', stripFileAuthTokensFromHtml(fixEl.innerHTML.trim()));
       _drawerFixDescOriginal = fixEl.innerHTML;
       window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
       var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
