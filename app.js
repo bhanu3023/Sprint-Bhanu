@@ -487,6 +487,21 @@ function stripFileAuthTokensFromHtml(html) {
   return html.replace(/\/api\/files\/([^"'\s?]+)\?t=[^"'\s&]+/g, '/api/files/$1');
 }
 
+// fetch() only throws a TypeError when the request never got an HTTP response at
+// all — offline, DNS failure, connection reset, CORS block, an upload larger than
+// a reverse proxy will accept. Its message ("Failed to fetch", "NetworkError when
+// attempting to fetch resource.", Safari's "Load failed") is a browser-internal
+// string, not something written for a user to read — surfacing it verbatim in a
+// toast looks like a broken error message even though it correctly identifies a
+// connectivity problem. Anything that reached the server and came back as a JSON
+// {error: "..."} is unaffected by this and keeps its own real message.
+function friendlyFetchErrorMessage(e, fallback) {
+  if (e instanceof TypeError) {
+    return 'Could not reach the server — check your connection and try again.';
+  }
+  return (e && e.message) || fallback || 'Something went wrong';
+}
+
 async function api(url, method, body, opts) {
   opts = opts || {};
   method = method || 'GET';
@@ -496,7 +511,12 @@ async function api(url, method, body, opts) {
     if (token) headers['Authorization'] = 'Bearer ' + token;
     var fetchOpts = { method: method, headers: headers };
     if (body !== undefined && body !== null) fetchOpts.body = JSON.stringify(body);
-    var res = await fetch(url, fetchOpts);
+    var res;
+    try {
+      res = await fetch(url, fetchOpts);
+    } catch (networkErr) {
+      throw new Error(friendlyFetchErrorMessage(networkErr, 'API request failed'));
+    }
     if (res.status === 401) {
       localStorage.removeItem('sb-token');
       localStorage.removeItem('sb-user');
@@ -5174,6 +5194,12 @@ window._dropToSprint = async function (event, sprintId) {
   if (!issueId) return;
   var targetSprintId = lane.getAttribute('data-sprint-drop');
   if (targetSprintId === 'null') targetSprintId = null;
+  // Dropped back into the lane it already belongs to — nothing actually
+  // changed, so skip the API call and the "Issue moved" toast entirely.
+  var draggedIssue = (S.data.issues || []).find(function (i) { return i.id === issueId; });
+  if (draggedIssue && String(draggedIssue.sprint_id || '') === String(targetSprintId || '')) {
+    return;
+  }
   // Belt-and-braces: completed lanes render without drop handlers, but guard here
   // too so no other path can drop a ticket into closed sprint history.
   if (isSprintClosed(targetSprintId)) {
@@ -9956,11 +9982,16 @@ function addDescInlineImageChip(tray, url, alt, fp) {
 async function uploadDescImageFile(file) {
   var fd = new FormData();
   fd.append('files', file, file.name || 'screenshot.png');
-  var res = await fetch('/api/comments/upload', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + getAuthToken() },
-    body: fd
-  });
+  var res;
+  try {
+    res = await fetch('/api/comments/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + getAuthToken() },
+      body: fd
+    });
+  } catch (networkErr) {
+    throw new Error(friendlyFetchErrorMessage(networkErr, 'Upload failed'));
+  }
   if (!res.ok) {
     var err = 'Upload failed';
     try { var j = await res.json(); if (j.error) err = j.error; } catch (_) {}
@@ -10258,12 +10289,13 @@ document.addEventListener('change', function(e) {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + getAuthToken() },
       body: fd
-    }).then(function(r) { return r.json(); }).then(function() {
+    }).then(async function(r) {
+      var data; try { data = await r.json(); } catch (_) { data = {}; }
+      if (!r.ok) throw new Error(data.error || 'Upload failed');
       toast('Attachment uploaded');
-      api('/api/issues/' + S.drawerIssueId).then(function(issue) {
-        if (issue) renderDrawerAttachments(issue.attachments || []);
-      });
-    }).catch(function() { toast('Upload failed', 'error'); });
+      var issue = await api('/api/issues/' + S.drawerIssueId);
+      if (issue) renderDrawerAttachments(issue.attachments || []);
+    }).catch(function(e) { toast(friendlyFetchErrorMessage(e, 'Upload failed'), 'error'); });
     e.target.value = '';
   }
 });
@@ -11220,11 +11252,17 @@ function bindDrawerEdits(issue) {
     submitBtn.textContent = 'Posting...';
     var commentBody = body;
 
-    // Upload attached files to comment-specific endpoint
+    // Upload attached files to comment-specific endpoint. On failure the files
+    // are kept in _commentFiles (not cleared) so the user can just hit Comment
+    // again instead of re-picking or re-pasting them — and the button is reset
+    // and the whole submit is aborted here, rather than falling through to post
+    // a comment silently missing the attachment the user thought was included
+    // (or, for an image-only comment, posting nothing at all).
     if (_commentFiles.length) {
       var fd = new FormData();
       fd.append('issue_id', issueId);
       _commentFiles.forEach(function(f) { fd.append('files', f); });
+      var uploadFailed = false;
       try {
         toast('Uploading attachment…');
         var uploadRes = await fetch('/api/comments/upload', {
@@ -11235,6 +11273,7 @@ function bindDrawerEdits(issue) {
         var uploadData = await uploadRes.json().catch(function () { return {}; });
         if (!uploadRes.ok) {
           toast(uploadData.error || 'Attachment upload failed', 'error');
+          uploadFailed = true;
         } else if (uploadData.files && uploadData.files.length) {
           var fileRefs = uploadData.files.map(function(f) {
             var isImg = f.type && f.type.startsWith('image/');
@@ -11242,7 +11281,16 @@ function bindDrawerEdits(issue) {
           }).join('\n');
           commentBody = commentBody ? commentBody + '\n' + fileRefs : fileRefs;
         }
-      } catch(e) { toast('Attachment upload failed', 'error'); }
+      } catch(e) {
+        toast(friendlyFetchErrorMessage(e, 'Attachment upload failed'), 'error');
+        uploadFailed = true;
+      }
+      if (uploadFailed) {
+        submitBtn._submitting = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Comment';
+        return;
+      }
       _commentFiles = [];
       _renderCommentFileList();
     }
