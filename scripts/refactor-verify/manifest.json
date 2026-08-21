@@ -178,8 +178,43 @@
      "to": 14087
     },
     {
-     "file": "app.js",
+     "file": "src/client/crud/space.js",
      "from": 14088,
+     "to": 14257
+    },
+    {
+     "file": "src/client/crud/sprint.js",
+     "from": 14258,
+     "to": 14288
+    },
+    {
+     "file": "src/client/crud/issue.js",
+     "from": 14289,
+     "to": 14518
+    },
+    {
+     "file": "src/client/components/worklog-modal.js",
+     "from": 14519,
+     "to": 14566
+    },
+    {
+     "file": "src/client/components/notifications.js",
+     "from": 14567,
+     "to": 14788
+    },
+    {
+     "file": "src/client/event-bindings.js",
+     "from": 14789,
+     "to": 15335
+    },
+    {
+     "file": "src/client/pages/admin-settings.js",
+     "from": 15336,
+     "to": 16818
+    },
+    {
+     "file": "src/client/components/global-search.js",
+     "from": 16819,
      "to": 17295
     }
    ]
@@ -213,6 +248,14 @@
   },
   {
    "note": "TODO markers for moved dead code and for the mis-named section above are recorded HERE rather than as comments inside the files, because client parts must stay RAW byte-identical to their original lines -- inserting a comment would fail cat-diff [A]/[C]."
+  },
+  {
+   "file": "src/client/crud/space.js",
+   "range": "14088-14257",
+   "todo": "DEAD CODE: goBackToSavedPage (original app.js:1154-1187, now in src/client/components/modal-drawer.js) has zero callers anywhere in app.js or index.html besides its own window.goBackToSavedPage export. Verify before deleting. NOT deleted this pass."
+  },
+  {
+   "note": "app.js is fully consumed as of C7 and has been deleted. All 17,295 original lines live in the 42 src/client/* files listed in targets[0].parts."
   }
  ]
 }
