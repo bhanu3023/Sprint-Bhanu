@@ -130,7 +130,14 @@ function updateDrawerDescEditorState(editorId, originalHtml) {
   if (!el || !btns || !saveBtn) return;
   var changed = richTextHasMeaningfulChange(originalHtml || '', el.innerHTML);
   btns.style.display = 'flex';
-  saveBtn.disabled = !changed;
+  // Dimmed look only — never the native `disabled` attribute. A browser never
+  // dispatches click on a disabled button at all, so if this recompute (fired
+  // from onfocus/oninput/a blur-triggered auto-linkify pass) landed disabled=true
+  // in the same gesture as a click on Save, that click would be silently
+  // swallowed before the handler below ever ran — no error, no save, the only
+  // visible effect being the description losing focus. The click handler
+  // re-checks richTextHasMeaningfulChange itself, so it stays a correct no-op
+  // when there is truly nothing to save; it just can never be a SILENT one.
   saveBtn.style.opacity = changed ? '1' : '0.45';
   saveBtn.style.cursor = changed ? 'pointer' : 'not-allowed';
 }
@@ -348,6 +355,28 @@ function highlightMentionsInCommentBody(body) {
   return html;
 }
 
+// Renders a stored comment body for the EDIT box, as opposed to bodyHtml()'s
+// read-only render further down. A pasted screenshot becomes a plain <img> with
+// nothing after it to inherit a style from — bodyHtml()'s version wraps the
+// same image in a small-gray-text caption block meant for display only, and
+// pre-filling the edit box with that (as _editComment used to) left the caret
+// sitting right after that caption, so anything typed next came out in the
+// same small gray text.
+function commentBodyToEditableHtml(body) {
+  if (!body) return '';
+  if (/<[a-z][\s\S]*>/i.test(body)) {
+    return body.replace(/<script[\s\S]*?<\/script>/gi, '');
+  }
+  var html = highlightMentionsInCommentBody(body);
+  html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+    return '<img class="desc-inline-img" src="' + esc(fileApiUrl(url)) + '" alt="' + esc(fname) + '"><br>';
+  });
+  html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+    return '<a href="' + esc(fileApiUrl(url)) + '" target="_blank">' + esc(fname) + '</a>';
+  });
+  return html;
+}
+
 function fmtMins(mins) {
   if (!mins || mins <= 0) return '0h';
   const h = Math.floor(mins / 60);
@@ -477,7 +506,11 @@ function augmentFileUrlsInHtml(html) {
   if (!html || html.indexOf('/api/files/') === -1) return html;
   var t = getAuthToken();
   if (!t) return html;
-  return html.replace(/\/api\/files\/([^"'\s?]+)/g, function (_m, id) {
+  // Consumes an existing "?t=..." (if any) instead of just stopping before it,
+  // so a description saved with a stale token already baked in — see the
+  // drawer description/fix-description save handlers — gets a single fresh
+  // token here rather than a second one appended after the old one.
+  return html.replace(/\/api\/files\/([^"'\s?]+)(?:\?t=[^"'\s&]+)?/g, function (_m, id) {
     return '/api/files/' + id + '?t=' + encodeURIComponent(t);
   });
 }
@@ -485,6 +518,21 @@ function augmentFileUrlsInHtml(html) {
 function stripFileAuthTokensFromHtml(html) {
   if (!html || html.indexOf('/api/files/') === -1) return html;
   return html.replace(/\/api\/files\/([^"'\s?]+)\?t=[^"'\s&]+/g, '/api/files/$1');
+}
+
+// fetch() only throws a TypeError when the request never got an HTTP response at
+// all — offline, DNS failure, connection reset, CORS block, an upload larger than
+// a reverse proxy will accept. Its message ("Failed to fetch", "NetworkError when
+// attempting to fetch resource.", Safari's "Load failed") is a browser-internal
+// string, not something written for a user to read — surfacing it verbatim in a
+// toast looks like a broken error message even though it correctly identifies a
+// connectivity problem. Anything that reached the server and came back as a JSON
+// {error: "..."} is unaffected by this and keeps its own real message.
+function friendlyFetchErrorMessage(e, fallback) {
+  if (e instanceof TypeError) {
+    return 'Could not reach the server — check your connection and try again.';
+  }
+  return (e && e.message) || fallback || 'Something went wrong';
 }
 
 async function api(url, method, body, opts) {
@@ -496,7 +544,12 @@ async function api(url, method, body, opts) {
     if (token) headers['Authorization'] = 'Bearer ' + token;
     var fetchOpts = { method: method, headers: headers };
     if (body !== undefined && body !== null) fetchOpts.body = JSON.stringify(body);
-    var res = await fetch(url, fetchOpts);
+    var res;
+    try {
+      res = await fetch(url, fetchOpts);
+    } catch (networkErr) {
+      throw new Error(friendlyFetchErrorMessage(networkErr, 'API request failed'));
+    }
     if (res.status === 401) {
       localStorage.removeItem('sb-token');
       localStorage.removeItem('sb-user');
@@ -795,6 +848,55 @@ function toast(msg, type) {
   c.appendChild(el);
   setTimeout(function () { el.classList.add('toast-fade'); }, 3000);
   setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 3600);
+}
+
+// A toast that offers one or more follow-up actions instead of just a message —
+// e.g. "PTM-9 created" with buttons to open it or copy its link, for the case
+// where auto-navigating away would be disruptive (a ticket is already open).
+// Stays up longer than a plain toast and only auto-dismisses if nothing was
+// clicked, since deciding takes a moment longer than reading a status line.
+// buttons: [{ label, handler, dismissOnClick }] — dismissOnClick defaults true.
+function toastWithButtons(msg, buttons, type) {
+  type = type || 'success';
+  var c = $('toastContainer');
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type + ' toast-with-actions';
+  var icon = type === 'error' ? '✕' : type === 'warning' ? '⚠️' : '✓';
+  el.innerHTML = '<span class="toast-icon">' + icon + '</span><span class="toast-msg">' + esc(msg) + '</span>';
+
+  var timers = [];
+  function dismiss() {
+    timers.forEach(clearTimeout);
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  var actionsWrap = document.createElement('div');
+  actionsWrap.className = 'toast-actions';
+  (buttons || []).forEach(function (b) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action-btn';
+    btn.textContent = b.label;
+    btn.onclick = function () {
+      if (b.handler) b.handler();
+      if (b.dismissOnClick !== false) dismiss();
+    };
+    actionsWrap.appendChild(btn);
+  });
+  el.appendChild(actionsWrap);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'toast-close-btn';
+  closeBtn.setAttribute('aria-label', 'Dismiss');
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = dismiss;
+  el.appendChild(closeBtn);
+
+  c.appendChild(el);
+  timers.push(setTimeout(function () { el.classList.add('toast-fade'); }, 8000));
+  timers.push(setTimeout(dismiss, 8600));
+  return el;
 }
 
 function popupAlert(title, msg, type) {
@@ -1847,7 +1949,6 @@ var SPACE_TAB_TO_SLUG = {
   reports: 'reports',
   mbr: 'mbr',
   allwork: 'all-work',
-  filters: 'filters',
   calendar: 'calendar',
   'space-settings': 'settings'
 };
@@ -1858,17 +1959,15 @@ var SPACE_SLUG_TO_TAB = {
   reports: 'reports',
   mbr: 'mbr',
   'all-work': 'allwork',
-  filters: 'filters',
   calendar: 'calendar',
   settings: 'space-settings'
 };
 
 var SPACE_SUBNAV_ITEMS = [
   { t: 'summary', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>', l: 'Summary' },
-  { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog' },
+  { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog & Sprints' },
   { t: 'sprint', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', l: 'Active Sprint' },
   { t: 'allwork', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'All Work' },
-  { t: 'filters', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>', l: 'Saved Filters' },
   { t: 'calendar', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', l: 'Calendar' },
   { t: 'reports', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>', l: 'Reports', spaceAdminOnly: true },
   { t: 'mbr', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>', l: 'MBR', spaceAdminOnly: true },
@@ -2223,7 +2322,6 @@ function renderTab(tab, opts) {
       await _initAwMultiSelects();
       renderAllWork();
     })(); break;
-    case 'filters': renderFilters(); break;
     case 'calendar': renderCalendar(); break;
     case 'space-settings': renderSpaceSettings(); break;
   }
@@ -5061,10 +5159,22 @@ function renderBacklog() {
   // drag from it into the next sprint — whereas completed sprints are history
   // and were pushing the backlog further down the page with every sprint.
   function lanesFor(status) {
-    return sprints
-      .filter(function (sp) { return sp.status === status; })
-      .sort(function (a, b) { return (a.position || 0) - (b.position || 0); })
-      .map(sprintLaneHtml).join('');
+    var list = sprints.filter(function (sp) { return sp.status === status; });
+    if (status === 'completed') {
+      // Most-recently-completed first (sprint 3, sprint 2, sprint 1, ...) rather
+      // than the planning-order position, which would show the OLDEST completed
+      // sprint on top — the opposite of what you want once a sprint is history.
+      // completed_at is the real completion moment (set by completeSprint, not
+      // touched by the sweeper's read of end_date); end_date/created_at are
+      // just fallbacks for a sprint completed before that column existed.
+      var completionTime = function (sp) {
+        return new Date(sp.completed_at || sp.end_date || sp.created_at || 0).getTime();
+      };
+      list.sort(function (a, b) { return completionTime(b) - completionTime(a); });
+    } else {
+      list.sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+    }
+    return list.map(sprintLaneHtml).join('');
   }
   // Any sprint with an unexpected status still renders, just above the backlog,
   // rather than silently disappearing from the page.
@@ -5174,6 +5284,12 @@ window._dropToSprint = async function (event, sprintId) {
   if (!issueId) return;
   var targetSprintId = lane.getAttribute('data-sprint-drop');
   if (targetSprintId === 'null') targetSprintId = null;
+  // Dropped back into the lane it already belongs to — nothing actually
+  // changed, so skip the API call and the "Issue moved" toast entirely.
+  var draggedIssue = (S.data.issues || []).find(function (i) { return i.id === issueId; });
+  if (draggedIssue && String(draggedIssue.sprint_id || '') === String(targetSprintId || '')) {
+    return;
+  }
   // Belt-and-braces: completed lanes render without drop handlers, but guard here
   // too so no other path can drop a ticket into closed sprint history.
   if (isSprintClosed(targetSprintId)) {
@@ -8473,38 +8589,19 @@ function renderAllWork(opts) {
     return '<th class="sortable-th" data-sort-col="' + c + '">' + label + sortIcon(c) + '</th>';
   };
 
-  var hasSelected = S.allWorkSelected.size > 0;
+  // Only an admin/site_admin of this space may select tickets and bulk-delete
+  // (mirrors canDeleteIssue / the backend's ACTION_MIN_ROLE for issue.bulk).
+  // A regular member gets no checkbox column at all -- there is nothing for
+  // them to select, so an empty checkbox column would just be UI noise.
+  var canBulkDelete = canDeleteIssue(S.currentSpace);
+  var hasSelected = canBulkDelete && S.allWorkSelected.size > 0;
   var html = '';
 
-  if (hasSelected) {
-    // Build assignee options from space members
-    var memberOpts = '<option value="">Assignee\u2026</option>';
-    var spaceMembers = getSpaceMembers(S.currentSpace);
-    if (!spaceMembers.length) spaceMembers = S.data.users || [];
-    spaceMembers.forEach(function(u) { memberOpts += '<option value="' + u.id + '">' + esc(u.name) + '</option>'; });
-
-    // Build sprint options
-    var sprintOpts = '<option value="">Sprint\u2026</option><option value="__none__">None (Backlog)</option>';
-    (S.data.sprints || []).filter(function(sp){ return sp.space_id == S.currentSpace; }).forEach(function(sp) {
-      sprintOpts += '<option value="' + sp.id + '">' + esc(sp.name) + '</option>';
-    });
-
-    html += '<div class="bulk-bar">' +
-      '<span class="bulk-count">' + S.allWorkSelected.size + ' issue' + (S.allWorkSelected.size > 1 ? 's' : '') + ' selected</span>' +
-      '<div class="bulk-actions">' +
-      '<select id="bulkStatusChange" class="input input-sm" title="Change status"><option value="">Status\u2026</option>' +
-        '<option value="To Do">To Do</option><option value="In Progress">In Progress</option>' +
-        '<option value="In Review">In Review</option><option value="Done">Done</option>' +
-        '<option value="Blocked">Blocked</option></select>' +
-      '<select id="bulkPriorityChange" class="input input-sm" title="Change priority"><option value="">Priority\u2026</option>' +
-        '<option value="critical">Critical</option><option value="high">High</option>' +
-        '<option value="medium">Medium</option><option value="low">Low</option></select>' +
-      '<select id="bulkAssigneeChange" class="input input-sm" title="Change assignee">' + memberOpts + '</select>' +
-      '<select id="bulkSprintChange" class="input input-sm" title="Move to sprint">' + sprintOpts + '</select>' +
-      '<button class="btn btn-sm btn-danger" onclick="window._bulkDelete()">🗑 Delete</button>' +
-      '</div>' +
-      '<button class="btn btn-sm btn-ghost bulk-deselect" onclick="window._bulkDeselect()" title="Clear selection">✕</button>' +
-      '</div>';
+  var bulkWrap = $('awBulkDeleteWrap');
+  if (bulkWrap) {
+    bulkWrap.style.display = hasSelected ? 'flex' : 'none';
+    var bulkCountEl = $('awBulkDeleteCount');
+    if (bulkCountEl) bulkCountEl.textContent = S.allWorkSelected.size + ' selected';
   }
 
   var visCols = _awGetVisibleCols();
@@ -8514,7 +8611,7 @@ function renderAllWork(opts) {
   var pagedIssues = issues.slice(0, PAGE_SIZE * (S.allWorkPage || 1));
 
   html += '<table class="data-table" style="min-width:1200px;width:100%"><thead><tr>' +
-    '<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>' +
+    (canBulkDelete ? ('<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>') : '') +
     visCols.map(function(col) {
       return col.sortCol
         ? th(col.label, col.sortCol)
@@ -8531,7 +8628,7 @@ function renderAllWork(opts) {
     var iid = iss.id;
     var nav = 'openIssuePage(\'' + iid + '\')';
     html += '<tr class="clickable-row" onclick="' + nav + '">' +
-      '<td onclick="event.stopPropagation()"><input type="checkbox" data-issue-check="' + iid + '"' + checked + '></td>' +
+      (canBulkDelete ? ('<td onclick="event.stopPropagation()"><input type="checkbox" data-issue-check="' + iid + '"' + checked + '></td>') : '') +
       visCols.map(function(col) {
         var cell = '';
         switch(col.key) {
@@ -8619,28 +8716,6 @@ function renderAllWork(opts) {
     };
   });
 
-  // Generic bulk field change handler
-  async function doBulkUpdate(field, value) {
-    if (!value) return;
-    var ids = Array.from(S.allWorkSelected);
-    var updates = {};
-    if (field === 'sprint_id') updates.sprint_id = value === '__none__' ? null : value;
-    else updates[field] = value;
-    await api('/api/issues/bulk', 'POST', { ids: ids, updates: updates });
-    S.allWorkSelected.clear();
-    await refreshData();
-    renderAllWork();
-    toast('Updated ' + ids.length + ' issue' + (ids.length > 1 ? 's' : ''));
-  }
-
-  var bulkStatus   = $('bulkStatusChange');
-  var bulkPriority = $('bulkPriorityChange');
-  var bulkAssignee = $('bulkAssigneeChange');
-  var bulkSprint   = $('bulkSprintChange');
-  if (bulkStatus)   bulkStatus.onchange   = function() { doBulkUpdate('status',      bulkStatus.value); };
-  if (bulkPriority) bulkPriority.onchange = function() { doBulkUpdate('priority',    bulkPriority.value); };
-  if (bulkAssignee) bulkAssignee.onchange = function() { doBulkUpdate('assignee_id', bulkAssignee.value); };
-  if (bulkSprint)   bulkSprint.onchange   = function() { doBulkUpdate('sprint_id',   bulkSprint.value); };
 }
 
 window._bulkDelete = async function () {
@@ -8690,105 +8765,6 @@ window._bulkDeselect = function() {
   S.allWorkSelected.clear();
   renderAllWork();
 };
-
-// ═══════════════════════════════════════════════════════════
-// FILTERS TAB
-// ═══════════════════════════════════════════════════════════
-function renderFilters() {
-  var filters = (S.data.saved_filters || []).filter(function (f) {
-    return f.space_id == S.currentSpace || f.user_id == S.currentUser;
-  });
-
-  if (!filters.length) {
-    $('filtersList').innerHTML = '<p class="placeholder-text">No saved filters. Create one to save your search criteria.</p>';
-    return;
-  }
-
-  var html = '';
-  for (var i = 0; i < filters.length; i++) {
-    var f = filters[i];
-    var conditions = [];
-    try {
-      conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-    } catch (e) { conditions = []; }
-    var condPreview = conditions.length
-      ? conditions.map(function (c) { return c.field + ' ' + c.operator + ' ' + c.value; }).join(', ')
-      : 'No conditions';
-
-    html += '<div class="filter-card">' +
-      '<div class="filter-card-header"><h4>' + esc(f.name) + '</h4><div class="filter-card-badges">' +
-      (f.is_shared ? '<span class="badge badge-muted">Shared</span>' : '') +
-      (f.is_pinned ? '<span class="badge badge-muted">Pinned</span>' : '') +
-      '</div></div>' +
-      '<p class="text-muted">' + esc(condPreview) + '</p>' +
-      '<div class="filter-card-actions">' +
-      '<button class="btn btn-sm btn-outline" onclick="window._applyFilter(\'' + f.id + '\')">Apply</button>' +
-      '<button class="btn btn-sm btn-outline" onclick="window._editFilter(\'' + f.id + '\')">Edit</button>' +
-      '<button class="btn btn-sm btn-outline" onclick="window._deleteFilter(\'' + f.id + '\')">Delete</button>' +
-      '</div></div>';
-  }
-  $('filtersList').innerHTML = html;
-}
-
-window._applyFilter = function (filterId) {
-  var f = (S.data.saved_filters || []).find(function (x) { return x.id == filterId; });
-  if (!f) return;
-  renderTab('allwork');
-  try {
-    var conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-    if (conditions.length && conditions[0].value) {
-      $('allWorkSearch').value = conditions[0].value;
-      renderAllWork();
-    }
-  } catch (e) { /* ignore parse errors */ }
-};
-
-window._editFilter = function (filterId) {
-  var f = (S.data.saved_filters || []).find(function (x) { return x.id == filterId; });
-  if (!f) return;
-  $('filterId').value = f.id;
-  $('filterSpaceId').value = f.space_id || S.currentSpace;
-  $('filterNameInput').value = f.name || '';
-  $('filterShared').checked = !!f.is_shared;
-  $('filterPinned').checked = !!f.is_pinned;
-  $('filterModalTitle').textContent = 'Edit Filter';
-  var conditions = [];
-  try {
-    conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-  } catch (e) { /* ignore */ }
-  renderFilterConditions(conditions);
-  openModal('modal-filter');
-};
-
-window._deleteFilter = async function (filterId) {
-  var ok = await confirmDialog('Delete this filter?');
-  if (!ok) return;
-  await api('/api/filters/' + filterId, 'DELETE');
-  await refreshData();
-  renderFilters();
-  toast('Filter deleted');
-};
-
-function renderFilterConditions(conditions) {
-  var c = $('filterConditions');
-  var html = '';
-  for (var i = 0; i < conditions.length; i++) {
-    var cond = conditions[i];
-    html += '<div class="filter-condition-row" data-cond-idx="' + i + '">' +
-      '<select class="input input-sm fc-field">' +
-      '<option value="status"' + (cond.field === 'status' ? ' selected' : '') + '>Status</option>' +
-      '<option value="priority"' + (cond.field === 'priority' ? ' selected' : '') + '>Priority</option>' +
-      '<option value="type"' + (cond.field === 'type' ? ' selected' : '') + '>Type</option>' +
-      '<option value="assignee_id"' + (cond.field === 'assignee_id' ? ' selected' : '') + '>Assignee</option></select>' +
-      '<select class="input input-sm fc-op">' +
-      '<option value="equals"' + (cond.operator === 'equals' ? ' selected' : '') + '>equals</option>' +
-      '<option value="not_equals"' + (cond.operator === 'not_equals' ? ' selected' : '') + '>not equals</option>' +
-      '<option value="contains"' + (cond.operator === 'contains' ? ' selected' : '') + '>contains</option></select>' +
-      '<input type="text" class="input input-sm fc-value" value="' + esc(cond.value || '') + '">' +
-      '<button type="button" class="btn btn-sm btn-outline" onclick="this.closest(\'.filter-condition-row\').remove()">x</button></div>';
-  }
-  c.innerHTML = html;
-}
 
 // ═══════════════════════════════════════════════════════════
 // SPACE SETTINGS TAB (with sub-tabs: General, People, Custom Fields)
@@ -9997,11 +9973,16 @@ function addDescInlineImageChip(tray, url, alt, fp) {
 async function uploadDescImageFile(file) {
   var fd = new FormData();
   fd.append('files', file, file.name || 'screenshot.png');
-  var res = await fetch('/api/comments/upload', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + getAuthToken() },
-    body: fd
-  });
+  var res;
+  try {
+    res = await fetch('/api/comments/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + getAuthToken() },
+      body: fd
+    });
+  } catch (networkErr) {
+    throw new Error(friendlyFetchErrorMessage(networkErr, 'Upload failed'));
+  }
   if (!res.ok) {
     var err = 'Upload failed';
     try { var j = await res.json(); if (j.error) err = j.error; } catch (_) {}
@@ -10087,13 +10068,14 @@ function normalizeDescInlineImages(editorEl) {
   }
 }
 
-async function handleDescImagePaste(editorEl, file) {
+async function handleDescImagePaste(editorEl, file, fieldLabel) {
+  fieldLabel = fieldLabel || 'description';
   if (!editorEl || !file) return;
   var fp = _fileFingerprint(file);
   var already = editorEl.querySelectorAll('.desc-inline-img[data-fp]');
   for (var i = 0; i < already.length; i++) {
     if (already[i].getAttribute('data-fp') === fp) {
-      toast('This screenshot is already in the description', 'warning');
+      toast('This screenshot is already in the ' + fieldLabel, 'warning');
       return;
     }
   }
@@ -10101,7 +10083,7 @@ async function handleDescImagePaste(editorEl, file) {
     var uploaded = await uploadDescImageFile(file);
     insertDescImageAtCaret(editorEl, uploaded.url, file.name || 'Screenshot', fp);
     if (editorEl.id === 'drawerDesc' || editorEl.id === 'drawerFixDesc') markDrawerDescDirty(editorEl.id);
-    toast('Screenshot added to description', 'success');
+    toast('Screenshot added to ' + fieldLabel, 'success');
   } catch (e) {
     toast(e.message || 'Could not upload screenshot', 'error');
   }
@@ -10299,12 +10281,13 @@ document.addEventListener('change', function(e) {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + getAuthToken() },
       body: fd
-    }).then(function(r) { return r.json(); }).then(function() {
+    }).then(async function(r) {
+      var data; try { data = await r.json(); } catch (_) { data = {}; }
+      if (!r.ok) throw new Error(data.error || 'Upload failed');
       toast('Attachment uploaded');
-      api('/api/issues/' + S.drawerIssueId).then(function(issue) {
-        if (issue) renderDrawerAttachments(issue.attachments || []);
-      });
-    }).catch(function() { toast('Upload failed', 'error'); });
+      var issue = await api('/api/issues/' + S.drawerIssueId);
+      if (issue) renderDrawerAttachments(issue.attachments || []);
+    }).catch(function(e) { toast(friendlyFetchErrorMessage(e, 'Upload failed'), 'error'); });
     e.target.value = '';
   }
 });
@@ -10743,6 +10726,263 @@ window.openDrawer = openDrawer;
 // first ticket ever opened. See bindDrawerTitleField.
 var _activeDrawerAutoSave = null;
 
+// ── @mention autocomplete ──────────────────────────────────
+// Parameterized on `el` (rather than closing over one hardcoded element) so it
+// can bind to both the comment-compose box (drawerCommentInput) AND each
+// dynamically-created comment EDIT box (edit-rich-<id>) -- previously this was
+// wired to drawerCommentInput only, so typing "@" while editing an existing
+// comment silently did nothing; there was no autocomplete listening on that
+// element at all. Guarded per-element the same way the original was guarded
+// per-drawer-open, since an edit box's DOM node persists (just hidden) across
+// repeated Edit/Cancel clicks on the same comment without a full re-render.
+function bindMentionAutocomplete(el) {
+  if (!el || el._mentionBound) return;
+  el._mentionBound = true;
+  var dropdown = $('mentionDropdown');
+  var activeMentionCharIdx = -1;
+
+  function getMembers() {
+    return window._drawerMembers || S.data.users || [];
+  }
+
+  function closeMention() {
+    dropdown.style.display = 'none';
+    activeMentionCharIdx = -1;
+  }
+
+  // #mentionDropdown is one shared element, sitting in the markup right after
+  // drawerCommentInput. That was harmless when only drawerCommentInput ever
+  // opened it, but a comment EDIT box lives elsewhere in the activity list --
+  // anchoring the dropdown with a plain `top` offset (relative to whatever
+  // ancestor happens to be positioned) would show it pinned near the compose
+  // box instead of under whichever editor is actually active. Same fix as
+  // positionComboDropdown/positionCFDropdown elsewhere in this file: switch to
+  // position:fixed and place it from el's own live viewport coordinates.
+  function positionMentionDropdown() {
+    dropdown._activeEl = el;
+    var elRect = el.getBoundingClientRect();
+    // Anchor on the CARET, not el's own bottom edge. el.getBoundingClientRect()
+    // covers the whole editor box -- fine for a short single-line compose box,
+    // where "bottom of the box" and "bottom of the visible content" are the
+    // same thing. An edit box with an embedded image (or just a few lines of
+    // text) is much taller, so its bottom edge can sit far below the caret --
+    // even off the bottom of the viewport entirely -- which is exactly why
+    // typing "@" while editing an existing comment looked like nothing
+    // happened: the dropdown WAS opening, just positioned off-screen.
+    var rect = elRect;
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      var caretRects = sel.getRangeAt(0).cloneRange().getClientRects();
+      if (caretRects && caretRects.length) rect = caretRects[caretRects.length - 1];
+    }
+    dropdown.style.position = 'fixed';
+    dropdown.style.left = elRect.left + 'px';
+    dropdown.style.width = elRect.width + 'px';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.right = 'auto';
+  }
+
+  // Keeps the dropdown glued to el while its scroll container moves (the
+  // activity list, a modal body, etc.) -- position:fixed coordinates are only
+  // ever right at the instant they're set otherwise. dropdown._activeEl guards
+  // this so only the element that's actually open right now repositions it;
+  // this listener is added once per el thanks to the _mentionBound guard above.
+  document.addEventListener('scroll', function () {
+    if (dropdown._activeEl === el && dropdown.style.display !== 'none') positionMentionDropdown();
+  }, { passive: true, capture: true });
+
+  // Returns all text before the caret inside a contenteditable element
+  function getTextBeforeCaret(node) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return '';
+    var r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(node);
+    r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+    return r.toString();
+  }
+
+  function insertMentionAtCaret(name, userId) {
+    // e.preventDefault() on mousedown keeps focus so caret is still valid
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+
+    var caretRange = sel.getRangeAt(0);
+    var endNode = caretRange.endContainer;
+    var endOffset = caretRange.endOffset;
+
+    // Find the @ in the current text node (most common case)
+    var atPos = -1;
+    var atNode = null;
+    if (endNode.nodeType === 3) {
+      var textUpToCaret = endNode.textContent.substring(0, endOffset);
+      var idx = textUpToCaret.lastIndexOf('@');
+      if (idx !== -1) {
+        atPos = idx;
+        atNode = endNode;
+      }
+    }
+
+    // If @ wasn't found in the same text node, walk backwards
+    if (atNode === null) {
+      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+      var nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      // build full text before caret
+      var fullText = getTextBeforeCaret(el);
+      var atIdx2 = activeMentionCharIdx;
+      if (atIdx2 < 0) {
+        var active = findActiveMentionAt(fullText);
+        if (!active) return;
+        atIdx2 = active.atIdx;
+      }
+      // count chars to find the node containing @
+      var charCount = 0;
+      for (var ni = 0; ni < nodes.length; ni++) {
+        var nodeLen = nodes[ni] === endNode ? endOffset : nodes[ni].textContent.length;
+        if (charCount + nodeLen > atIdx2) {
+          atNode = nodes[ni];
+          atPos = atIdx2 - charCount;
+          break;
+        }
+        charCount += nodeLen;
+      }
+    }
+
+    if (!atNode) return;
+
+    // Select from @ to current caret position and delete it
+    var delRange = document.createRange();
+    delRange.setStart(atNode, atPos);
+    if (atNode === endNode) {
+      delRange.setEnd(endNode, endOffset);
+    } else {
+      delRange.setEnd(endNode, endOffset);
+    }
+    sel.removeAllRanges();
+    sel.addRange(delRange);
+    document.execCommand('delete', false, null);
+
+    // Insert mention chip + non-breaking space
+    var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
+    document.execCommand('insertHTML', false, chip);
+  }
+
+  function showMention(query) {
+    var members = getMembers().filter(function(m) {
+      return !query || m.name.toLowerCase().indexOf(query.toLowerCase()) !== -1;
+    });
+    if (!members.length) { closeMention(); return; }
+
+    positionMentionDropdown();
+    dropdown.style.display = 'block';
+    dropdown.innerHTML = members.map(function(m) {
+      return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
+        'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
+        'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
+        '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
+        initials(m.name) + '</div>' +
+        '<div><div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
+        (m.email ? '<div style="font-size:11px;color:var(--text2)">' + esc(m.email) + '</div>' : '') +
+        '</div></div>';
+    }).join('');
+
+    dropdown.querySelectorAll('.mention-item').forEach(function(item) {
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault(); // keeps focus in el so selection is intact
+        var name = item.dataset.name;
+        var id = item.dataset.id;
+        if (el.contentEditable === 'true') {
+          insertMentionAtCaret(name, id);
+        } else {
+          var val = el.value;
+          var before = val.substring(0, activeMentionCharIdx);
+          var after = val.substring(el.selectionStart);
+          el.value = before + '@' + name + ' ' + after;
+          var pos = activeMentionCharIdx + name.length + 2;
+          el.setSelectionRange(pos, pos);
+          el.focus();
+        }
+        closeMention();
+        activeMentionCharIdx = -1;
+      });
+    });
+  }
+
+  el.addEventListener('input', function() {
+    var isContentEditable = el.contentEditable === 'true';
+    var textBefore;
+    if (isContentEditable) {
+      textBefore = getTextBeforeCaret(el);
+    } else {
+      textBefore = el.value.substring(0, el.selectionStart);
+    }
+    var active = findActiveMentionAt(textBefore);
+    if (!active) { closeMention(); return; }
+    activeMentionCharIdx = active.atIdx;
+    showMention(active.query);
+  });
+
+  el.addEventListener('keydown', function(e) {
+    if (dropdown.style.display === 'none') return;
+    var items = dropdown.querySelectorAll('.mention-item');
+    var active = dropdown.querySelector('.mention-item.focused');
+    var idx = Array.prototype.indexOf.call(items, active);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (active) active.classList.remove('focused');
+      var next = items[idx + 1] || items[0];
+      next.classList.add('focused');
+      next.style.background = 'var(--bg3)';
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (active) active.classList.remove('focused');
+      var prev = items[idx - 1] || items[items.length - 1];
+      prev.classList.add('focused');
+      prev.style.background = 'var(--bg3)';
+    } else if (e.key === 'Enter' && active) {
+      e.preventDefault();
+      active.click();
+    } else if (e.key === 'Escape') {
+      closeMention();
+    }
+  });
+
+  // Guarded per-element for the same reason as the handlers above.
+  if (!el._mentionOutsideBound) {
+    el._mentionOutsideBound = true;
+    document.addEventListener('click', function(e) {
+      if (!dropdown.contains(e.target) && e.target !== el) closeMention();
+    });
+  }
+}
+
+// A comment EDIT box (edit-rich-<id>) had no image-paste handling at all --
+// unlike the compose box's own _commentFiles flow, or the description
+// editors' document-level delegated listener (which only covers the static
+// DESC_EDITOR_IDS list, not a dynamically-created id like this one). Pasting
+// a screenshot there fell through to the browser's raw default paste,
+// inserting an unbounded base64 data: URI directly into the comment body
+// instead of uploading it. Routes through the exact same handleDescImagePaste
+// the description fields use -- it already uploads via /api/comments/upload,
+// which comments and descriptions share.
+function bindCommentEditImagePaste(el) {
+  if (!el || el._commentEditPasteBound) return;
+  el._commentEditPasteBound = true;
+  el.addEventListener('paste', function (e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items || !items.length) return;
+    var imageFiles = _dedupePasteFiles(items).filter(function (f) { return f.type && f.type.indexOf('image/') === 0; });
+    if (!imageFiles.length) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (el._pasteBusy) return;
+    el._pasteBusy = true;
+    handleDescImagePaste(el, imageFiles[0], 'comment').finally(function () {
+      setTimeout(function () { el._pasteBusy = false; }, 500);
+    });
+  });
+}
+
 function bindDrawerEdits(issue) {
   var issueId = issue.id;
   var pending = {};
@@ -10970,7 +11210,17 @@ function bindDrawerEdits(issue) {
           if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
         } catch(ex) { console.error('img upload failed', ex); }
       }
-      await saveFieldNow('description', descEl.innerHTML.trim());
+      // descEl.innerHTML still carries the LIVE session token baked into every
+      // desc-inline-img src (fileApiUrl() puts it there so the image is visible
+      // while editing) — stripping it here mirrors getDescriptionHtmlForSave(),
+      // which the Create Issue path already uses. Without this, the stored
+      // description keeps today's token forever; augmentFileUrlsInHtml() then
+      // appends a SECOND ?t=... on every later render (its regex stops at the
+      // first "?", so it can't tell the URL already has one), producing a
+      // malformed src that always 401s — the exact "screenshot goes broken
+      // after saving" bug, and re-pasting the same image then reports it as
+      // already attached because the broken <img> is still sitting in the DOM.
+      await saveFieldNow('description', stripFileAuthTokensFromHtml(descEl.innerHTML.trim()));
       _drawerDescOriginal = descEl.innerHTML;
       window._drawerDescOriginalHtml = _drawerDescOriginal;
       var b = $('drawerDescBtns'); if(b) b.style.display='none';
@@ -11005,7 +11255,8 @@ function bindDrawerEdits(issue) {
     fixSaveBtn.disabled = true;
     fixSaveBtn.textContent = 'Saving...';
     try {
-      await saveFieldNow('fix_description', fixEl.innerHTML.trim());
+      // Same token-stripping fix as the description save above.
+      await saveFieldNow('fix_description', stripFileAuthTokensFromHtml(fixEl.innerHTML.trim()));
       _drawerFixDescOriginal = fixEl.innerHTML;
       window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
       var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
@@ -11028,191 +11279,7 @@ function bindDrawerEdits(issue) {
   // Expose pending to the global save handler (fallback)
   window._drawerPending = pending;
 
-  // ── @mention autocomplete ─────────────────────────────────
-  (function() {
-    var textarea = $('drawerCommentInput');
-    // Bind once — this block previously re-ran on every drawer open, stacking
-    // duplicate 'input'/'keydown'/'click' listeners on the same persistent element.
-    if (!textarea || textarea._mentionBound) return;
-    textarea._mentionBound = true;
-    var dropdown = $('mentionDropdown');
-    var activeMentionCharIdx = -1;
-
-    function getMembers() {
-      return window._drawerMembers || S.data.users || [];
-    }
-
-    function closeMention() {
-      dropdown.style.display = 'none';
-      activeMentionCharIdx = -1;
-    }
-
-    // Returns all text before the caret inside a contenteditable element
-    function getTextBeforeCaret(el) {
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return '';
-      var r = sel.getRangeAt(0).cloneRange();
-      r.selectNodeContents(el);
-      r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
-      return r.toString();
-    }
-
-    function insertMentionAtCaret(name, userId) {
-      // e.preventDefault() on mousedown keeps focus so caret is still valid
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return;
-
-      var caretRange = sel.getRangeAt(0);
-      var endNode = caretRange.endContainer;
-      var endOffset = caretRange.endOffset;
-
-      // Find the @ in the current text node (most common case)
-      var atPos = -1;
-      var atNode = null;
-      if (endNode.nodeType === 3) {
-        var textUpToCaret = endNode.textContent.substring(0, endOffset);
-        var idx = textUpToCaret.lastIndexOf('@');
-        if (idx !== -1) {
-          atPos = idx;
-          atNode = endNode;
-        }
-      }
-
-      // If @ wasn't found in the same text node, walk backwards
-      if (atNode === null) {
-        var walker = document.createTreeWalker(textarea, NodeFilter.SHOW_TEXT, null, false);
-        var nodes = [];
-        while (walker.nextNode()) nodes.push(walker.currentNode);
-        // build full text before caret
-        var fullText = getTextBeforeCaret(textarea);
-        var atIdx2 = activeMentionCharIdx;
-        if (atIdx2 < 0) {
-          var active = findActiveMentionAt(fullText);
-          if (!active) return;
-          atIdx2 = active.atIdx;
-        }
-        // count chars to find the node containing @
-        var charCount = 0;
-        for (var ni = 0; ni < nodes.length; ni++) {
-          var nodeLen = nodes[ni] === endNode ? endOffset : nodes[ni].textContent.length;
-          if (charCount + nodeLen > atIdx2) {
-            atNode = nodes[ni];
-            atPos = atIdx2 - charCount;
-            break;
-          }
-          charCount += nodeLen;
-        }
-      }
-
-      if (!atNode) return;
-
-      // Select from @ to current caret position and delete it
-      var delRange = document.createRange();
-      delRange.setStart(atNode, atPos);
-      if (atNode === endNode) {
-        delRange.setEnd(endNode, endOffset);
-      } else {
-        delRange.setEnd(endNode, endOffset);
-      }
-      sel.removeAllRanges();
-      sel.addRange(delRange);
-      document.execCommand('delete', false, null);
-
-      // Insert mention chip + non-breaking space
-      var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
-      document.execCommand('insertHTML', false, chip);
-    }
-
-    function showMention(query) {
-      var members = getMembers().filter(function(m) {
-        return !query || m.name.toLowerCase().indexOf(query.toLowerCase()) !== -1;
-      });
-      if (!members.length) { closeMention(); return; }
-
-      dropdown.style.top = (textarea.offsetHeight + 2) + 'px';
-      dropdown.style.display = 'block';
-      dropdown.innerHTML = members.map(function(m) {
-        return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
-          'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
-          'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
-          '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
-          initials(m.name) + '</div>' +
-          '<div><div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
-          (m.email ? '<div style="font-size:11px;color:var(--text2)">' + esc(m.email) + '</div>' : '') +
-          '</div></div>';
-      }).join('');
-
-      dropdown.querySelectorAll('.mention-item').forEach(function(item) {
-        item.addEventListener('mousedown', function(e) {
-          e.preventDefault(); // keeps focus in textarea so selection is intact
-          var name = item.dataset.name;
-          var id = item.dataset.id;
-          if (textarea.contentEditable === 'true') {
-            insertMentionAtCaret(name, id);
-          } else {
-            var val = textarea.value;
-            var before = val.substring(0, activeMentionCharIdx);
-            var after = val.substring(textarea.selectionStart);
-            textarea.value = before + '@' + name + ' ' + after;
-            var pos = activeMentionCharIdx + name.length + 2;
-            textarea.setSelectionRange(pos, pos);
-            textarea.focus();
-          }
-          closeMention();
-          activeMentionCharIdx = -1;
-        });
-      });
-    }
-
-    textarea.addEventListener('input', function() {
-      var isContentEditable = textarea.contentEditable === 'true';
-      var textBefore;
-      if (isContentEditable) {
-        textBefore = getTextBeforeCaret(textarea);
-      } else {
-        textBefore = textarea.value.substring(0, textarea.selectionStart);
-      }
-      var active = findActiveMentionAt(textBefore);
-      if (!active) { closeMention(); return; }
-      activeMentionCharIdx = active.atIdx;
-      showMention(active.query);
-    });
-
-    textarea.addEventListener('keydown', function(e) {
-      if (dropdown.style.display === 'none') return;
-      var items = dropdown.querySelectorAll('.mention-item');
-      var active = dropdown.querySelector('.mention-item.focused');
-      var idx = Array.prototype.indexOf.call(items, active);
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (active) active.classList.remove('focused');
-        var next = items[idx + 1] || items[0];
-        next.classList.add('focused');
-        next.style.background = 'var(--bg3)';
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (active) active.classList.remove('focused');
-        var prev = items[idx - 1] || items[items.length - 1];
-        prev.classList.add('focused');
-        prev.style.background = 'var(--bg3)';
-      } else if (e.key === 'Enter' && active) {
-        e.preventDefault();
-        active.click();
-      } else if (e.key === 'Escape') {
-        closeMention();
-      }
-    });
-
-    // Guarded for the same reason as the handlers above: this is a document-level
-    // listener registered inside bindDrawerEdits(), so without the flag every
-    // drawer open leaked another permanent listener onto document.
-    if (!textarea._mentionOutsideBound) {
-      textarea._mentionOutsideBound = true;
-      document.addEventListener('click', function(e) {
-        if (!dropdown.contains(e.target) && e.target !== textarea) closeMention();
-      });
-    }
-  })();
+  bindMentionAutocomplete($('drawerCommentInput'));
 
   // Paste image support for comment box — bind ONCE per drawer element, not per click.
   // (Previously this was registered inside the onclick handler below, so every
@@ -11269,11 +11336,17 @@ function bindDrawerEdits(issue) {
     submitBtn.textContent = 'Posting...';
     var commentBody = body;
 
-    // Upload attached files to comment-specific endpoint
+    // Upload attached files to comment-specific endpoint. On failure the files
+    // are kept in _commentFiles (not cleared) so the user can just hit Comment
+    // again instead of re-picking or re-pasting them — and the button is reset
+    // and the whole submit is aborted here, rather than falling through to post
+    // a comment silently missing the attachment the user thought was included
+    // (or, for an image-only comment, posting nothing at all).
     if (_commentFiles.length) {
       var fd = new FormData();
       fd.append('issue_id', issueId);
       _commentFiles.forEach(function(f) { fd.append('files', f); });
+      var uploadFailed = false;
       try {
         toast('Uploading attachment…');
         var uploadRes = await fetch('/api/comments/upload', {
@@ -11284,6 +11357,7 @@ function bindDrawerEdits(issue) {
         var uploadData = await uploadRes.json().catch(function () { return {}; });
         if (!uploadRes.ok) {
           toast(uploadData.error || 'Attachment upload failed', 'error');
+          uploadFailed = true;
         } else if (uploadData.files && uploadData.files.length) {
           var fileRefs = uploadData.files.map(function(f) {
             var isImg = f.type && f.type.startsWith('image/');
@@ -11291,7 +11365,16 @@ function bindDrawerEdits(issue) {
           }).join('\n');
           commentBody = commentBody ? commentBody + '\n' + fileRefs : fileRefs;
         }
-      } catch(e) { toast('Attachment upload failed', 'error'); }
+      } catch(e) {
+        toast(friendlyFetchErrorMessage(e, 'Attachment upload failed'), 'error');
+        uploadFailed = true;
+      }
+      if (uploadFailed) {
+        submitBtn._submitting = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Comment';
+        return;
+      }
       _commentFiles = [];
       _renderCommentFileList();
     }
@@ -11409,11 +11492,9 @@ function renderDrawerSubtasks(subtasks) {
       var isDone = st.status === 'Done';
       html += '<div class="subtask-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;border-bottom:1px solid var(--border)" ' +
         'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
-        '<input type="checkbox" ' + (isDone ? 'checked' : '') + ' onclick="event.stopPropagation();window._toggleSubtaskDone(\'' + st.id + '\',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--success)">' +
         '<span class="subtask-key" style="font-size:11px;font-weight:700;color:var(--accent);min-width:48px;cursor:pointer" onclick="event.stopPropagation();openIssuePage(\'' + st.id + '\')">' + esc(st.key || '') + '</span>' +
         '<span style="flex:1;font-size:13px;' + (isDone ? 'text-decoration:line-through;color:var(--text3)' : '') + '" onclick="openIssuePage(\'' + st.id + '\')">' + esc(st.title) + '</span>' +
-        statusBadge(st.status) +
-        '<button class="btn-icon" style="width:20px;height:20px;font-size:12px;opacity:0.5" onclick="event.stopPropagation();window._deleteSubtask(\'' + st.id + '\')" title="Delete subtask">\u2715</button>' +
+        statusBadge(st.status, true) +
         '</div>';
     }
   } else {
@@ -11485,43 +11566,6 @@ window._submitSubtask = async function() {
     $('subtaskTitleInput').value = '';
     // Refresh drawer
     var issue = await api('/api/issues/' + parentId);
-    renderDrawerSubtasks(issue.subtasks || []);
-    await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
-};
-
-window._toggleSubtaskDone = async function(subtaskId, checked) {
-  var newStatus = checked ? 'Done' : 'To Do';
-  try {
-    await api('/api/issues/' + subtaskId, 'PUT', { status: newStatus });
-    var issue = await api('/api/issues/' + S.drawerIssueId);
-    renderDrawerSubtasks(issue.subtasks || []);
-    await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
-};
-
-window._deleteSubtask = async function(subtaskId) {
-  var sub = (S.data.issues || []).find(function (i) { return i.id === subtaskId; }) || {};
-  var parent = (S.data.issues || []).find(function (i) { return i.id === S.drawerIssueId; }) || {};
-  var spaceId = sub.space_id || parent.space_id || S.currentSpace;
-  if (!canDeleteIssue(spaceId)) {
-    toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
-    return;
-  }
-  var key = issueKeyStr(sub) || 'this subtask';
-  var ok = await typedConfirmDialog({
-    title: 'Delete subtask ' + key + '?',
-    intro: sub.title || '',
-    note: softDeleteNote(),
-    phrase: key,
-    phraseHint: 'To confirm, type the subtask number',
-    confirmLabel: 'Delete subtask'
-  });
-  if (!ok) return;
-  try {
-    await api('/api/issues/' + subtaskId, 'DELETE');
-    toast(key + ' moved to Deleted Items', 'success');
-    var issue = await api('/api/issues/' + S.drawerIssueId);
     renderDrawerSubtasks(issue.subtasks || []);
     await refreshData();
   } catch(e) { toast(e.message, 'error'); }
@@ -11898,7 +11942,12 @@ function _renderActivityTab(tab, issue) {
     var bodyHtml = (function(body) {
       if (/<[a-z][\s\S]*>/i.test(body)) {
         var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
-        return safe;
+        // A comment that has been through the rich-edit-and-save cycle below
+        // stores its images as real <img src="/api/files/id"> (no token, by
+        // design — see _saveComment) rather than the [img:name|url] markup the
+        // bracket branch below handles. Without this, those images would never
+        // get a token at all, on any render, ever.
+        return augmentFileUrlsInHtml(safe);
       }
       var html = highlightMentionsInCommentBody(body);
       html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
@@ -11952,9 +12001,26 @@ function _renderActivityTab(tab, issue) {
     var richEl = document.getElementById('edit-rich-' + id);
     var bodyDiv = document.querySelector('.comment-body-' + id);
     if (!editArea || !richEl) return;
-    // Pre-fill with current HTML content
-    richEl.innerHTML = bodyDiv ? bodyDiv.innerHTML : '';
+    // Hide the read-only render while editing — it used to stay visible the
+    // whole time, so opening Edit just added a second copy of the comment
+    // (text + screenshot) below the original instead of replacing it in place.
+    if (bodyDiv) bodyDiv.style.display = 'none';
+    // Pre-fill from the RAW stored body, not bodyDiv.innerHTML. The read-only
+    // render wraps a pasted screenshot in a styled caption block (small gray
+    // "📷 filename" text) meant only for display — copying that HTML in put the
+    // caret right after that block, so anything typed next inherited its small
+    // gray style instead of normal text. commentBodyToEditableHtml renders the
+    // same image as a plain <img> (like the description editor does), which
+    // leaves nothing after it for typed text to inherit.
+    var cm = ((_drawerIssueData && _drawerIssueData.comments) || []).find(function(c) { return c.id === id; });
+    richEl.innerHTML = cm ? commentBodyToEditableHtml(cm.body) : (bodyDiv ? bodyDiv.innerHTML : '');
     editArea.style.display = '';
+    // The edit box is a fresh element each time the activity list re-renders,
+    // but re-opening Edit on the SAME comment without a re-render in between
+    // reuses this exact node -- both binders below no-op on a repeat call via
+    // their own bind-once guards, so this is safe to call every time.
+    bindMentionAutocomplete(richEl);
+    bindCommentEditImagePaste(richEl);
     richEl.focus();
     // Move cursor to end
     var range = document.createRange();
@@ -11967,7 +12033,9 @@ function _renderActivityTab(tab, issue) {
 
   window._cancelEditComment = function(id) {
     var editArea = document.querySelector('.comment-edit-area-' + id);
+    var bodyDiv = document.querySelector('.comment-body-' + id);
     if (editArea) editArea.style.display = 'none';
+    if (bodyDiv) bodyDiv.style.display = '';
   };
 
   window._deleteComment = function(id) {
@@ -11985,7 +12053,12 @@ function _renderActivityTab(tab, issue) {
   window._saveComment = function(id) {
     var richEl = document.getElementById('edit-rich-' + id);
     if (!richEl) return;
-    var newBody = richEl.innerHTML.trim();
+    // richEl was pre-filled from the rendered comment body in _editComment,
+    // which means any pasted screenshot's <img> now carries today's live
+    // session token (bodyHtml embeds it for display). Strip it before saving
+    // — same bug and same fix as the drawer description save handlers: saving
+    // the token verbatim bakes today's token in permanently.
+    var newBody = stripFileAuthTokensFromHtml(richEl.innerHTML.trim());
     if (!newBody || newBody === '<br>') return;
     api('/api/comments/' + id, 'PUT', { body: newBody }).then(function() {
       var issueId = S.drawerIssueId;
@@ -13768,61 +13841,48 @@ async function handleIssueSubmit(e) {
     } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Failed to create issue: " + e.message, "error"); return; }
     closeModal('modal-issue');
     await refreshData();
-    if (parentId && S.drawerIssueId === parentId) {
+    // Captured before anything below navigates: renderCurrentView() ->
+    // navigateToSpace() unconditionally calls _exitIssuePage(), so if a ticket
+    // was open when Create Issue was launched (it opens as an overlay on top
+    // of whatever page is behind it), calling that would silently close it out
+    // from under the user even before the auto-open-new-ticket behavior below
+    // ever ran.
+    var ticketWasOpen = !!S.drawerIssueId;
+    var subtaskOfOpenTicket = parentId && S.drawerIssueId === parentId;
+    if (subtaskOfOpenTicket) {
       var parentIssue = await api('/api/issues/' + parentId);
       renderDrawerSubtasks(parentIssue.subtasks || []);
-    } else {
+    } else if (!ticketWasOpen) {
       renderCurrentView();
     }
-    if (created && created.id && !parentId) {
-      toast('Issue created — opening in new tab…');
-      // Wait for custom fields to be saved before opening
-      setTimeout(async function() {
-        await new Promise(r => setTimeout(r, 500));
-        var fresh = await api('/api/issues/' + created.id);
-        openIssuePage(created.id);
-      }, 300);
+    // else: some ticket is open that isn't this new one's parent -- leave it
+    // on screen untouched; the toast below is the only feedback.
+    if (created && created.id) {
+      if (subtaskOfOpenTicket) {
+        toast('Issue created');
+      } else if (ticketWasOpen) {
+        // Don't yank the user away from whatever they're reading. Offer a way
+        // to jump to the new ticket instead of forcing it.
+        var newKey = issueKeyStr(created) || created.id;
+        toastWithButtons(newKey + ' created', [
+          { label: 'Open', handler: function () { openIssuePage(created.id); } },
+          { label: 'Copy link', handler: function () { copyIssueLinkByKey(newKey); }, dismissOnClick: false }
+        ]);
+      } else if (!parentId) {
+        toast('Issue created — opening in new tab…');
+        // Wait for custom fields to be saved before opening
+        setTimeout(async function() {
+          await new Promise(r => setTimeout(r, 500));
+          var fresh = await api('/api/issues/' + created.id);
+          openIssuePage(created.id);
+        }, 300);
+      } else {
+        toast('Issue created');
+      }
     } else {
       toast('Issue created');
     }
   }
-}
-
-// ═══════════════════════════════════════════════════════════
-// FILTER CRUD
-// ═══════════════════════════════════════════════════════════
-async function handleFilterSubmit(e) {
-  e.preventDefault();
-  var id = $('filterId').value;
-  var condRows = qsa('.filter-condition-row');
-  var conditions = [];
-  condRows.forEach(function (row) {
-    conditions.push({
-      field: row.querySelector('.fc-field').value,
-      operator: row.querySelector('.fc-op').value,
-      value: row.querySelector('.fc-value').value
-    });
-  });
-
-  var payload = {
-    space_id: $('filterSpaceId').value || S.currentSpace,
-    user_id: S.currentUser,
-    name: $('filterNameInput').value,
-    conditions: JSON.stringify(conditions),
-    is_shared: $('filterShared').checked,
-    is_pinned: $('filterPinned').checked
-  };
-
-  if (id) {
-    await api('/api/filters/' + id, 'PUT', payload);
-    toast('Filter updated');
-  } else {
-    await api('/api/filters', 'POST', payload);
-    toast('Filter created');
-  }
-  closeModal('modal-filter');
-  await refreshData();
-  renderFilters();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -14388,35 +14448,7 @@ document.addEventListener('DOMContentLoaded', function () {
   $('spaceForm').addEventListener('submit', handleSpaceSubmit);
   $('sprintForm').addEventListener('submit', handleSprintSubmit);
   $('issueForm').addEventListener('submit', handleIssueSubmit);
-  $('filterForm').addEventListener('submit', handleFilterSubmit);
   $('worklogForm').addEventListener('submit', handleWorklogSubmit);
-
-  // Create filter
-  $('createFilterBtn').addEventListener('click', function () {
-    $('filterId').value = '';
-    $('filterSpaceId').value = S.currentSpace || '';
-    $('filterNameInput').value = '';
-    $('filterShared').checked = false;
-    $('filterPinned').checked = false;
-    $('filterConditions').innerHTML = '';
-    $('filterModalTitle').textContent = 'Create Filter';
-    openModal('modal-filter');
-  });
-
-  // Add filter condition
-  $('addConditionBtn').addEventListener('click', function () {
-    var row = document.createElement('div');
-    row.className = 'filter-condition-row';
-    row.innerHTML = '<select class="input input-sm fc-field">' +
-      '<option value="status">Status</option><option value="priority">Priority</option>' +
-      '<option value="type">Type</option><option value="assignee_id">Assignee</option></select>' +
-      '<select class="input input-sm fc-op">' +
-      '<option value="equals">equals</option><option value="not_equals">not equals</option>' +
-      '<option value="contains">contains</option></select>' +
-      '<input type="text" class="input input-sm fc-value" value="">' +
-      '<button type="button" class="btn btn-sm btn-outline" onclick="this.closest(\'.filter-condition-row\').remove()">x</button>';
-    $('filterConditions').appendChild(row);
-  });
 
   // Backlog search
   $('backlogSearch').addEventListener('input', function () {
@@ -15825,13 +15857,13 @@ function richInsertImage(elId) {
 }
 
 // ── Copy issue link ─────────────────────────────────────
-function copyDrawerLink() {
-  // Use current issue key saved when drawer opened
-  var issueKey = window._currentIssueKey || (window.S && S.drawerIssueId);
+// Shared by the drawer's own copy-link button and the "created while another
+// ticket was open" toast, which offers a copy-link action for the NEW ticket
+// (a different key than whatever is currently open, so it can't just reuse
+// copyDrawerLink's window._currentIssueKey).
+function copyIssueLinkByKey(issueKey) {
   var url = window.location.origin + '/?issue=' + encodeURIComponent(issueKey);
-  navigator.clipboard.writeText(url).then(function() {
-    toast('Link copied!');
-  }).catch(function() {
+  function fallbackCopy() {
     var el = document.createElement('input');
     el.value = url;
     document.body.appendChild(el);
@@ -15839,7 +15871,18 @@ function copyDrawerLink() {
     document.execCommand('copy');
     document.body.removeChild(el);
     toast('Link copied!');
-  });
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function() { toast('Link copied!'); }).catch(fallbackCopy);
+  } else {
+    fallbackCopy();
+  }
+}
+
+function copyDrawerLink() {
+  // Use current issue key saved when drawer opened
+  var issueKey = window._currentIssueKey || (window.S && S.drawerIssueId);
+  copyIssueLinkByKey(issueKey);
 }
 
 // ── Browser back button support ─────────────────────────

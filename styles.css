@@ -1821,11 +1821,13 @@ body.light .topbar-search-wrap { background: #f6f8fa; }
 
 /* Top bar */
 .drawer-topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.drawer-topbar-left { display: flex; align-items: center; gap: 10px; }
+.drawer-topbar-left { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .drawer-topbar-right { display: flex; align-items: center; gap: 4px; }
 .drawer-issue-key { font-size: 13px; font-weight: 700; color: var(--accent); cursor: pointer; }
 .drawer-issue-key:hover { text-decoration: underline; }
-.drawer-type-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+/* JS sets the type badge's className outright (badge badge-type badge-type-<type>),
+   so .drawer-type-badge from the markup never actually applies -- the rules that
+   matter are the ones below. */
 .drawer-close-btn { font-size: 18px; }
 
 /* Body layout */
@@ -2583,6 +2585,43 @@ body.light .modal-dialog {
 
 .toast-fade { opacity: 0; transition: opacity 0.5s ease; }
 
+.toast-with-actions {
+  flex-wrap: wrap;
+  max-width: 420px;
+  padding-right: 34px;   /* room for the close button, positioned absolutely */
+  position: relative;
+}
+.toast-actions {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 2px;
+}
+.toast-action-btn {
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.35);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast-action-btn:hover { background: rgba(255,255,255,0.3); }
+.toast-close-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.75);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+.toast-close-btn:hover { color: #fff; }
+
 /* Popup Alert (prominent banner) */
 .popup-alert {
   display: flex;
@@ -3219,8 +3258,12 @@ body.light #linkDialogInline { background: #ffffff; }
   gap: 4px;
   font-size: 12px;
   color: var(--text2);
-  margin-bottom: 2px;
-  padding-bottom: 4px;
+  /* No margin/padding here: this sits inline in .drawer-topbar-left alongside
+     Back, the copy-link button, and the type badge. A bottom-only margin
+     (removed) shifted this element's box downward while its content stayed
+     put, which visually pushed the crumb icons/text ABOVE the row's true
+     center relative to its siblings -- .drawer-topbar-left's own `gap`
+     already spaces things out, including when the row wraps. */
 }
 .drawer-crumb-link {
   color: var(--accent);
@@ -3229,13 +3272,7 @@ body.light #linkDialogInline { background: #ffffff; }
 }
 .drawer-crumb-link:hover { text-decoration: underline; }
 .drawer-crumb-sep { color: var(--text3); margin: 0 2px; }
-.drawer-crumb-icon { font-size: 13px; }
-.drawer-topbar-left {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
+.drawer-crumb-icon { font-size: 13px; display: inline-flex; align-items: center; }
 
 /* Chart cards */
 .chart-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
@@ -3267,7 +3304,17 @@ select.input-sm { appearance: auto; -webkit-appearance: auto; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; }
 .badge-muted { background: var(--bg4); color: var(--text2); }
 .badge-key { background: var(--accent-bg); color: var(--accent); font-weight: 700; }
-.badge-type { }
+/* The drawer topbar's type badge (JS sets className to "badge badge-type
+   badge-type-<type>") had no size/color rules of its own here, so it fell
+   back to plain .badge sizing (11px) with no color at all -- same palette as
+   the type icons (typeIcon()/TYPE_ICONS) for consistency, light-tint
+   background + saturated text like the status/priority badges use. */
+.badge-type { font-size: 13px; padding: 3px 10px; }
+.badge-type-epic    { background: #eae6ff; color: #5243aa; }
+.badge-type-story   { background: #e3fcef; color: #006644; }
+.badge-type-task    { background: #deebff; color: #0052cc; }
+.badge-type-bug     { background: #ffebe6; color: #bf2600; }
+.badge-type-subtask { background: #e6fcff; color: #00738c; }
 .avatar-group { display: flex; margin-left: 8px; }
 .avatar-group .avatar { margin-left: -4px; border: 2px solid var(--bg2); }
 .space-header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg2); }
@@ -4111,19 +4158,6 @@ body.light .user-footer-actions .btn-icon:hover { color: #fff; background: rgba(
 .aw-col-item:hover { background: var(--bg3); }
 .aw-col-item input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); width: 14px; height: 14px; flex-shrink: 0; }
 
-/* ── Bulk Action Bar ─────────────────────────────────────── */
-.bulk-bar {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 8px 16px; background: color-mix(in srgb, var(--accent) 10%, var(--bg2));
-  border-bottom: 2px solid var(--accent); animation: slideDown .15s ease-out;
-}
-@keyframes slideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
-.bulk-count { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; }
-.bulk-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.bulk-actions .input { font-size: 12px; padding: 4px 8px; }
-.bulk-deselect { margin-left: auto; color: var(--text3); background: none; border: none; font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: var(--radius); }
-.bulk-deselect:hover { background: var(--bg3); color: var(--text1); }
-.btn-ghost { background: none; border: 1px solid var(--border); }
 
 /* Custom field inputs in issue drawer */
 .drawer-cf-input .input { width: 100%; }

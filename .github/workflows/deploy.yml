@@ -4,23 +4,12 @@ name: Deploy to production
 # for re-running the current commit without a new push (e.g. after fixing a
 # server-side issue that had nothing to do with the code).
 #
-# Safety net, two layers:
-#   1. Container rollback (seconds): the previous working image is tagged
-#      :previous before anything is touched. If the new image fails to build,
-#      or the app fails its health check after starting, that old image is put
-#      back immediately. This never touches git or GitHub.
-#   2. Commit rollback (the next minute or two): on the same failure, this
-#      workflow reverts the FULL RANGE of commits in this push (not just the
-#      tip) with `git revert` -- a NEW commit, not a rewrite of history -- and
-#      pushes it. A single push can carry several commits at once; reverting
-#      only the tip would leave earlier ones in the batch untouched even if
-#      one of THEM was the actual problem, so the range reverted is
-#      github.event.before (the last commit that deployed successfully) up to
-#      github.sha (this push's tip). The push re-triggers this same workflow,
-#      which deploys the reverted -- known-good -- code on its own.
-#      Loop guard: a commit that is itself an auto-revert is never reverted
-#      again, so a persistent infra problem fails loudly instead of
-#      flip-flopping.
+# Safety net: container rollback (seconds). The previous working image is
+# tagged :previous before anything is touched. If the new image fails to
+# build, or the app fails its health check after starting, that old image is
+# put back immediately. This never touches git or GitHub -- a failed deploy
+# leaves production on the last known-good image, and the broken commit
+# stays on main for a human to fix and push again.
 #
 # NOT covered: a database migration that partially applied before the failure.
 # Rolling back code does not undo a schema change. That is a judgement call
@@ -35,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # needed for the auto-revert push (layer 2)
+  contents: read
 
 jobs:
   deploy:
@@ -44,8 +33,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # full history -- `git revert` needs the target commit's parent
 
       - name: Syntax gate
         # The project rule: never ship without these passing (see CLAUDE.md).
@@ -103,8 +90,8 @@ jobs:
         id: deploy
         # Build BEFORE touching the running container. If the build fails, the
         # currently-running container is never stopped -- production is simply
-        # untouched, and layer 1 (below) has nothing to do. Only once the new
-        # image builds successfully do we tag the old one :previous and swap.
+        # untouched, and the rollback step (below) has nothing to do. Only once
+        # the new image builds successfully do we tag the old one :previous and swap.
         run: |
           ssh -i ~/.ssh/id_deploy -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" bash -euo pipefail -s << 'REMOTE'
@@ -153,11 +140,13 @@ jobs:
             'docker logs --tail 60 sprint-board-app 2>&1' || true
           exit 1
 
-      # -- Layer 1: instant container rollback --------------------------------
+      # -- Container rollback ---------------------------------------------
       # Runs whenever ANYTHING above failed. Only actually swaps the container
       # back if the deploy step got far enough to swap it in the first place
       # (the .deploy-swapped marker) -- a syntax-gate or build failure never
       # touched the running container, so there is nothing to undo here.
+      # This is the only automatic recovery -- the broken commit itself is
+      # left on main for a human to fix and push again.
       - name: Roll back the container if the deploy failed
         if: failure()
         run: |
@@ -184,95 +173,6 @@ jobs:
           echo "rolled back"
           REMOTE
 
-      # -- Layer 2: revert the commit on GitHub --------------------------------
-      # A NEW commit that undoes this one -- history is not rewritten, and the
-      # push below re-triggers this workflow to deploy the reverted (known
-      # good) code on its own. Skipped if this commit IS a revert, so a
-      # persistent problem (e.g. the server itself being down) fails loudly
-      # instead of endlessly reverting reverts.
-      - name: Revert the pushed commit(s)
-        if: failure()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          SUBJECT="$(git log -1 --pretty=%s HEAD)"
-          if [[ "$SUBJECT" == "[auto-revert]"* ]]; then
-            echo "::warning::HEAD is already an auto-revert ($SUBJECT) -- not reverting again."
-            echo "The container rollback above is the current safety net. A human needs to look at this."
-            exit 0
-          fi
-
-          # A single push can carry several commits (e.g. 2,3,4,5 pushed
-          # together) but this run only ever sees the final tip (github.sha).
-          # Reverting just that one commit would leave the others in place
-          # even if an EARLIER one in the batch was the actual problem.
-          # github.event.before is the SHA main was at right before this
-          # push -- i.e. the last commit that deployed successfully -- so
-          # reverting the whole range brings the tree back to that known-good
-          # state no matter how many commits were batched or which one broke it.
-          BEFORE="${{ github.event.before }}"
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            # workflow_dispatch, a brand-new branch, or a force-push has no
-            # usable "before" boundary -- fall back to just the tip commit.
-            BEFORE="$(git rev-parse HEAD~1)"
-          fi
-
-          echo "Reverting the range ${BEFORE}..${{ github.sha }}"
-          if git revert --no-commit "${BEFORE}..${{ github.sha }}"; then
-            SHORT_BEFORE="$(git rev-parse --short "$BEFORE")"
-            SHORT_TIP="$(git rev-parse --short "${{ github.sha }}")"
-            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            # Oldest first -- reads as "what happened, in order". This is the
-            # exact range that got reverted, listed by subject, so nobody has
-            # to go look it up separately.
-            REVERTED_LOG="$(git log --oneline --reverse "${BEFORE}..${{ github.sha }}")"
-
-            # Built with printf into a file rather than a heredoc: printf
-            # treats REVERTED_LOG (which can contain arbitrary commit subject
-            # text) as inert %s data, never as something to re-parse, so
-            # there is no quoting or terminator-matching risk regardless of
-            # what ends up in it. The commit message IS the incident report
-            # -- readable straight from `git log` or the GitHub UI, no
-            # digging through Actions logs required to know what happened.
-            MSGFILE="$(mktemp)"
-            {
-              printf "[auto-revert] Deploy failed for %s -- reverted back to %s\n\n" "$SHORT_TIP" "$SHORT_BEFORE"
-              printf "WHY: the commit(s) below failed during CI/CD -- either the build,\n"
-              printf "or the app's own health check after it restarted. Full logs:\n"
-              printf "%s\n\n" "$RUN_URL"
-              printf "WHAT WAS UNDONE (oldest first):\n"
-              printf "%s\n\n" "$REVERTED_LOG"
-              printf "Production is running %s again -- the last commit that\n" "$SHORT_BEFORE"
-              printf "deployed successfully. Nothing further is needed to keep it that way.\n\n"
-              printf "WHAT TO DO NEXT, locally:\n"
-              printf "1. Open the run above and check WHY it failed: the build step's\n"
-              printf "   output, or -- for a health-check failure -- the app's own\n"
-              printf "   container logs, which that run captured.\n"
-              printf "2. Recover your changes. Do NOT cherry-pick or revert just %s\n" "$SHORT_TIP"
-              printf "   on its own -- it is only that one commit's OWN diff on top of\n"
-              printf "   the commits before it, and those no longer exist in the tree\n"
-              printf "   after this revert, so it will not apply cleanly. Recover the\n"
-              printf "   WHOLE range instead:\n"
-              printf "     git cherry-pick %s..%s\n" "$SHORT_BEFORE" "$SHORT_TIP"
-              printf "   or, to grab the full code in one step instead of replaying each\n"
-              printf "   commit separately:\n"
-              printf "     git checkout %s -- .\n" "$SHORT_TIP"
-              printf "     git commit -m \"Restore code from %s\"\n" "$SHORT_TIP"
-              printf "3. Fix whatever the logs pointed at.\n"
-              printf "4. Push again -- same pipeline, auto-deploys if it passes this time.\n"
-            } > "$MSGFILE"
-
-            git commit -F "$MSGFILE"
-            rm -f "$MSGFILE"
-            git push origin main
-            echo "Reverted and pushed -- a new deploy of the known-good code will start automatically."
-          else
-            echo "::error::git revert failed (likely a conflict) -- could not auto-recover on GitHub. The container-level rollback above is still in effect."
-            git revert --abort || true
-            exit 1
-          fi
-
       - name: Summary
         if: always()
         run: |
@@ -286,9 +186,11 @@ jobs:
             if [ "${{ job.status }}" != "success" ]; then
               echo "**This deploy failed.** What should have happened automatically:"
               echo "- the previous container image was restarted (if the deploy got that far)"
-              echo "- this commit was reverted and pushed as a new commit, which will redeploy on its own"
               echo ""
-              echo "If neither happened (check the two steps above), roll back by hand:"
+              echo "The broken commit is still on main. Fix it locally, then push again --"
+              echo "the same pipeline will auto-deploy once it passes."
+              echo ""
+              echo "If the container rollback did not happen (check the step above), roll back by hand:"
               echo '```'
               echo "docker stop sprint-board-app && docker rm sprint-board-app &&"
               echo "docker run -d --name sprint-board-app -p 8082:3000 --restart unless-stopped"

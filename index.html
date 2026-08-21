@@ -630,6 +630,11 @@
               </div>
             </div>
             <button class="btn btn-outline btn-sm" id="awClearFilters" style="display:none" onclick="window._awClearFilters()">✕ Clear all</button>
+            <div id="awBulkDeleteWrap" style="display:none;align-items:center;gap:8px;margin-left:auto">
+              <span id="awBulkDeleteCount" style="font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap"></span>
+              <button class="btn btn-sm btn-danger" id="awBulkDeleteBtn" onclick="window._bulkDelete()">🗑 Delete</button>
+              <button id="awBulkDeselectBtn" onclick="window._bulkDeselect()" title="Clear selection" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:var(--radius)">✕</button>
+            </div>
           </div>
           <!-- Advanced Filter Panel -->
           <div class="aw-adv-panel" id="awAdvPanel" style="display:none">
@@ -658,17 +663,6 @@
             <button type="button" class="calendar-nav-btn" id="calendarNext" aria-label="Next month">&#8594;</button>
           </div>
           <div id="calendarGrid" data-hj-suppress class="calendar-grid"></div>
-        </div>
-
-        <!-- Space: Filters -->
-        <div class="view" id="view-filters" hidden>
-          <div class="view-toolbar">
-            <div class="toolbar-group"></div>
-            <div class="toolbar-group">
-              <button class="btn btn-primary btn-sm" id="createFilterBtn">+ Create Filter</button>
-            </div>
-          </div>
-          <div id="filtersList" class="filters-list"></div>
         </div>
 
         <!-- Space: Settings (with sub-tabs: General, People, Custom Fields) -->
@@ -1204,44 +1198,6 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-issue')">Cancel</button>
         <button class="btn btn-primary" id="issueSubmitBtn" type="submit" form="issueForm">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Create/Edit Filter Modal -->
-  <div id="modal-filter" class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('modal-filter')"></div>
-    <div class="modal-dialog">
-      <div class="modal-header">
-        <h3 id="filterModalTitle">Create Filter</h3>
-        <button class="btn-icon modal-close" onclick="closeModal('modal-filter')">✕</button>
-      </div>
-      <div class="modal-body">
-        <form id="filterForm">
-          <input type="hidden" id="filterId">
-          <input type="hidden" id="filterSpaceId">
-          <div class="form-group">
-            <label class="form-label" for="filterNameInput">Name</label>
-            <input type="text" id="filterNameInput" class="input" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Conditions</label>
-            <div id="filterConditions" class="filter-conditions"></div>
-            <button type="button" class="btn btn-outline btn-sm" id="addConditionBtn">+ Add Condition</button>
-          </div>
-          <div class="form-row">
-            <div class="form-group form-check">
-              <label><input type="checkbox" id="filterShared"> Shared with team</label>
-            </div>
-            <div class="form-group form-check">
-              <label><input type="checkbox" id="filterPinned"> Pin to sidebar</label>
-            </div>
-          </div>
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-filter')">Cancel</button>
-        <button class="btn btn-primary" type="submit" form="filterForm">Save</button>
       </div>
     </div>
   </div>
