@@ -163,8 +163,23 @@
      "to": 9972
     },
     {
-     "file": "app.js",
+     "file": "src/client/components/space-context-menu.js",
      "from": 9973,
+     "to": 10843
+    },
+    {
+     "file": "src/client/components/issue-drawer.js",
+     "from": 10844,
+     "to": 12126
+    },
+    {
+     "file": "src/client/components/drawer-panels.js",
+     "from": 12127,
+     "to": 14087
+    },
+    {
+     "file": "app.js",
+     "from": 14088,
      "to": 17295
     }
    ]
@@ -189,5 +204,15 @@
    "crlf": 1431,
    "lf": 1431
   }
- }
+ },
+ "notes": [
+  {
+   "file": "src/client/components/drawer-panels.js",
+   "range": "12127-14087",
+   "todo": "BANNER IS WRONG: the section banner says \"LINKED ITEMS (Jira-style)\" but that describes only ~the first 300 lines. The file actually contains: issue links (LINK_TYPES, renderDrawerLinks, link dialog), drawer activity/comments (_drawerIssueData, renderDrawerActivity, _renderActivityTab), drawer attachments (renderDrawerAttachments), and the product-type/combination field pickers (renderIssueProductTypeSets, renderIssueCombinationField, bindCombinationCombobox). Needs sub-splitting in a later pass; kept as ONE file here because sub-splitting on a first pass is where contiguity guarantees get lost."
+  },
+  {
+   "note": "TODO markers for moved dead code and for the mis-named section above are recorded HERE rather than as comments inside the files, because client parts must stay RAW byte-identical to their original lines -- inserting a comment would fail cat-diff [A]/[C]."
+  }
+ ]
 }
