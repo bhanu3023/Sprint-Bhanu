@@ -295,7 +295,14 @@
 
   <div class="footer-text">© 2026 Neutara Technologies. All rights reserved.</div>
 
+<!-- Runtime config (server-generated) must load before hotjar.js reads it -->
+<script src="/config.js"></script>
+<script src="/hotjar.js"></script>
 <script>
+  // Cover the login screen too, not just the app behind it. Module scope,
+  // and a no-op unless HOTJAR_SITE_ID is configured — see hotjar.js.
+  if (typeof initHotjar === 'function') initHotjar();
+
   // Show OAuth error from URL param (e.g. ?error=user_not_found)
   (function () {
     var params = new URLSearchParams(window.location.search);

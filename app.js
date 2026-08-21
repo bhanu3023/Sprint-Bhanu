@@ -2,6 +2,12 @@
 // SPRINTBOARD ENTERPRISE — SPA CORE LOGIC
 // ═══════════════════════════════════════════════════════════
 
+// ── Analytics ─────────────────────────
+// Module scope, not DOMContentLoaded: recording starts as soon as this
+// script runs, so the loading overlay and any pre-auth state are covered.
+// A no-op unless HOTJAR_SITE_ID is configured — see hotjar.js.
+if (typeof initHotjar === 'function') initHotjar();
+
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
@@ -22,6 +28,7 @@ const S = {
   ywExcludeDone: false,
   awFilters: {
     type: [], status: [], priority: [], assignee: [], sprint: [],
+    productType: [], team: [], desc: '',
     createdFrom: '', createdTo: '',
     updatedFrom: '', updatedTo: '',
     dueDateFrom: '', dueDateTo: '',
@@ -106,8 +113,87 @@ function richTextMediaSignature(html) {
   return parts.join(';');
 }
 
+// Tag-name sequence only (no attributes/styles) -- a change here means pure
+// formatting changed (bold/bullet-list/heading applied to the same words)
+// even though normalizeRichTextForCompare's plain-text view sees no
+// difference at all. Without this, reformatting existing text and clicking
+// Save was a silent no-op: the button stayed clickable, the click handler's
+// own richTextHasMeaningfulChange re-check said "nothing changed", and the
+// old, unformatted text just stayed in the database.
+function richTextTagSignature(html) {
+  if (!html) return '';
+  var d = document.createElement('div');
+  d.innerHTML = String(html);
+  var tags = [];
+  d.querySelectorAll('*').forEach(function (el) { tags.push(el.tagName); });
+  return tags.join(',');
+}
+
+// ── Scoped undo/redo for rich-text editors ──────────────────
+// Native Ctrl+Z on contenteditable is not reliably scoped per element in
+// Chromium/Edge — with several contenteditable regions on one page (here:
+// Description, Fix Description, the comment box), the browser's own undo
+// history can be shared across all of them, so undoing inside the comment
+// box could pop a change from an entirely different field that was edited
+// (and already saved) earlier — reported as "Ctrl+Z in the comment box
+// reverts the description". Each field gets its own real, self-contained
+// undo/redo stack instead, and native undo/redo is blocked for these fields
+// entirely so the browser's shared history can never be reached from them.
+// Call again (safe/cheap) whenever an editor's content is freshly set (drawer
+// opened for a different issue, comment edit box (re)built) to reset the
+// stack to that content — the event bindings themselves attach only once.
+function attachScopedUndo(el) {
+  if (!el) return;
+  el._undoStack = [el.innerHTML];
+  el._redoStack = [];
+  if (el._scopedUndoBound) return;
+  el._scopedUndoBound = true;
+  function snapshot() {
+    var last = el._undoStack[el._undoStack.length - 1];
+    if (el.innerHTML === last) return;
+    el._undoStack.push(el.innerHTML);
+    if (el._undoStack.length > 50) el._undoStack.shift();
+    el._redoStack = [];
+  }
+  function placeCaretAtEnd() {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  el.addEventListener('input', function () {
+    clearTimeout(el._undoTimer);
+    el._undoTimer = setTimeout(snapshot, 350);
+  });
+  el.addEventListener('keydown', function (e) {
+    var mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    var key = e.key.toLowerCase();
+    var isUndo = key === 'z' && !e.shiftKey;
+    var isRedo = (key === 'z' && e.shiftKey) || key === 'y';
+    if (!isUndo && !isRedo) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(el._undoTimer);
+    snapshot(); // capture whatever was typed right before undo, so it isn't lost
+    if (isRedo) {
+      if (!el._redoStack.length) return;
+      el._undoStack.push(el._redoStack.pop());
+    } else {
+      if (el._undoStack.length <= 1) return;
+      el._redoStack.push(el._undoStack.pop());
+    }
+    el.innerHTML = el._undoStack[el._undoStack.length - 1];
+    placeCaretAtEnd();
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 function richTextHasMeaningfulChange(originalHtml, currentHtml) {
   if (normalizeRichTextForCompare(originalHtml) !== normalizeRichTextForCompare(currentHtml)) return true;
+  if (richTextTagSignature(originalHtml) !== richTextTagSignature(currentHtml)) return true;
   return richTextMediaSignature(originalHtml) !== richTextMediaSignature(currentHtml);
 }
 
@@ -124,7 +210,14 @@ function updateDrawerDescEditorState(editorId, originalHtml) {
   if (!el || !btns || !saveBtn) return;
   var changed = richTextHasMeaningfulChange(originalHtml || '', el.innerHTML);
   btns.style.display = 'flex';
-  saveBtn.disabled = !changed;
+  // Dimmed look only — never the native `disabled` attribute. A browser never
+  // dispatches click on a disabled button at all, so if this recompute (fired
+  // from onfocus/oninput/a blur-triggered auto-linkify pass) landed disabled=true
+  // in the same gesture as a click on Save, that click would be silently
+  // swallowed before the handler below ever ran — no error, no save, the only
+  // visible effect being the description losing focus. The click handler
+  // re-checks richTextHasMeaningfulChange itself, so it stays a correct no-op
+  // when there is truly nothing to save; it just can never be a SILENT one.
   saveBtn.style.opacity = changed ? '1' : '0.45';
   saveBtn.style.cursor = changed ? 'pointer' : 'not-allowed';
 }
@@ -132,11 +225,6 @@ function updateDrawerDescEditorState(editorId, originalHtml) {
 function markDrawerDescDirty(editorId) {
   var origKey = editorId === 'drawerDesc' ? '_drawerDescOriginalHtml' : '_drawerFixDescOriginalHtml';
   updateDrawerDescEditorState(editorId, window[origKey] || '');
-}
-
-function getPtComboTypesNeedingCombination() {
-  return (typeof window !== 'undefined' && window.PRODUCT_TYPES_WITH_COMBINATIONS)
-    || ['Message', 'Email', 'Content'];
 }
 
 // Maps a built-in field_key to how to read its value in the drawer and on a
@@ -251,15 +339,13 @@ function validateIssueForDone(issueOrId) {
   // Combination field was removed from being unable to reach Done at all
   // (the old check read an empty picker and always reported Product Type missing).
   if (comboMode) {
+    var meta = findCombinationFieldMeta(spaceId);
     var comboVal = null;
-    if (!useDrawer && issue) {
-      var meta = findCombinationFieldMeta(spaceId);
-      if (meta && meta.id) {
-        var cfv = (S.data.issue_field_values || []).find(function (v) {
-          return String(v.issue_id) === String(issue.id) && String(v.field_id) === String(meta.id);
-        });
-        comboVal = cfv ? cfv.value : null;
-      }
+    if (!useDrawer && issue && meta && meta.id) {
+      var cfv = (S.data.issue_field_values || []).find(function (v) {
+        return String(v.issue_id) === String(issue.id) && String(v.field_id) === String(meta.id);
+      });
+      comboVal = cfv ? cfv.value : null;
     }
     var sel = useDrawer
       ? (_drawerPtComboSel || readPtComboSelectionFromContainer($('drawerCombinationField')))
@@ -267,8 +353,13 @@ function validateIssueForDone(issueOrId) {
     if (!sel || !sel.productTypes || !sel.productTypes.length) {
       missing.push('Product Type');
     } else {
+      // A type only REQUIRES picking a combination if this space actually has
+      // at least one configured for it -- every type has its own group now
+      // (see getCombinationsForProductType), and one an admin hasn't filled
+      // in yet has nothing valid to select, so it shouldn't block Done on a
+      // field with no real options.
       var needsCombo = sel.productTypes.some(function (t) {
-        return productTypeHasCombinations(t) || productTypeUsesAllCombinations(t);
+        return getCombinationsForProductType(t, meta).length > 0;
       });
       if (needsCombo && (!sel.combinations || !sel.combinations.length)) missing.push('Combination');
     }
@@ -338,6 +429,28 @@ function highlightMentionsInCommentBody(body) {
     var escapedName = m.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     html = html.replace(new RegExp('@' + escapedName, 'g'),
       '<span style="color:#0052cc;font-weight:600">@' + esc(m.name) + '</span>');
+  });
+  return html;
+}
+
+// Renders a stored comment body for the EDIT box, as opposed to bodyHtml()'s
+// read-only render further down. A pasted screenshot becomes a plain <img> with
+// nothing after it to inherit a style from — bodyHtml()'s version wraps the
+// same image in a small-gray-text caption block meant for display only, and
+// pre-filling the edit box with that (as _editComment used to) left the caret
+// sitting right after that caption, so anything typed next came out in the
+// same small gray text.
+function commentBodyToEditableHtml(body) {
+  if (!body) return '';
+  if (/<[a-z][\s\S]*>/i.test(body)) {
+    return body.replace(/<script[\s\S]*?<\/script>/gi, '');
+  }
+  var html = highlightMentionsInCommentBody(body);
+  html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+    return '<img class="desc-inline-img" src="' + esc(fileApiUrl(url)) + '" alt="' + esc(fname) + '"><br>';
+  });
+  html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
+    return '<a href="' + esc(fileApiUrl(url)) + '" target="_blank">' + esc(fname) + '</a>';
   });
   return html;
 }
@@ -471,7 +584,11 @@ function augmentFileUrlsInHtml(html) {
   if (!html || html.indexOf('/api/files/') === -1) return html;
   var t = getAuthToken();
   if (!t) return html;
-  return html.replace(/\/api\/files\/([^"'\s?]+)/g, function (_m, id) {
+  // Consumes an existing "?t=..." (if any) instead of just stopping before it,
+  // so a description saved with a stale token already baked in — see the
+  // drawer description/fix-description save handlers — gets a single fresh
+  // token here rather than a second one appended after the old one.
+  return html.replace(/\/api\/files\/([^"'\s?]+)(?:\?t=[^"'\s&]+)?/g, function (_m, id) {
     return '/api/files/' + id + '?t=' + encodeURIComponent(t);
   });
 }
@@ -479,6 +596,21 @@ function augmentFileUrlsInHtml(html) {
 function stripFileAuthTokensFromHtml(html) {
   if (!html || html.indexOf('/api/files/') === -1) return html;
   return html.replace(/\/api\/files\/([^"'\s?]+)\?t=[^"'\s&]+/g, '/api/files/$1');
+}
+
+// fetch() only throws a TypeError when the request never got an HTTP response at
+// all — offline, DNS failure, connection reset, CORS block, an upload larger than
+// a reverse proxy will accept. Its message ("Failed to fetch", "NetworkError when
+// attempting to fetch resource.", Safari's "Load failed") is a browser-internal
+// string, not something written for a user to read — surfacing it verbatim in a
+// toast looks like a broken error message even though it correctly identifies a
+// connectivity problem. Anything that reached the server and came back as a JSON
+// {error: "..."} is unaffected by this and keeps its own real message.
+function friendlyFetchErrorMessage(e, fallback) {
+  if (e instanceof TypeError) {
+    return 'Could not reach the server — check your connection and try again.';
+  }
+  return (e && e.message) || fallback || 'Something went wrong';
 }
 
 async function api(url, method, body, opts) {
@@ -490,7 +622,12 @@ async function api(url, method, body, opts) {
     if (token) headers['Authorization'] = 'Bearer ' + token;
     var fetchOpts = { method: method, headers: headers };
     if (body !== undefined && body !== null) fetchOpts.body = JSON.stringify(body);
-    var res = await fetch(url, fetchOpts);
+    var res;
+    try {
+      res = await fetch(url, fetchOpts);
+    } catch (networkErr) {
+      throw new Error(friendlyFetchErrorMessage(networkErr, 'API request failed'));
+    }
     if (res.status === 401) {
       localStorage.removeItem('sb-token');
       localStorage.removeItem('sb-user');
@@ -791,6 +928,55 @@ function toast(msg, type) {
   setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 3600);
 }
 
+// A toast that offers one or more follow-up actions instead of just a message —
+// e.g. "PTM-9 created" with buttons to open it or copy its link, for the case
+// where auto-navigating away would be disruptive (a ticket is already open).
+// Stays up longer than a plain toast and only auto-dismisses if nothing was
+// clicked, since deciding takes a moment longer than reading a status line.
+// buttons: [{ label, handler, dismissOnClick }] — dismissOnClick defaults true.
+function toastWithButtons(msg, buttons, type) {
+  type = type || 'success';
+  var c = $('toastContainer');
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type + ' toast-with-actions';
+  var icon = type === 'error' ? '✕' : type === 'warning' ? '⚠️' : '✓';
+  el.innerHTML = '<span class="toast-icon">' + icon + '</span><span class="toast-msg">' + esc(msg) + '</span>';
+
+  var timers = [];
+  function dismiss() {
+    timers.forEach(clearTimeout);
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  var actionsWrap = document.createElement('div');
+  actionsWrap.className = 'toast-actions';
+  (buttons || []).forEach(function (b) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action-btn';
+    btn.textContent = b.label;
+    btn.onclick = function () {
+      if (b.handler) b.handler();
+      if (b.dismissOnClick !== false) dismiss();
+    };
+    actionsWrap.appendChild(btn);
+  });
+  el.appendChild(actionsWrap);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'toast-close-btn';
+  closeBtn.setAttribute('aria-label', 'Dismiss');
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = dismiss;
+  el.appendChild(closeBtn);
+
+  c.appendChild(el);
+  timers.push(setTimeout(function () { el.classList.add('toast-fade'); }, 8000));
+  timers.push(setTimeout(dismiss, 8600));
+  return el;
+}
+
 function popupAlert(title, msg, type) {
   type = type || 'success';
   var c = $('toastContainer');
@@ -943,7 +1129,7 @@ function closeDrawer() {
   stopDrawerLiveSync();
   window._drawerPending = {};
   if (window.history.length > 1 && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
-    window.history.back();
+    _goBackOnce();
     return;
   }
   _closeIssueDrawer();
@@ -1004,7 +1190,6 @@ window.goBackToSavedPage = goBackToSavedPage;
 // Opens an issue in a new browser tab
 function openIssuePage(issueId, opts) {
   opts = opts || {};
-  collapseSpaceSubnav();
   if (!opts.skipHistory) {
     S._prevView = S.currentView;
     S._prevTab = S.currentTab;
@@ -1014,10 +1199,39 @@ function openIssuePage(issueId, opts) {
     S._prevScrollY = window.scrollY;
     S._issueReturnUrl = window.location.pathname + window.location.search;
   }
+  // goBackFromIssue() relies on window.history.back()/popstate, which has an
+  // unresolved intermittent issue reported specifically for tickets opened
+  // from All Work (not reproducible in automated testing so far). For that
+  // one entry point, this button is rewired to navigate straight back to
+  // All Work directly -- no history.back(), no popstate, so whatever that
+  // issue is, it can't apply. (The ✕ close button isn't a usable fallback
+  // here: body.issue-page .drawer-close-btn is CSS-hidden by design in this
+  // full-page ticket view, this button is the only in-app way out.)
+  var backBtn = $('drawerBackBtn');
+  if (backBtn) {
+    if (S._prevTab === 'allwork') {
+      backBtn.onclick = function () { closeIssueFromAllWork(); };
+    } else {
+      backBtn.onclick = function () { goBackFromIssue(); };
+    }
+  }
   var issueObj = (S.data.issues || []).find(function(i){ return i.id == issueId; });
   var issueKey = issueObj ? issueObj.key : issueId;
+  // Leave the sidebar's expanded space submenu as it is rather than collapsing
+  // it (used to call collapseSpaceSubnav() here unconditionally) -- if we
+  // already know this issue's space, make sure THAT space's menu is the one
+  // showing; openDrawer does the same once the full issue loads, for the case
+  // where the issue wasn't in the local cache yet.
+  if (issueObj && issueObj.space_id) mountSpaceSubnav(issueObj.space_id, S.currentTab);
   if (!opts.skipHistory) {
-    window.history.pushState({ issueId: issueId, returnUrl: S._issueReturnUrl }, '', '/?issue=' + encodeURIComponent(issueKey));
+    // &from=<tab-slug> so a hard refresh on this ticket page can still recover
+    // which tab it was opened from (S._prevTab/currentTab are in-memory JS
+    // state, gone on reload) -- without it, the boot deep-link path had no way
+    // to know the real origin and always assumed Backlog, so "Back" after a
+    // refresh sent an All-Work-opened ticket to Backlog & Sprints instead.
+    var fromSlug = (S.currentView === 'space' && S.currentTab) ? (SPACE_TAB_TO_SLUG[S.currentTab] || '') : '';
+    var issueUrl = '/?issue=' + encodeURIComponent(issueKey) + (fromSlug ? '&from=' + fromSlug : '');
+    window.history.pushState({ issueId: issueId, returnUrl: S._issueReturnUrl }, '', issueUrl);
   }
   document.body.classList.add('issue-page');
   openDrawer(issueId);
@@ -1076,6 +1290,20 @@ var SPRINT_STATUS_COLORS = {
   planning: '#6b7280', active: '#3b82f6', completed: '#10b981'
 };
 
+// Type/priority are admin-configurable per space (migration 016) — an admin
+// can add a value with no entry in PRIORITY_COLORS/badge-type-* CSS. Rather
+// than every such value collapsing to the same flat gray (indistinguishable
+// on a chart, invisible as a badge with no background at all), derive a
+// stable color from the string itself so new values still read as distinct.
+function _hashHue(v) {
+  var s = String(v || ''), h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+function fallbackAccentColor(v) { return 'hsl(' + _hashHue(v) + ',65%,45%)'; }
+function fallbackBadgeBg(v) { return 'hsl(' + _hashHue(v) + ',70%,93%)'; }
+function fallbackBadgeText(v) { return 'hsl(' + _hashHue(v) + ',60%,32%)'; }
+
 // ═══════════════════════════════════════════════════════════
 // HTML BADGE / AVATAR HELPERS
 // ═══════════════════════════════════════════════════════════
@@ -1102,7 +1330,7 @@ function priorityBadge(priority, noCaret) {
   var colors = {
     highest: '#dc2626', high: '#ef4444', medium: '#f59e0b', low: '#3b82f6', lowest: '#6b7280'
   };
-  var color = colors[priority] || '#6b7280';
+  var color = colors[priority] || fallbackAccentColor(priority);
   // No margin-top nudge on the caret — the flex container centres it, and the
   // nudge left it sitting a few pixels below the label.
   var caret = noCaret ? ''
@@ -1125,6 +1353,24 @@ function typeIcon(type) {
 
 function typeLabel(type) {
   return cap(type || 'task');
+}
+
+// badge-type-<type> in styles.css only has rules for the original 5 types --
+// an admin-added type has no matching class, and plain .badge-type has no
+// background/color of its own, so the badge would render as invisible text.
+// Known types keep the real CSS classes (best visual quality); anything else
+// gets an inline-style fallback so it's still a readable, distinct pill.
+function applyTypeBadgeStyle(el, type) {
+  if (!el) return;
+  if (TYPE_ICONS[type]) {
+    el.className = 'badge badge-type badge-type-' + type;
+    el.style.background = '';
+    el.style.color = '';
+  } else {
+    el.className = 'badge badge-type';
+    el.style.background = fallbackBadgeBg(type);
+    el.style.color = fallbackBadgeText(type);
+  }
 }
 
 function sprintStatusBadge(status) {
@@ -1216,26 +1462,21 @@ function getSpaceSprints(spaceId) {
   return (S.data.sprints || []).filter(function (sp) { return sp.space_id == spaceId; });
 }
 
-/** True if user is on the sprint's Developer or QA roster. */
-function isUserInSprint(sp, userId) {
-  if (!sp || !userId) return false;
-  var devs = sp.developer_ids || [];
-  var qas = sp.qa_ids || [];
-  return devs.indexOf(userId) >= 0 || qas.indexOf(userId) >= 0;
-}
-
-/** Non-completed sprints the user may assign when creating an issue. */
+/** Non-completed sprints the user may assign when creating an issue.
+ * Previously also required the current user to be on the sprint's
+ * Developer/QA roster (or be a space/org admin) — per the permission
+ * matrix, any space member who can create an issue can move it into any
+ * open sprint, so a plain member not personally listed on that sprint's
+ * roster still needs to see it here. The issue drawer's own sprint field
+ * already worked this way (see its inline filter for why it deliberately
+ * avoids this function) — this brings Create Issue in line with it. */
 function getIssueFormSprints(spaceId, opts) {
   opts = opts || {};
   if (!spaceId) return [];
   var includeSprintId = opts.includeSprintId;
-  var userId = S.currentUser;
-  var adminForSpace = isOrgAdminUser() || canManageSpace(spaceId);
   return getSpaceSprints(spaceId).filter(function (sp) {
-    if (sp.status === 'completed') return false;
     if (includeSprintId && sp.id === includeSprintId) return true;
-    if (adminForSpace) return true;
-    return isUserInSprint(sp, userId);
+    return sp.status !== 'completed';
   });
 }
 
@@ -1457,6 +1698,8 @@ async function init() {
 
     S.currentUser = me.id;
     S.currentUserObj = me;
+    // First point the app knows who this is — tie the recording to them.
+    if (typeof identifyHotjarUser === 'function') identifyHotjarUser(me);
     localStorage.setItem('sb-user', JSON.stringify(me));
     // Apply DB-stored theme preference
     applyTheme('light', false);
@@ -1551,20 +1794,40 @@ async function init() {
             if (S._prevSpace === undefined || S._prevSpace === null) S._prevSpace = S.currentSpace;
             S.currentSpace = iss.space_id;
             S.currentView = 'space';
-            S.currentTab = 'backlog';
+            // &from=<tab-slug> (set by openIssuePage when the ticket was
+            // originally opened) survives a hard refresh; without it there was
+            // no way to recover which tab this was opened from, so it always
+            // fell back to Backlog even for a ticket opened from All Work.
+            var fromSlug = new URLSearchParams(window.location.search).get('from');
+            var bootTab = SPACE_SLUG_TO_TAB[fromSlug] || 'backlog';
+            S.currentTab = bootTab;
             var space = getSpace(iss.space_id);
             if (space) {
-              // $('spaceNav').removeAttribute('hidden'); // Already have top nav
-              // Removed: navSection hiding - keep visible
-              qsa('.space-item').forEach(function(el) {
-                el.classList.toggle('active', el.dataset.spaceId === iss.space_id);
-              });
+              // mountSpaceSubnav (not just toggling .active) so the sidebar's
+              // Summary/Backlog/Active Sprint/etc submenu actually exists in the
+              // DOM. Without it, S.currentSpace/currentView already claimed
+              // "in this space" while the subnav was never inserted, so the
+              // next real click on this space item saw "already there" and
+              // toggled it CLOSED (navigateTo('home')) instead of opening it —
+              // the reported "needs a second click to open" bug.
+              mountSpaceSubnav(iss.space_id, bootTab);
               qsa('.nav-item[data-tab]').forEach(function(el) {
-                el.classList.toggle('active', el.dataset.tab === 'backlog');
+                el.classList.toggle('active', el.dataset.tab === bootTab);
               });
             }
           }
         } catch(_) {}
+        // openIssuePage normally wires this button's onclick -- this boot path
+        // calls openDrawer directly (the URL is already the deep link, nothing
+        // to push), so it has to be wired here too or the button is dead.
+        var bootBackBtn = $('drawerBackBtn');
+        if (bootBackBtn) {
+          if (S.currentTab === 'allwork') {
+            bootBackBtn.onclick = function () { closeIssueFromAllWork(); };
+          } else {
+            bootBackBtn.onclick = function () { goBackFromIssue(); };
+          }
+        }
         openDrawer(issueParam);
         setTimeout(function() {
           var key = $('drawerKey') && $('drawerKey').textContent;
@@ -1844,7 +2107,6 @@ var SPACE_TAB_TO_SLUG = {
   reports: 'reports',
   mbr: 'mbr',
   allwork: 'all-work',
-  filters: 'filters',
   calendar: 'calendar',
   'space-settings': 'settings'
 };
@@ -1855,17 +2117,15 @@ var SPACE_SLUG_TO_TAB = {
   reports: 'reports',
   mbr: 'mbr',
   'all-work': 'allwork',
-  filters: 'filters',
   calendar: 'calendar',
   settings: 'space-settings'
 };
 
 var SPACE_SUBNAV_ITEMS = [
   { t: 'summary', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M5 4h-1a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>', l: 'Summary' },
-  { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog' },
+  { t: 'backlog', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'Backlog & Sprints' },
   { t: 'sprint', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>', l: 'Active Sprint' },
   { t: 'allwork', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>', l: 'All Work' },
-  { t: 'filters', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>', l: 'Saved Filters' },
   { t: 'calendar', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', l: 'Calendar' },
   { t: 'reports', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>', l: 'Reports', spaceAdminOnly: true },
   { t: 'mbr', i: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>', l: 'MBR', spaceAdminOnly: true },
@@ -1880,13 +2140,36 @@ function getSpaceByKey(key) {
   }) || null;
 }
 
-function spacePath(spaceId, tab) {
+// Space Settings' own sub-tabs (General/People/Custom Fields/Deleted Items/
+// Reports) previously shared one URL no matter which was open — this gives
+// each its own path segment, same pattern as SPACE_TAB_TO_SLUG above.
+var SETTINGS_TAB_TO_SLUG = {
+  general: '', people: 'people', customfields: 'custom-fields',
+  deleted: 'deleted', reports: 'reports'
+};
+var SETTINGS_SLUG_TO_TAB = {
+  '': 'general', people: 'people', 'custom-fields': 'customfields',
+  deleted: 'deleted', reports: 'reports'
+};
+// Same gap, same fix, for MBR's own sub-tabs (Overview/Comparison Trends/Achievements).
+var MBR_TAB_TO_SLUG = { overview: '', comparison: 'comparison', achievements: 'achievements' };
+var MBR_SLUG_TO_TAB = { '': 'overview', comparison: 'comparison', achievements: 'achievements' };
+
+function spacePath(spaceId, tab, subTab) {
   var sp = getSpace(spaceId) || getSpaceByKey(spaceId);
   if (!sp || !sp.key) return '/';
   tab = tab || 'summary';
   var slug = SPACE_TAB_TO_SLUG[tab] || 'summary';
   if (slug === 'summary') return '/space/' + encodeURIComponent(sp.key);
-  return '/space/' + encodeURIComponent(sp.key) + '/' + slug;
+  var base = '/space/' + encodeURIComponent(sp.key) + '/' + slug;
+  if (tab === 'space-settings') {
+    var subSlug = SETTINGS_TAB_TO_SLUG[subTab || _settingsActiveTab];
+    if (subSlug) base += '/' + subSlug;
+  } else if (tab === 'mbr') {
+    var mSlug = MBR_TAB_TO_SLUG[subTab || _mbrActiveTab];
+    if (mSlug) base += '/' + mSlug;
+  }
+  return base;
 }
 
 function yourWorkPath(tab, opts) {
@@ -1896,6 +2179,16 @@ function yourWorkPath(tab, opts) {
   return tab === 'assigned' ? '/my-work' : '/my-work/' + tab;
 }
 
+// Org Admin Settings' left-nav sections previously all shared /settings no
+// matter which was open — same gap as Space Settings/MBR above. Slugs match
+// the section keys themselves (already kebab-case) so there's no separate
+// naming to keep in sync; org-general is the default (empty slug).
+var ADMIN_SECTIONS_WITH_URL = [
+  'org-general', 'org-security', 'org-notifications', 'user-management',
+  'roles-permissions', 'all-spaces', 'global-custom-fields', 'email-settings',
+  'audit-log', 'deleted-tickets'
+];
+
 function appPathForView(view, extras) {
   extras = extras || {};
   if (view === 'yourwork') return yourWorkPath(extras.yourWorkTab || S.yourWorkTab);
@@ -1904,7 +2197,10 @@ function appPathForView(view, extras) {
   if (view === 'global-reports') return '/reports';
   if (view === 'worklog-report') return '/work-log';
   if (view === 'product-roadmap') return '/roadmap';
-  if (view === 'settings') return '/settings';
+  if (view === 'settings') {
+    var section = extras.section || _adminSection;
+    return (section && section !== 'org-general') ? '/settings/' + section : '/settings';
+  }
   return '/';
 }
 
@@ -1941,13 +2237,23 @@ function parseAppRoute() {
   var path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
   var issueKey = new URLSearchParams(window.location.search).get('issue');
   if (issueKey) return { view: 'issue', issueKey: issueKey };
-  var spaceMatch = path.match(/^\/space\/([^/]+)(?:\/([^/]+))?$/i);
+  var spaceMatch = path.match(/^\/space\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/i);
   if (spaceMatch) {
-    return {
+    var spaceTab = SPACE_SLUG_TO_TAB[spaceMatch[2]] || 'summary';
+    var route = {
       view: 'space',
       spaceKey: decodeURIComponent(spaceMatch[1]),
-      tab: SPACE_SLUG_TO_TAB[spaceMatch[2]] || 'summary'
+      tab: spaceTab
     };
+    // Third segment only means something under /settings/<sub-tab> or
+    // /mbr/<sub-tab> — a stray extra segment anywhere else (or an unrecognized
+    // sub-tab slug) falls back to the default sub-tab rather than a broken route.
+    if (spaceTab === 'space-settings' && spaceMatch[3] != null) {
+      route.settingsSubTab = SETTINGS_SLUG_TO_TAB[spaceMatch[3]] || 'general';
+    } else if (spaceTab === 'mbr' && spaceMatch[3] != null) {
+      route.mbrSubTab = MBR_SLUG_TO_TAB[spaceMatch[3]] || 'overview';
+    }
+    return route;
   }
   if (path === '/my-work/open') return { view: 'yourwork', yourWorkTab: 'assigned', openOnly: true };
   if (path === '/my-work' || path === '/my-work/assigned') return { view: 'yourwork', yourWorkTab: 'assigned' };
@@ -1958,6 +2264,10 @@ function parseAppRoute() {
   if (path === '/work-log') return { view: 'worklog-report' };
   if (path === '/roadmap') return { view: 'product-roadmap' };
   if (path === '/settings') return { view: 'settings' };
+  var settingsMatch = path.match(/^\/settings\/([^/]+)$/i);
+  if (settingsMatch && ADMIN_SECTIONS_WITH_URL.indexOf(settingsMatch[1]) >= 0) {
+    return { view: 'settings', adminSection: settingsMatch[1] };
+  }
   return { view: 'home' };
 }
 
@@ -1994,12 +2304,15 @@ function applyRouteFromUrl(opts) {
   if (route.view === 'space') {
     var sp = getSpaceByKey(route.spaceKey);
     if (sp) {
-      navigateToSpace(sp.id, route.tab || 'summary', { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+      navigateToSpace(sp.id, route.tab || 'summary', {
+        skipUrlUpdate: true, replaceUrl: opts.replaceUrl,
+        settingsSubTab: route.settingsSubTab, mbrSubTab: route.mbrSubTab
+      });
       return true;
     }
   }
   if (route.view !== 'home') {
-    navigateTo(route.view, { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+    navigateTo(route.view, { skipUrlUpdate: true, replaceUrl: opts.replaceUrl, adminSection: route.adminSection });
     return true;
   }
   navigateTo('home', { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
@@ -2081,7 +2394,7 @@ function navigateTo(view, opts) {
   else if (view === 'spaces') renderSpacesView();
   else if (view === 'worklog-report') renderWorklogReport();
   else if (view === 'product-roadmap') renderProductRoadmap();
-  else if (view === 'settings') { document.body.classList.add('settings-active'); collapseSidebarForSettings(); renderAdminSettings('org-general'); }
+  else if (view === 'settings') { document.body.classList.add('settings-active'); collapseSidebarForSettings(); renderAdminSettings(opts.adminSection || 'org-general'); }
   else if (view === 'global-reports') renderGlobalReports();
 }
 
@@ -2166,6 +2479,8 @@ function navigateToSpace(spaceId, tab, opts) {
   mountSpaceSubnav(spaceId, tab);
   saveNavState();
 
+  if (tab === 'space-settings' && opts.settingsSubTab) _settingsActiveTab = opts.settingsSubTab;
+  if (tab === 'mbr' && opts.mbrSubTab) _mbrActiveTab = opts.mbrSubTab;
   if (!opts.skipUrlUpdate) syncAppUrl({ replace: opts.replaceUrl });
 
   renderTab(tab, { skipUrlUpdate: true });
@@ -2218,9 +2533,13 @@ function renderTab(tab, opts) {
         S._dataLoadedSpace = S.currentSpace;
       }
       await _initAwMultiSelects();
+      // Restores whatever was last saved for THIS space -- safe to do on every
+      // entry into the tab, not just the first: _awSaveFilterState() runs on
+      // every filter change (inside renderAllWork itself), so localStorage is
+      // always already current and this never clobbers an unsaved edit.
+      _awLoadFilterState();
       renderAllWork();
     })(); break;
-    case 'filters': renderFilters(); break;
     case 'calendar': renderCalendar(); break;
     case 'space-settings': renderSpaceSettings(); break;
   }
@@ -2353,15 +2672,33 @@ function renderSidebar() {
     ? spaces.map(spaceNavItem).join('')
     : '<p class="text-muted sidebar-empty">No spaces</p>';
 
-  // Bind space clicks — open sub-nav for selected space only
+  // Clicking a space in the sidebar is a pure expand/collapse toggle for its
+  // Summary/Backlog/etc submenu -- it never navigates the main content area
+  // by itself (that only happens when a submenu link itself is clicked, via
+  // the .space-subitem delegate below). This is true from anywhere: Home,
+  // All Work, another space, or an open ticket -- clicking a space just
+  // shows or hides its own menu in place.
+  //
+  // An earlier version of this handler tried to distinguish "already viewing
+  // this space" from "not viewing it" using S.currentSpace/currentView, which
+  // is a different kind of state (what's rendered in the main pane) from
+  // "is this space's submenu currently expanded in the sidebar" -- the two
+  // drifted out of sync (e.g. opening a ticket doesn't touch S.currentSpace),
+  // which is what caused the earlier "first click goes home" bug. Reading the
+  // submenu's own DOM presence directly avoids that class of bug entirely.
   qsa('.space-item').forEach(function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
       var spaceId = el.dataset.spaceId;
-      if (String(S.currentSpace) === String(spaceId) && S.currentView === 'space') {
-        navigateTo('home');
+      var alreadyExpanded = !!(el.nextElementSibling && el.nextElementSibling.classList.contains('space-subnav'));
+      if (alreadyExpanded) {
+        collapseSpaceSubnav();
       } else {
-        navigateToSpace(spaceId, 'summary');
+        // Only show the real current tab as active in the submenu if we are
+        // actually navigated into this space right now; otherwise nothing in
+        // the list is marked active until a link in it is clicked.
+        var activeTab = (String(S.currentSpace) === String(spaceId) && S.currentView === 'space') ? S.currentTab : null;
+        mountSpaceSubnav(spaceId, activeTab);
       }
     });
   });
@@ -2691,25 +3028,31 @@ function _drawSpacesGrid(spaces) {
 var _ywCache = null; // { assigned, reported, recent }
 
 var YW_FILTER_DEFS = {
-  type: {
-    opts: [
-      { v: 'task', l: 'Task' }, { v: 'bug', l: 'Bug' }, { v: 'story', l: 'Story' },
-      { v: 'epic', l: 'Epic' }, { v: 'subtask', l: 'Subtask' }
-    ]
-  },
+  // status is a true fixed workflow (issue-state-machine.md) -- type/priority
+  // are NOT: they're per-space configurable (migration 016), and Your Work
+  // spans every space the user belongs to, so there's no single space to read
+  // an option list from. Same "distinct values actually on tickets" approach
+  // used for the All Work filters — see _ywGetTypeOrPriorityOpts below.
   status: {
     opts: [
       { v: 'To Do', l: 'To Do' }, { v: 'In Progress', l: 'In Progress' },
       { v: 'In Review', l: 'In Review' }, { v: 'Done', l: 'Done' }, { v: 'Blocked', l: 'Blocked' }
     ]
-  },
-  priority: {
-    opts: [
-      { v: 'highest', l: 'Highest' }, { v: 'high', l: 'High' }, { v: 'medium', l: 'Medium' },
-      { v: 'low', l: 'Low' }, { v: 'lowest', l: 'Lowest' }
-    ]
   }
 };
+
+function _ywGetTypeOrPriorityOpts(key, issues) {
+  var seen = {};
+  var opts = [];
+  (issues || []).forEach(function (iss) {
+    var v = iss[key];
+    if (!v || seen[v]) return;
+    seen[v] = true;
+    opts.push({ v: v, l: cap(v) });
+  });
+  opts.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return opts;
+}
 
 function _ywGetSpaceOpts(issues) {
   var seen = {};
@@ -2761,6 +3104,7 @@ function _ywGetKeyOpts(issues) {
 function _ywGetFilterOpts(key, issues) {
   if (key === 'space') return _ywGetSpaceOpts(issues);
   if (key === 'key') return _ywGetKeyOpts(issues);
+  if (key === 'type' || key === 'priority') return _ywGetTypeOrPriorityOpts(key, issues);
   return (YW_FILTER_DEFS[key] && YW_FILTER_DEFS[key].opts) || [];
 }
 
@@ -4838,11 +5182,13 @@ function renderSummary() {
     { label: 'In Review', count: inRev, color: STATUS_COLORS['In Review'] },
     { label: 'Done', count: done, color: STATUS_COLORS['Done'] }
   ];
-  var prioGroups = ['highest', 'high', 'medium', 'low', 'lowest'].map(function (p) {
+  // Space's own configured priority list, not the fixed 5 -- an admin-added
+  // priority value's issues used to be silently excluded from this chart.
+  var prioGroups = getIssuePriorityOptionsForSpace(S.currentSpace).map(function (o) {
     return {
-      label: cap(p),
-      count: issues.filter(function (iss) { return iss.priority === p; }).length,
-      color: PRIORITY_COLORS[p]
+      label: o.l,
+      count: issues.filter(function (iss) { return iss.priority === o.v; }).length,
+      color: PRIORITY_COLORS[o.v] || fallbackAccentColor(o.v)
     };
   });
 
@@ -5058,10 +5404,22 @@ function renderBacklog() {
   // drag from it into the next sprint — whereas completed sprints are history
   // and were pushing the backlog further down the page with every sprint.
   function lanesFor(status) {
-    return sprints
-      .filter(function (sp) { return sp.status === status; })
-      .sort(function (a, b) { return (a.position || 0) - (b.position || 0); })
-      .map(sprintLaneHtml).join('');
+    var list = sprints.filter(function (sp) { return sp.status === status; });
+    if (status === 'completed') {
+      // Most-recently-completed first (sprint 3, sprint 2, sprint 1, ...) rather
+      // than the planning-order position, which would show the OLDEST completed
+      // sprint on top — the opposite of what you want once a sprint is history.
+      // completed_at is the real completion moment (set by completeSprint, not
+      // touched by the sweeper's read of end_date); end_date/created_at are
+      // just fallbacks for a sprint completed before that column existed.
+      var completionTime = function (sp) {
+        return new Date(sp.completed_at || sp.end_date || sp.created_at || 0).getTime();
+      };
+      list.sort(function (a, b) { return completionTime(b) - completionTime(a); });
+    } else {
+      list.sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+    }
+    return list.map(sprintLaneHtml).join('');
   }
   // Any sprint with an unexpected status still renders, just above the backlog,
   // rather than silently disappearing from the page.
@@ -5171,6 +5529,12 @@ window._dropToSprint = async function (event, sprintId) {
   if (!issueId) return;
   var targetSprintId = lane.getAttribute('data-sprint-drop');
   if (targetSprintId === 'null') targetSprintId = null;
+  // Dropped back into the lane it already belongs to — nothing actually
+  // changed, so skip the API call and the "Issue moved" toast entirely.
+  var draggedIssue = (S.data.issues || []).find(function (i) { return i.id === issueId; });
+  if (draggedIssue && String(draggedIssue.sprint_id || '') === String(targetSprintId || '')) {
+    return;
+  }
   // Belt-and-braces: completed lanes render without drop handlers, but guard here
   // too so no other path can drop a ticket into closed sprint history.
   if (isSprintClosed(targetSprintId)) {
@@ -5786,7 +6150,11 @@ window._showReportIssues = function(key) {
     row.onclick = function() {
       var id = row.dataset.id;
       close();
-      openDrawer(id);
+      // openIssuePage (not openDrawer directly) so this push a history entry
+      // like every other drawer-opening path — opening straight via openDrawer
+      // only does a replaceState internally, so Back from here used to skip
+      // past the drawer entirely instead of closing it first.
+      openIssuePage(id);
     };
   });
 };
@@ -6993,7 +7361,7 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
   var canEditSpillover = !!data.can_edit_spillover;
   var tableRows = issues.map(function(i) {
     var sc = SCOLORS[i.status] || '#42526e';
-    var pc = PCOLORS[i.priority] || '#6b7280';
+    var pc = PCOLORS[i.priority] || fallbackAccentColor(i.priority);
     var assigneeName = i.assignee ? esc(i.assignee.name) : '<span style="color:var(--text3)">Unassigned</span>';
     var typeIcon = {story:'◈',task:'☑',bug:'⚡',epic:'⬡',subtask:'⊡'}[i.type] || '◈';
     return '<tr style="border-bottom:1px solid var(--border)">' +
@@ -7155,6 +7523,7 @@ async function renderMBR(subTab) {
 
 window._switchMbrTab = function (tab) {
   renderMBR(tab);
+  syncAppUrl();
 };
 
 // Sprint names in this app tend to be long descriptive titles ("Sprint-2:
@@ -8010,22 +8379,117 @@ var AW_FILTER_FIELDS = [
     fromKey: 'dueDateFrom',   toKey: 'dueDateTo' },
   { key: 'startdate', label: 'Start Date', kind: 'date',
     fromKey: 'startDateFrom', toKey: 'startDateTo' },
+  // Same reasoning as the columns fix: Product Type, Team and Description are
+  // builtin fields whose real value lives on the issue row itself, never in
+  // issue_field_values, so filtering them through the generic cf_<id> path
+  // (like _awGetCFFilterFields() used to offer) would silently match nothing.
+  // opts for productType/team are filled in by _awLoadDynamicOpts() from the
+  // space's own custom_fields.options, the same source _awGetCFFilterFields()
+  // would have used -- so this doesn't hardcode a fixed option list that
+  // could drift from what's actually configured for the space.
+  { key: 'productType', label: 'Product Type', kind: 'multi', opts: [] },
+  { key: 'team',         label: 'Team',          kind: 'multi', opts: [] },
+  { key: 'desc',         label: 'Description',   kind: 'cftext' },
 ];
 
 // Which fields are currently shown as rows in the panel
 var _awActiveFields = [];
 
-// Build filter field defs from space custom fields
+// Persist the All Work advanced filters (which fields are shown, plus every
+// value including custom-field ones like Combination) to localStorage, keyed
+// per space. Before this, the whole thing -- _awActiveFields and S.awFilters
+// -- lived only in memory, so a hard refresh reset it to defaults exactly
+// like starting the app fresh; there was never anywhere it survived to.
+function _awFilterStorageKey() {
+  return S.currentSpace ? ('aw-filters-' + S.currentSpace) : null;
+}
+function _awSaveFilterState() {
+  var key = _awFilterStorageKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ activeFields: _awActiveFields, filters: S.awFilters }));
+  } catch (e) { /* storage unavailable/full -- filters just won't persist this time */ }
+}
+function _awLoadFilterState() {
+  var key = _awFilterStorageKey();
+  if (!key) return;
+  try {
+    var raw = localStorage.getItem(key);
+    if (!raw) return;
+    var parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.activeFields)) _awActiveFields = parsed.activeFields;
+    if (parsed && parsed.filters && typeof parsed.filters === 'object') {
+      // Merge onto the default shape rather than replacing outright, so a
+      // stored blob from before some field existed still has every key the
+      // rest of the filter code expects to find.
+      S.awFilters = Object.assign({
+        type: [], status: [], priority: [], assignee: [], sprint: [],
+        productType: [], team: [], desc: '',
+        createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '',
+        dueDateFrom: '', dueDateTo: '', startDateFrom: '', startDateTo: ''
+      }, parsed.filters);
+    }
+  } catch (e) { /* corrupt/unavailable storage -- fall back to current defaults silently */ }
+}
+
+// Distinct values ACTUALLY saved for one custom multi-select field, scoped to
+// issues in the current space. Combination stores a structured
+// {combinations:[...], productTypes:[...]} value (or a bare string for the
+// simple single-combination case) rather than the plain comma-joined string
+// every other multi_select custom field uses -- see the multi-select custom
+// field filter block in renderAllWork() for that plain-comma-joined
+// convention -- so it's parsed with parsePtComboSelection and only its real
+// .combinations are counted; productTypes is a different field entirely and
+// has nothing to do with this one.
+function _awDistinctCFOptions(field) {
+  var spaceIssueIds = {};
+  getSpaceIssues(S.currentSpace).forEach(function (i) { spaceIssueIds[i.id] = true; });
+  var seen = {}, out = [];
+  function add(v) {
+    if (v == null) return;
+    v = String(v).trim();
+    if (!v || seen[v]) return;
+    seen[v] = true;
+    out.push(v);
+  }
+  (S.data.issue_field_values || []).forEach(function (fv) {
+    if (fv.field_id != field.id || !fv.value || !spaceIssueIds[fv.issue_id]) return;
+    if (isCombinationField(field)) {
+      parsePtComboSelection('', fv.value).combinations.forEach(add);
+    } else {
+      String(fv.value).split(',').forEach(add);
+    }
+  });
+  return out.sort(function (a, b) { return a.localeCompare(b); }).map(function (v) { return { v: v, l: v }; });
+}
+
+// Build filter field defs from space custom fields. Excludes builtin fields
+// (Product Type, Team, Description, etc. -- see DONE_BUILTIN_READERS) for the
+// same reason _awGetCFColumns() does: their real value lives on the issue row
+// itself, never in issue_field_values, so a cf_<id> filter for one of them
+// would silently match nothing no matter what the user picks. Those three now
+// have proper native entries in AW_FILTER_FIELDS instead. Genuinely custom
+// fields like Combination, which really do store in issue_field_values, are
+// unaffected.
 function _awGetCFFilterFields() {
   return (S.data.custom_fields || [])
-    .filter(function(f){ return f.space_id == S.currentSpace; })
+    .filter(function(f){ return f.space_id == S.currentSpace && !DONE_BUILTIN_READERS[f.field_key]; })
     .map(function(f) {
       var kind = (f.field_type === 'select' || f.field_type === 'multi_select') ? 'multi'
                : (f.field_type === 'date') ? 'cfdate'
                : 'cftext';
       var fd = { key: 'cf_' + f.id, label: f.name, kind: kind, cfId: f.id, cfType: f.field_type };
       if (kind === 'multi') {
-        fd.opts = (Array.isArray(f.options) ? f.options : []).map(function(o){ return {v: o, l: o}; });
+        // Distinct values ACTUALLY saved on this space's issues for this
+        // field, not the field's configured option list -- same reasoning as
+        // _awDistinctOpts above: a configured option nobody's used yet would
+        // otherwise show up as filterable-but-matches-nothing, and the config
+        // can drift from reality over time. This object is rebuilt fresh on
+        // every call (see _awGetFieldDef), so there's nowhere to persist a
+        // dynamically-loaded value the way the static AW_FILTER_FIELDS entries
+        // do -- computing it inline here every time is the correct fix rather
+        // than a workaround.
+        fd.opts = _awDistinctCFOptions(f);
       }
       if (kind === 'cfdate') {
         fd.fromKey = 'cf_' + f.id + '_from';
@@ -8056,20 +8520,43 @@ function _awAnyActive() {
 }
 
 // Populate dynamic opts for assignee & sprint
+// Distinct values ACTUALLY present on this space's issues right now, for one
+// field. Deliberately not the DB's fixed enum, not the space's member/sprint
+// list, and not a custom field's configured options -- any of those three
+// can drift from what's really on tickets (an option nobody's used yet, a
+// member no ticket is assigned to, an option since removed from config but
+// still saved somewhere). extract(issue) returns an array of raw values found
+// on that issue (usually one, but product_type is a comma-joined multi-value
+// string); label(value) formats it for display, defaulting to the raw value.
+function _awDistinctOpts(extract, label) {
+  var seen = {}, out = [];
+  getSpaceIssues(S.currentSpace).forEach(function (iss) {
+    (extract(iss) || []).forEach(function (v) {
+      if (v == null || v === '') return;
+      var key = String(v);
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(v);
+    });
+  });
+  return out.map(function (v) { return { v: v, l: label ? label(v) : v }; })
+    .sort(function (a, b) { return String(a.l).localeCompare(String(b.l)); });
+}
+
 async function _awLoadDynamicOpts() {
-  var assigneeFd = _awGetFieldDef('assignee');
-  var sprintFd   = _awGetFieldDef('sprint');
-  try {
-    var members = await api('/api/spaces/' + S.currentSpace + '/members');
-    assigneeFd.opts = (members || []).map(function(m){ return {v: m.user_id, l: m.name}; });
-  } catch(_) {}
-  try {
-    var sprintRows = await api('/api/sprints?space_id=' + S.currentSpace);
-    sprintFd.opts = (sprintRows || []).map(function(sp){ return {v: sp.id, l: sp.name}; });
-  } catch(_) {
-    var sprints = (S.data.sprints || []).filter(function(sp){ return sp.space_id == S.currentSpace; });
-    sprintFd.opts = sprints.map(function(sp){ return {v: sp.id, l: sp.name}; });
-  }
+  _awGetFieldDef('type').opts     = _awDistinctOpts(function(i){ return [i.type]; }, typeLabel);
+  _awGetFieldDef('status').opts   = _awDistinctOpts(function(i){ return [i.status]; });
+  _awGetFieldDef('priority').opts = _awDistinctOpts(function(i){ return [i.priority]; }, cap);
+  _awGetFieldDef('assignee').opts = _awDistinctOpts(function(i){ return [i.assignee_id]; }, function(v){
+    var u = findUser(v); return u ? u.name : v;
+  });
+  _awGetFieldDef('sprint').opts   = _awDistinctOpts(function(i){ return [i.sprint_id]; }, function(v){
+    var sp = (S.data.sprints || []).find(function(s){ return s.id == v; }); return sp ? sp.name : v;
+  });
+  _awGetFieldDef('productType').opts = _awDistinctOpts(function(i){
+    return (i.product_type || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+  });
+  _awGetFieldDef('team').opts = _awDistinctOpts(function(i){ return [i.team]; });
 }
 
 // Toggle the filter panel open/closed
@@ -8268,6 +8755,7 @@ window._awClearFilters = function() {
   if (srch) srch.value = '';
   S.awFilters = {
     type: [], status: [], priority: [], assignee: [], sprint: [],
+    productType: [], team: [], desc: '',
     createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '',
     dueDateFrom: '', dueDateTo: '', startDateFrom: '', startDateTo: ''
   };
@@ -8299,6 +8787,16 @@ var AW_ALL_COLUMNS = [
   { key: 'start_date',      label: 'Start Date',     sortCol: 'start_date',   def: false },
   { key: 'created_at',      label: 'Created',        sortCol: 'created_at',   def: false },
   { key: 'fix_description', label: 'Fix Description',sortCol: null,           def: false },
+  // These three had no native column at all -- only a generic cf_<id> one via
+  // _awGetCFColumns(), which reads issue_field_values. Product Type, Team and
+  // Description are builtin fields whose real value lives on the issue row
+  // itself (issues.product_type/team/description, per DONE_BUILTIN_READERS),
+  // never in issue_field_values, so that column always rendered "--" no
+  // matter how much real data existed. Reading the issue property directly
+  // instead, same as every other native column here already does.
+  { key: 'product_type',    label: 'Product Type',   sortCol: null,           def: false },
+  { key: 'team',            label: 'Team',            sortCol: null,           def: false },
+  { key: 'description',     label: 'Description',    sortCol: null,           def: false },
 ];
 var _AW_COL_STORE_KEY = 'sb_aw_cols';
 
@@ -8318,9 +8816,18 @@ function _awSaveVisibleCols(keys) {
   localStorage.setItem(_AW_COL_STORE_KEY, JSON.stringify(keys));
 }
 
-// Get custom field columns for current space
+// Get custom field columns for current space. Excludes any field whose
+// field_key is one of DONE_BUILTIN_READERS's keys -- those store their real
+// value directly on the issue row (issues.product_type, issues.team, etc.),
+// never in issue_field_values, so a cf_<id> column for one of them would
+// always render "--" and would just duplicate a column that already exists
+// natively above (or, for product_type/team/description, the native column
+// added above). Genuinely custom fields like Combination -- whose value
+// really does live in issue_field_values -- still come through normally.
 function _awGetCFColumns() {
-  var spaceFields = (S.data.custom_fields || []).filter(function(f){ return f.space_id == S.currentSpace; });
+  var spaceFields = (S.data.custom_fields || []).filter(function(f){
+    return f.space_id == S.currentSpace && !DONE_BUILTIN_READERS[f.field_key];
+  });
   return spaceFields.map(function(f){
     return { key: 'cf_' + f.id, label: f.name, sortCol: null, def: false, cfId: f.id };
   });
@@ -8363,13 +8870,19 @@ window._awToggleColKey = function(key, on) {
 S.allWorkSort = { col: 'key', dir: 'desc' };
 function renderAllWork(opts) {
   if (!opts || !opts.keepPage) S.allWorkPage = 1;
+  // Every filter mutator (_awAddField, _awRemoveField, _awMultiToggle,
+  // _awSetDate, _awSetCFText, _awClearFilters) calls renderAllWork() right
+  // after changing _awActiveFields/S.awFilters, so this is the one place that
+  // sees every change and can keep localStorage in sync with all of them.
+  _awSaveFilterState();
   var search = ($('allWorkSearch') ? $('allWorkSearch').value : '').toLowerCase().trim();
   var f = S.awFilters;
 
-  var anyFilter = search ||
-    f.type.length || f.status.length || f.priority.length || f.assignee.length || f.sprint.length ||
-    f.createdFrom || f.createdTo || f.updatedFrom || f.updatedTo ||
-    f.dueDateFrom || f.dueDateTo || f.startDateFrom || f.startDateTo;
+  // _awAnyActive() checks every ACTIVE field generically by kind, so unlike
+  // the fixed list this replaced, it correctly covers Product Type/Team/
+  // Description and any custom field (Combination) too -- filtering by only
+  // one of those used to leave the "Clear all" button hidden.
+  var anyFilter = _awAnyActive();
   var clearBtn = $('awClearFilters');
   if (clearBtn) clearBtn.style.display = anyFilter ? '' : 'none';
   var colBtn = $('awColBtn');
@@ -8389,6 +8902,20 @@ function renderAllWork(opts) {
   if (f.priority.length) issues = issues.filter(function(i) { return f.priority.indexOf(i.priority) >= 0; });
   if (f.assignee.length) issues = issues.filter(function(i) { return f.assignee.indexOf(i.assignee_id) >= 0; });
   if (f.sprint.length)   issues = issues.filter(function(i) { return f.sprint.indexOf(i.sprint_id) >= 0; });
+  // Product Type / Team / Description read straight off the issue row, same
+  // as the fields above -- see the AW_FILTER_FIELDS comment for why these
+  // aren't handled through the generic custom-field filter block below.
+  if (f.productType && f.productType.length) {
+    issues = issues.filter(function(i) {
+      var vals = (i.product_type || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+      return f.productType.some(function(a){ return vals.indexOf(a) >= 0; });
+    });
+  }
+  if (f.team && f.team.length) issues = issues.filter(function(i) { return f.team.indexOf(i.team) >= 0; });
+  if (f.desc) {
+    var descQ = f.desc.toLowerCase();
+    issues = issues.filter(function(i) { return (i.description || '').toLowerCase().indexOf(descQ) >= 0; });
+  }
   // Date range filters
   if (f.createdFrom)   issues = issues.filter(function(i) { return i.created_at && i.created_at.slice(0,10) >= f.createdFrom; });
   if (f.createdTo)     issues = issues.filter(function(i) { return i.created_at && i.created_at.slice(0,10) <= f.createdTo; });
@@ -8470,38 +8997,19 @@ function renderAllWork(opts) {
     return '<th class="sortable-th" data-sort-col="' + c + '">' + label + sortIcon(c) + '</th>';
   };
 
-  var hasSelected = S.allWorkSelected.size > 0;
+  // Only an admin/site_admin of this space may select tickets and bulk-delete
+  // (mirrors canDeleteIssue / the backend's ACTION_MIN_ROLE for issue.bulk).
+  // A regular member gets no checkbox column at all -- there is nothing for
+  // them to select, so an empty checkbox column would just be UI noise.
+  var canBulkDelete = canDeleteIssue(S.currentSpace);
+  var hasSelected = canBulkDelete && S.allWorkSelected.size > 0;
   var html = '';
 
-  if (hasSelected) {
-    // Build assignee options from space members
-    var memberOpts = '<option value="">Assignee\u2026</option>';
-    var spaceMembers = getSpaceMembers(S.currentSpace);
-    if (!spaceMembers.length) spaceMembers = S.data.users || [];
-    spaceMembers.forEach(function(u) { memberOpts += '<option value="' + u.id + '">' + esc(u.name) + '</option>'; });
-
-    // Build sprint options
-    var sprintOpts = '<option value="">Sprint\u2026</option><option value="__none__">None (Backlog)</option>';
-    (S.data.sprints || []).filter(function(sp){ return sp.space_id == S.currentSpace; }).forEach(function(sp) {
-      sprintOpts += '<option value="' + sp.id + '">' + esc(sp.name) + '</option>';
-    });
-
-    html += '<div class="bulk-bar">' +
-      '<span class="bulk-count">' + S.allWorkSelected.size + ' issue' + (S.allWorkSelected.size > 1 ? 's' : '') + ' selected</span>' +
-      '<div class="bulk-actions">' +
-      '<select id="bulkStatusChange" class="input input-sm" title="Change status"><option value="">Status\u2026</option>' +
-        '<option value="To Do">To Do</option><option value="In Progress">In Progress</option>' +
-        '<option value="In Review">In Review</option><option value="Done">Done</option>' +
-        '<option value="Blocked">Blocked</option></select>' +
-      '<select id="bulkPriorityChange" class="input input-sm" title="Change priority"><option value="">Priority\u2026</option>' +
-        '<option value="critical">Critical</option><option value="high">High</option>' +
-        '<option value="medium">Medium</option><option value="low">Low</option></select>' +
-      '<select id="bulkAssigneeChange" class="input input-sm" title="Change assignee">' + memberOpts + '</select>' +
-      '<select id="bulkSprintChange" class="input input-sm" title="Move to sprint">' + sprintOpts + '</select>' +
-      '<button class="btn btn-sm btn-danger" onclick="window._bulkDelete()">🗑 Delete</button>' +
-      '</div>' +
-      '<button class="btn btn-sm btn-ghost bulk-deselect" onclick="window._bulkDeselect()" title="Clear selection">✕</button>' +
-      '</div>';
+  var bulkWrap = $('awBulkDeleteWrap');
+  if (bulkWrap) {
+    bulkWrap.style.display = hasSelected ? 'flex' : 'none';
+    var bulkCountEl = $('awBulkDeleteCount');
+    if (bulkCountEl) bulkCountEl.textContent = S.allWorkSelected.size + ' selected';
   }
 
   var visCols = _awGetVisibleCols();
@@ -8511,7 +9019,7 @@ function renderAllWork(opts) {
   var pagedIssues = issues.slice(0, PAGE_SIZE * (S.allWorkPage || 1));
 
   html += '<table class="data-table" style="min-width:1200px;width:100%"><thead><tr>' +
-    '<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>' +
+    (canBulkDelete ? ('<th><input type="checkbox" id="allWorkSelectAll"' + (S.allWorkSelected.size === issues.length && issues.length > 0 ? ' checked' : '') + '></th>') : '') +
     visCols.map(function(col) {
       return col.sortCol
         ? th(col.label, col.sortCol)
@@ -8528,7 +9036,7 @@ function renderAllWork(opts) {
     var iid = iss.id;
     var nav = 'openIssuePage(\'' + iid + '\')';
     html += '<tr class="clickable-row" onclick="' + nav + '">' +
-      '<td onclick="event.stopPropagation()"><input type="checkbox" data-issue-check="' + iid + '"' + checked + '></td>' +
+      (canBulkDelete ? ('<td onclick="event.stopPropagation()"><input type="checkbox" data-issue-check="' + iid + '"' + checked + '></td>') : '') +
       visCols.map(function(col) {
         var cell = '';
         switch(col.key) {
@@ -8546,12 +9054,19 @@ function renderAllWork(opts) {
           case 'created_at':      cell = '<td onclick="' + nav + '">' + (fmtDateShort(iss.created_at) || '\u2014') + '</td>'; break;
           case 'reporter':        cell = '<td onclick="' + nav + '">' + (reporter ? esc(reporter.name) : '\u2014') + '</td>'; break;
           case 'fix_description': cell = '<td onclick="' + nav + '">' + (iss.fix_description ? esc(iss.fix_description.slice(0,60)) + (iss.fix_description.length>60?'…':'') : '\u2014') + '</td>'; break;
+          case 'product_type':    cell = '<td onclick="' + nav + '">' + (iss.product_type ? esc(iss.product_type.split(',').map(function(t){ return t.trim(); }).join(', ')) : '—') + '</td>'; break;
+          case 'team':             cell = '<td onclick="' + nav + '">' + (iss.team ? esc(iss.team) : '—') + '</td>'; break;
+          case 'description':      cell = '<td onclick="' + nav + '">' + (iss.description ? esc(iss.description.slice(0,60)) + (iss.description.length>60?'…':'') : '—') + '</td>'; break;
           default:
             // Custom field column (cf_<fieldId>)
             if (col.key.indexOf('cf_') === 0) {
               var cfId = col.cfId || col.key.replace('cf_','');
               var cfVal = (S.data.issue_field_values || []).find(function(v){ return v.issue_id == iss.id && v.field_id == cfId; });
-              cell = '<td onclick="' + nav + '">' + (cfVal && cfVal.value ? esc(cfVal.value) : '\u2014') + '</td>';
+              var cfField = (S.data.custom_fields || []).find(function(f){ return f.id == cfId; });
+              var cfDisplay = cfVal && cfVal.value
+                ? (isCombinationField(cfField) ? formatCombinationFieldDisplayValue(cfVal.value) : cfVal.value)
+                : '';
+              cell = '<td onclick="' + nav + '">' + (cfDisplay ? esc(cfDisplay) : '\u2014') + '</td>';
             } else {
               cell = '<td onclick="' + nav + '">\u2014</td>';
             }
@@ -8616,28 +9131,6 @@ function renderAllWork(opts) {
     };
   });
 
-  // Generic bulk field change handler
-  async function doBulkUpdate(field, value) {
-    if (!value) return;
-    var ids = Array.from(S.allWorkSelected);
-    var updates = {};
-    if (field === 'sprint_id') updates.sprint_id = value === '__none__' ? null : value;
-    else updates[field] = value;
-    await api('/api/issues/bulk', 'POST', { ids: ids, updates: updates });
-    S.allWorkSelected.clear();
-    await refreshData();
-    renderAllWork();
-    toast('Updated ' + ids.length + ' issue' + (ids.length > 1 ? 's' : ''));
-  }
-
-  var bulkStatus   = $('bulkStatusChange');
-  var bulkPriority = $('bulkPriorityChange');
-  var bulkAssignee = $('bulkAssigneeChange');
-  var bulkSprint   = $('bulkSprintChange');
-  if (bulkStatus)   bulkStatus.onchange   = function() { doBulkUpdate('status',      bulkStatus.value); };
-  if (bulkPriority) bulkPriority.onchange = function() { doBulkUpdate('priority',    bulkPriority.value); };
-  if (bulkAssignee) bulkAssignee.onchange = function() { doBulkUpdate('assignee_id', bulkAssignee.value); };
-  if (bulkSprint)   bulkSprint.onchange   = function() { doBulkUpdate('sprint_id',   bulkSprint.value); };
 }
 
 window._bulkDelete = async function () {
@@ -8689,105 +9182,6 @@ window._bulkDeselect = function() {
 };
 
 // ═══════════════════════════════════════════════════════════
-// FILTERS TAB
-// ═══════════════════════════════════════════════════════════
-function renderFilters() {
-  var filters = (S.data.saved_filters || []).filter(function (f) {
-    return f.space_id == S.currentSpace || f.user_id == S.currentUser;
-  });
-
-  if (!filters.length) {
-    $('filtersList').innerHTML = '<p class="placeholder-text">No saved filters. Create one to save your search criteria.</p>';
-    return;
-  }
-
-  var html = '';
-  for (var i = 0; i < filters.length; i++) {
-    var f = filters[i];
-    var conditions = [];
-    try {
-      conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-    } catch (e) { conditions = []; }
-    var condPreview = conditions.length
-      ? conditions.map(function (c) { return c.field + ' ' + c.operator + ' ' + c.value; }).join(', ')
-      : 'No conditions';
-
-    html += '<div class="filter-card">' +
-      '<div class="filter-card-header"><h4>' + esc(f.name) + '</h4><div class="filter-card-badges">' +
-      (f.is_shared ? '<span class="badge badge-muted">Shared</span>' : '') +
-      (f.is_pinned ? '<span class="badge badge-muted">Pinned</span>' : '') +
-      '</div></div>' +
-      '<p class="text-muted">' + esc(condPreview) + '</p>' +
-      '<div class="filter-card-actions">' +
-      '<button class="btn btn-sm btn-outline" onclick="window._applyFilter(\'' + f.id + '\')">Apply</button>' +
-      '<button class="btn btn-sm btn-outline" onclick="window._editFilter(\'' + f.id + '\')">Edit</button>' +
-      '<button class="btn btn-sm btn-outline" onclick="window._deleteFilter(\'' + f.id + '\')">Delete</button>' +
-      '</div></div>';
-  }
-  $('filtersList').innerHTML = html;
-}
-
-window._applyFilter = function (filterId) {
-  var f = (S.data.saved_filters || []).find(function (x) { return x.id == filterId; });
-  if (!f) return;
-  renderTab('allwork');
-  try {
-    var conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-    if (conditions.length && conditions[0].value) {
-      $('allWorkSearch').value = conditions[0].value;
-      renderAllWork();
-    }
-  } catch (e) { /* ignore parse errors */ }
-};
-
-window._editFilter = function (filterId) {
-  var f = (S.data.saved_filters || []).find(function (x) { return x.id == filterId; });
-  if (!f) return;
-  $('filterId').value = f.id;
-  $('filterSpaceId').value = f.space_id || S.currentSpace;
-  $('filterNameInput').value = f.name || '';
-  $('filterShared').checked = !!f.is_shared;
-  $('filterPinned').checked = !!f.is_pinned;
-  $('filterModalTitle').textContent = 'Edit Filter';
-  var conditions = [];
-  try {
-    conditions = f.conditions ? (typeof f.conditions === 'string' ? JSON.parse(f.conditions) : f.conditions) : [];
-  } catch (e) { /* ignore */ }
-  renderFilterConditions(conditions);
-  openModal('modal-filter');
-};
-
-window._deleteFilter = async function (filterId) {
-  var ok = await confirmDialog('Delete this filter?');
-  if (!ok) return;
-  await api('/api/filters/' + filterId, 'DELETE');
-  await refreshData();
-  renderFilters();
-  toast('Filter deleted');
-};
-
-function renderFilterConditions(conditions) {
-  var c = $('filterConditions');
-  var html = '';
-  for (var i = 0; i < conditions.length; i++) {
-    var cond = conditions[i];
-    html += '<div class="filter-condition-row" data-cond-idx="' + i + '">' +
-      '<select class="input input-sm fc-field">' +
-      '<option value="status"' + (cond.field === 'status' ? ' selected' : '') + '>Status</option>' +
-      '<option value="priority"' + (cond.field === 'priority' ? ' selected' : '') + '>Priority</option>' +
-      '<option value="type"' + (cond.field === 'type' ? ' selected' : '') + '>Type</option>' +
-      '<option value="assignee_id"' + (cond.field === 'assignee_id' ? ' selected' : '') + '>Assignee</option></select>' +
-      '<select class="input input-sm fc-op">' +
-      '<option value="equals"' + (cond.operator === 'equals' ? ' selected' : '') + '>equals</option>' +
-      '<option value="not_equals"' + (cond.operator === 'not_equals' ? ' selected' : '') + '>not equals</option>' +
-      '<option value="contains"' + (cond.operator === 'contains' ? ' selected' : '') + '>contains</option></select>' +
-      '<input type="text" class="input input-sm fc-value" value="' + esc(cond.value || '') + '">' +
-      '<button type="button" class="btn btn-sm btn-outline" onclick="this.closest(\'.filter-condition-row\').remove()">x</button></div>';
-  }
-  c.innerHTML = html;
-}
-
-// ═══════════════════════════════════════════════════════════
 // SPACE SETTINGS TAB (with sub-tabs: General, People, Custom Fields)
 // ═══════════════════════════════════════════════════════════
 var _settingsActiveTab = 'general';
@@ -8828,6 +9222,7 @@ function renderSpaceSettings(subTab) {
 window._switchSettingsTab = function (tab) {
   _settingsActiveTab = tab;
   renderSpaceSettings(tab);
+  syncAppUrl();
 };
 
 function renderSettingsGeneral(space) {
@@ -9256,7 +9651,10 @@ function formatFieldShowIn(field) {
 }
 
 function isLockedBuiltinField(field) {
-  return !!(field && field.is_builtin && field.field_key === 'title');
+  // Options are now freely editable on type/priority (migration 016), but the
+  // field itself must always exist — deleting it would leave the space with no
+  // way to set a value that Create Issue always shows as required.
+  return !!(field && field.is_builtin && ['title', 'type', 'priority'].indexOf(field.field_key) >= 0);
 }
 
 function isCombinationField(field) {
@@ -9321,10 +9719,6 @@ function readShowInFromForm() {
 // on a bug. `required_types` narrows is_required to the listed types.
 // An EMPTY or missing list means "every type", so every field that was already
 // required before this feature keeps behaving exactly the same.
-// Derived from ISSUE_TYPES so the checkbox list can never offer a type the
-// database would reject, or miss one that was added.
-var REQUIRED_TYPE_CHOICES = enumOpts(ISSUE_TYPES);
-
 function normalizeTypeList(list) {
   if (!Array.isArray(list)) return [];
   return list.map(function (t) { return String(t).toLowerCase().trim(); }).filter(Boolean);
@@ -9338,12 +9732,17 @@ function fieldRequiredForType(field, type) {
   return types.indexOf(String(type || '').toLowerCase().trim()) >= 0;
 }
 
-function renderRequiredTypeChoices(selected) {
+// Type is admin-configurable per space (migration 016) — the checkbox list
+// must reflect the SPACE's own current Type options, not the fixed 5, or a
+// newly-added type could never be selected here and a removed one would show
+// as a stale, unremovable checkbox.
+function renderRequiredTypeChoices(selected, spaceId) {
   var box = $('customFieldRequiredTypes');
   if (!box) return;
+  var choices = getIssueTypeOptionsForSpace(spaceId || S.currentSpace);
   var sel = normalizeTypeList(selected);
   var all = sel.length === 0;                     // unset shows as "all ticked"
-  box.innerHTML = REQUIRED_TYPE_CHOICES.map(function (c) {
+  box.innerHTML = choices.map(function (c) {
     var on = all || sel.indexOf(c.v) >= 0;
     return '<label><input type="checkbox" class="cf-req-type" value="' + c.v + '"' +
       (on ? ' checked' : '') + '> ' + c.l + '</label>';
@@ -9367,9 +9766,10 @@ function syncRequiredTypesVisibility() {
 
 function formatRequiredForTypes(field) {
   if (!field || !field.is_required) return 'No';
+  var choices = getIssueTypeOptionsForSpace(field.space_id);
   var types = normalizeTypeList(field.required_types);
-  if (!types.length || types.length === REQUIRED_TYPE_CHOICES.length) return 'Yes — all types';
-  var labels = REQUIRED_TYPE_CHOICES
+  if (!types.length || types.length === choices.length) return 'Yes — all types';
+  var labels = choices
     .filter(function (c) { return types.indexOf(c.v) >= 0; })
     .map(function (c) { return c.l; });
   return 'Yes — ' + (labels.length ? labels.join(', ') : 'no types');
@@ -9404,9 +9804,10 @@ function paintSettingsCustomFields(space) {
     var optionsDisplay = '\u2014';
     if (isCombinationField(f)) {
       var pg = parseCombinationFieldOptions(f);
-      optionsDisplay = 'Message: ' + (pg.groups.Message || []).length +
-        ', Mail: ' + (pg.groups.Email || []).length +
-        ', Content: ' + (pg.groups.Content || []).length;
+      var ptOpts = getProductTypeOptionsForSpace(space.id);
+      optionsDisplay = ptOpts.length
+        ? ptOpts.map(function (o) { return o.l + ': ' + (pg.groups[o.v] || []).length; }).join(', ')
+        : 'No Product Type options configured';
     } else if (f.is_builtin && (f.field_key === 'product_type' || f.field_key === 'team' || f.field_key === 'type' || f.field_key === 'priority')) {
       var optVals = normalizeCFOptions(f.options);
       optionsDisplay = optVals.length ? optVals.join(', ') : formatFieldOptionsForEditor(f);
@@ -9715,12 +10116,13 @@ function openCustomFieldModal(field) {
   var isBuiltin = !!(field && field.is_builtin);
   var isProductTypeBuiltin = field && isBuiltinProductTypeField(field);
   // Built-in selects whose choices are NOT ours to edit:
-  //   type, priority → fixed by CHECK constraints on the issues table, so a value
-  //                    added here can never be saved (the insert would fail);
-  //   sprint         → the choices come from the sprints table, not from options.
-  // The Options box was offered for all three even though nothing reads it — a
-  // dead control that invited an admin to configure something that cannot work.
-  var FIXED_OPTION_BUILTINS = ['type', 'priority', 'status', 'sprint'];
+  //   status  → the workflow state machine (.claude/rules/issue-state-machine.md)
+  //             hardcodes these 4 values and the transitions between them;
+  //   sprint  → the choices come from the sprints table, not from options.
+  // type/priority WERE in this list too, back when the issues table had a DB
+  // CHECK constraint pinning them to 5 fixed values each (migration 016 dropped
+  // it) — they're now configurable exactly like Team/Product Type.
+  var FIXED_OPTION_BUILTINS = ['status', 'sprint'];
   var optionsAreFixed = isBuiltin && FIXED_OPTION_BUILTINS.indexOf(field.field_key) >= 0;
   var canEditOptions = isCombo || isProductTypeBuiltin ||
     (isBuiltin && field.field_type === 'select' && !optionsAreFixed) ||
@@ -9731,20 +10133,15 @@ function openCustomFieldModal(field) {
     $('customFieldName').value = field.name || '';
     $('customFieldType').value = field.field_type || field.type || 'text';
     $('customFieldRequired').checked = !!(field.is_required || field.required);
-    renderRequiredTypeChoices(field.required_types);
+    renderRequiredTypeChoices(field.required_types, field.space_id);
     writeShowInToForm(field);
     if (isCombo) {
-      var parsed = parseCombinationFieldOptions(field);
-      $('cfComboMessage').value = (parsed.groups.Message || []).join('\n');
-      $('cfComboEmail').value = (parsed.groups.Email || []).join('\n');
-      $('cfComboContent').value = (parsed.groups.Content || []).join('\n');
       $('customFieldOptions').value = '';
     } else {
       $('customFieldOptions').value = formatFieldOptionsForEditor(field);
-      $('cfComboMessage').value = '';
-      $('cfComboEmail').value = '';
-      $('cfComboContent').value = '';
     }
+    // renderCombinationGroupEditors runs from toggleCustomFieldOptions below,
+    // which is always called at the end of this function with the real field.
   } else {
     $('customFieldModalTitle').textContent = 'Add Custom Field';
     $('customFieldId').value = '';
@@ -9753,9 +10150,6 @@ function openCustomFieldModal(field) {
     $('customFieldRequired').checked = false;
     renderRequiredTypeChoices([]);
     $('customFieldOptions').value = '';
-    $('cfComboMessage').value = '';
-    $('cfComboEmail').value = '';
-    $('cfComboContent').value = '';
     if ($('customFieldShowInCreate')) $('customFieldShowInCreate').checked = true;
     if ($('customFieldShowInDrawer')) $('customFieldShowInDrawer').checked = true;
     if ($('customFieldName')) $('customFieldName').readOnly = false;
@@ -9779,26 +10173,75 @@ function openCustomFieldModal(field) {
     reqBox._reqTypesBound = true;
     reqBox.addEventListener('change', syncRequiredTypesVisibility);
   }
-  toggleCustomFieldOptions(isCombo ? field : (canEditOptions ? field : null));
+  toggleCustomFieldOptions(isCombo ? field : (canEditOptions ? field : null), !isCombo && !canEditOptions);
   openModal('modal-custom-field');
 }
 window.openCustomFieldModal = openCustomFieldModal;
 
-function toggleCustomFieldOptions(editingField) {
+function toggleCustomFieldOptions(editingField, forceHide) {
   var type = $('customFieldType').value;
   var isCombo = editingField && isCombinationField(editingField);
   if (!isCombo && $('customFieldName') && ($('customFieldName').value || '').toLowerCase().trim() === 'combination') {
     isCombo = true;
   }
   var isProductType = editingField && isBuiltinProductTypeField(editingField);
-  var show = ((type === 'select' || type === 'multi_select') && !isCombo) || isProductType;
+  // forceHide is set by openCustomFieldModal for builtins whose options are NOT
+  // editable (status/sprint) — without it, this fell back to reading the Field
+  // Type select's raw DOM value ('select'), which stays 'select' for those
+  // fields too, so the box showed anyway and a saved edit silently no-op'd.
+  var show = !forceHide && (((type === 'select' || type === 'multi_select') && !isCombo) || isProductType);
   $('customFieldOptionsGroup').hidden = !show;
   if ($('customFieldCombinationGroups')) {
     $('customFieldCombinationGroups').hidden = !isCombo;
+    if (isCombo) {
+      var existingGroups = (editingField && isCombinationField(editingField))
+        ? parseCombinationFieldOptions(editingField).groups
+        : {};
+      renderCombinationGroupEditors(existingGroups);
+    }
   }
   if ($('customFieldOptions') && isProductType) {
     $('customFieldOptions').placeholder = 'Message, Email, Content, Manage, Infra';
   }
+}
+
+// One textarea per Product Type option THIS SPACE currently has configured
+// (getProductTypeOptionsForSpace already reads that from custom_fields.options
+// -- see the buildProductTypeComboPickerHtml call site, which was already
+// wired this way). Combination used to offer exactly 3 fixed boxes
+// (Message/Email/Content) regardless of what Product Type actually had
+// configured, so a space could never set up combinations for any type beyond
+// those three, no matter what it added to Product Type's own options.
+// existingGroups keys that no longer match a current Product Type option are
+// intentionally dropped from view here -- their combinations still exist in
+// storage until this form is actually saved, but there's no live product type
+// left to attach the box to.
+function renderCombinationGroupEditors(existingGroups) {
+  var container = $('cfComboGroupsList');
+  if (!container) return;
+  existingGroups = existingGroups || {};
+  var ptOptions = getProductTypeOptionsForSpace(S.currentSpace);
+  if (!ptOptions.length) {
+    container.innerHTML = '<p class="text-muted" style="font-size:12px">' +
+      'This space has no Product Type options configured yet — add some on the Product Type field first.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  ptOptions.forEach(function (o, i) {
+    var label = document.createElement('label');
+    label.className = 'form-label';
+    label.style.marginTop = i === 0 ? '0' : '10px';
+    label.style.display = 'block';
+    label.textContent = o.l;
+    var ta = document.createElement('textarea');
+    ta.className = 'input';
+    ta.dataset.ptGroup = o.v;
+    ta.rows = 4;
+    ta.placeholder = 'Source - Destination';
+    ta.value = (existingGroups[o.v] || []).join('\n');
+    container.appendChild(label);
+    container.appendChild(ta);
+  });
 }
 
 function parseCombinationLines(text) {
@@ -9808,11 +10251,10 @@ function parseCombinationLines(text) {
 }
 
 function buildCombinationOptionsFromEditor() {
-  var groups = {
-    Message: parseCombinationLines($('cfComboMessage') && $('cfComboMessage').value),
-    Email: parseCombinationLines($('cfComboEmail') && $('cfComboEmail').value),
-    Content: parseCombinationLines($('cfComboContent') && $('cfComboContent').value)
-  };
+  var groups = {};
+  qsa('#cfComboGroupsList textarea[data-pt-group]').forEach(function (ta) {
+    groups[ta.dataset.ptGroup] = parseCombinationLines(ta.value);
+  });
   return {
     v: 2,
     groups: groups,
@@ -9994,11 +10436,16 @@ function addDescInlineImageChip(tray, url, alt, fp) {
 async function uploadDescImageFile(file) {
   var fd = new FormData();
   fd.append('files', file, file.name || 'screenshot.png');
-  var res = await fetch('/api/comments/upload', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + getAuthToken() },
-    body: fd
-  });
+  var res;
+  try {
+    res = await fetch('/api/comments/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + getAuthToken() },
+      body: fd
+    });
+  } catch (networkErr) {
+    throw new Error(friendlyFetchErrorMessage(networkErr, 'Upload failed'));
+  }
   if (!res.ok) {
     var err = 'Upload failed';
     try { var j = await res.json(); if (j.error) err = j.error; } catch (_) {}
@@ -10084,13 +10531,14 @@ function normalizeDescInlineImages(editorEl) {
   }
 }
 
-async function handleDescImagePaste(editorEl, file) {
+async function handleDescImagePaste(editorEl, file, fieldLabel) {
+  fieldLabel = fieldLabel || 'description';
   if (!editorEl || !file) return;
   var fp = _fileFingerprint(file);
   var already = editorEl.querySelectorAll('.desc-inline-img[data-fp]');
   for (var i = 0; i < already.length; i++) {
     if (already[i].getAttribute('data-fp') === fp) {
-      toast('This screenshot is already in the description', 'warning');
+      toast('This screenshot is already in the ' + fieldLabel, 'warning');
       return;
     }
   }
@@ -10098,7 +10546,7 @@ async function handleDescImagePaste(editorEl, file) {
     var uploaded = await uploadDescImageFile(file);
     insertDescImageAtCaret(editorEl, uploaded.url, file.name || 'Screenshot', fp);
     if (editorEl.id === 'drawerDesc' || editorEl.id === 'drawerFixDesc') markDrawerDescDirty(editorEl.id);
-    toast('Screenshot added to description', 'success');
+    toast('Screenshot added to ' + fieldLabel, 'success');
   } catch (e) {
     toast(e.message || 'Could not upload screenshot', 'error');
   }
@@ -10296,12 +10744,13 @@ document.addEventListener('change', function(e) {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + getAuthToken() },
       body: fd
-    }).then(function(r) { return r.json(); }).then(function() {
+    }).then(async function(r) {
+      var data; try { data = await r.json(); } catch (_) { data = {}; }
+      if (!r.ok) throw new Error(data.error || 'Upload failed');
       toast('Attachment uploaded');
-      api('/api/issues/' + S.drawerIssueId).then(function(issue) {
-        if (issue) renderDrawerAttachments(issue.attachments || []);
-      });
-    }).catch(function() { toast('Upload failed', 'error'); });
+      var issue = await api('/api/issues/' + S.drawerIssueId);
+      if (issue) renderDrawerAttachments(issue.attachments || []);
+    }).catch(function(e) { toast(friendlyFetchErrorMessage(e, 'Upload failed'), 'error'); });
     e.target.value = '';
   }
 });
@@ -10338,9 +10787,23 @@ $('customFieldForm').addEventListener('submit', async function (e) {
     return;
   }
 
+  var savingField = id ? (S.data.custom_fields || []).find(function (f) { return String(f.id) === String(id); }) : null;
+  // 'epic' and 'subtask' are load-bearing string literals elsewhere (Roadmap
+  // grouping, the Add Subtask flow) — unlike every other Type value, they can't
+  // become admin-removable without rewriting those features, so the editor
+  // blocks it here instead of silently letting a save break them.
+  if (savingField && savingField.is_builtin && savingField.field_key === 'type') {
+    var RESERVED_TYPES = ['epic', 'subtask'];
+    var missingReserved = RESERVED_TYPES.filter(function (t) { return options.indexOf(t) < 0; });
+    if (missingReserved.length) {
+      toast('"' + missingReserved.join('", "') + '" can’t be removed from Type — required by Roadmap/subtasks.', 'error');
+      return;
+    }
+  }
+
   try {
     if (id) {
-      var editingField = (S.data.custom_fields || []).find(function (f) { return String(f.id) === String(id); });
+      var editingField = savingField;
       var payload;
       if (editingField && editingField.is_builtin) {
         payload = { is_required: required, options: options, show_in: showIn, required_types: requiredTypes };
@@ -10488,6 +10951,19 @@ async function openDrawer(issueId) {
   }
 
   if (!issue) { toast('Could not load issue', 'error'); return; }
+  // The fetch above is async — if the user hit Back (popstate → _closeIssueDrawer
+  // clears drawerIssueId) or opened a different issue while it was in flight,
+  // this response is stale. Rendering it anyway re-opens a drawer the user just
+  // closed and stomps the URL popstate just restored, which is why Back
+  // sometimes looked like it needed two clicks: the first click's popstate ran
+  // correctly, then this exact code below undid it a moment later.
+  if (S.drawerIssueId !== issueId) return;
+  // Fallback for openIssuePage's same mount call — only needed when the issue
+  // wasn't already in the local cache at click time, so its space_id wasn't
+  // known synchronously yet.
+  if (issue.space_id && !document.querySelector('.space-item[data-space-id="' + issue.space_id + '"] + .space-subnav')) {
+    mountSpaceSubnav(issue.space_id, S.currentTab);
+  }
   trackRecentIssueView(issue);
   updateDrawerStarBtn(issue.id);
   var starBtn = $('drawerStarBtn');
@@ -10498,7 +10974,16 @@ async function openDrawer(issueId) {
       toggleIssueFavorite(S.drawerIssueId);
     };
   }
-  if (issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); window._currentIssueKey = issue.key; }
+  if (issue.key) {
+    // Preserve an existing &from=<tab> query param rather than rebuilding the
+    // URL bare -- this used to silently drop it, so a hard refresh landed back
+    // on the boot path's hardcoded 'backlog' assumption every time regardless
+    // of what openIssuePage had just encoded.
+    var existingFrom = new URLSearchParams(window.location.search).get('from');
+    var replaceUrl = '/?issue=' + encodeURIComponent(issue.key) + (existingFrom ? '&from=' + existingFrom : '');
+    history.replaceState({ issueId: issueId }, '', replaceUrl);
+    window._currentIssueKey = issue.key;
+  }
   document.body.classList.add('issue-page'); void document.body.offsetHeight; var dp = document.querySelector('.drawer-panel'); if(dp){ dp.style.position='fixed'; dp.style.inset='0'; dp.style.width='100vw'; dp.style.maxWidth='100vw'; dp.style.height='100vh'; dp.style.zIndex='99999'; dp.style.display='flex'; dp.style.flexDirection='column'; } $('issueDrawer').removeAttribute('hidden');
 
   // Parent breadcrumb for subtasks
@@ -10519,7 +11004,7 @@ async function openDrawer(issueId) {
 
   $('drawerKey').textContent = issue.key || (issue.project_key ? issue.project_key + '-?' : '#' + issue.id);
   $('drawerType').textContent = typeLabel(issue.type);
-  $('drawerType').className = 'badge badge-type badge-type-' + (issue.type || 'task');
+  applyTypeBadgeStyle($('drawerType'), issue.type || 'task');
   setDrawerTitleValue(issue.title || '');
   // Render description - convert plain text to HTML safely
   var descText = issue.description || '';
@@ -10558,6 +11043,10 @@ async function openDrawer(issueId) {
   var fixBtns = $('drawerFixDescBtns'); if (fixBtns) fixBtns.style.display = 'none';
 
   $('drawerStatus').value = issue.status || 'To Do';
+  // Rebuilt from this issue's own space's Priority custom field — same reason
+  // as Team/Product Type below: index.html's old fixed 5-option list never
+  // reflected an admin's actual configured priority values for the space.
+  $('drawerPriority').innerHTML = buildBuiltinSelectOptionsHtml('priority', issue.space_id, issue.priority, null);
   $('drawerPriority').value = issue.priority || 'medium';
 
   var spaceId = issue.space_id || S.currentSpace;
@@ -10614,8 +11103,18 @@ async function openDrawer(issueId) {
   $('drawerPoints').value = issue.story_points != null ? issue.story_points : '';
   $('drawerStartDate').value = fmtDateISO(issue.start_date);
   $('drawerDueDate').value = fmtDateISO(issue.due_date);
-  if ($('drawerTeam')) $('drawerTeam').value = issue.team || '';
-  if ($('drawerProductType')) $('drawerProductType').value = issue.product_type || '';
+  // Rebuilt from this issue's own space's custom_fields.options every render
+  // -- see buildBuiltinSelectOptionsHtml -- rather than the fixed HTML option
+  // list index.html used to carry, which never reflected an admin's actual
+  // Team/Product Type configuration for the space.
+  if ($('drawerTeam')) {
+    $('drawerTeam').innerHTML = buildBuiltinSelectOptionsHtml('team', issue.space_id, issue.team, '— None —');
+    $('drawerTeam').value = issue.team || '';
+  }
+  if ($('drawerProductType')) {
+    $('drawerProductType').innerHTML = buildBuiltinSelectOptionsHtml('product_type', issue.space_id, issue.product_type, '— None —');
+    $('drawerProductType').value = issue.product_type || '';
+  }
   // Estimate field removed
 
   var totalSpent = 0;
@@ -10679,7 +11178,10 @@ function startDrawerLiveSync(issueId) {
       // Update right-side fields silently (only if not focused by user)
       var activeId = document.activeElement && document.activeElement.id;
       if (activeId !== 'drawerStatus')    $('drawerStatus').value    = fresh.status    || '';
-      if (activeId !== 'drawerPriority')  $('drawerPriority').value  = fresh.priority  || '';
+      if (activeId !== 'drawerPriority') {
+        $('drawerPriority').innerHTML = buildBuiltinSelectOptionsHtml('priority', fresh.space_id, fresh.priority, null);
+        $('drawerPriority').value = fresh.priority || '';
+      }
       if (activeId !== 'drawerAssignee') {
         // Ensure the new assignee is in the dropdown options before setting value
         var members = window._drawerMembers || [];
@@ -10701,12 +11203,26 @@ function startDrawerLiveSync(issueId) {
       if (activeId !== 'drawerPoints')      $('drawerPoints').value      = fresh.story_points != null ? fresh.story_points : '';
       if (activeId !== 'drawerStartDate')   $('drawerStartDate').value   = fresh.start_date  ? fresh.start_date.slice(0,10) : '';
       if (activeId !== 'drawerDueDate')     $('drawerDueDate').value     = fresh.due_date    ? fresh.due_date.slice(0,10)   : '';
-      if (activeId !== 'drawerTeam'        && $('drawerTeam'))        $('drawerTeam').value        = fresh.team         || '';
-      if (activeId !== 'drawerProductType' && $('drawerProductType')) $('drawerProductType').value = fresh.product_type || '';
+      if (activeId !== 'drawerTeam'        && $('drawerTeam')) {
+        $('drawerTeam').innerHTML = buildBuiltinSelectOptionsHtml('team', fresh.space_id, fresh.team, '— None —');
+        $('drawerTeam').value = fresh.team || '';
+      }
+      if (activeId !== 'drawerProductType' && $('drawerProductType')) {
+        $('drawerProductType').innerHTML = buildBuiltinSelectOptionsHtml('product_type', fresh.space_id, fresh.product_type, '— None —');
+        $('drawerProductType').value = fresh.product_type || '';
+      }
       if (activeId !== 'drawerTitle') setDrawerTitleValue(fresh.title || '');
       // Update time tracking, attachments, activity
-      var timeSpentEl = document.querySelector('.drawer-time-spent');
-      if (timeSpentEl) timeSpentEl.textContent = fresh.time_spent || '—';
+      // Sum from fresh.worklogs, matching the initial drawer-open computation
+      // above (not fresh.time_spent, the cached column) — self-heals if that
+      // column and the worklog rows ever drift apart.
+      var timeSpentEl = $('drawerTimeSpent');
+      if (timeSpentEl) {
+        var freshWorklogs = fresh.worklogs || [];
+        var freshTotalSpent = 0;
+        for (var fw = 0; fw < freshWorklogs.length; fw++) freshTotalSpent += (freshWorklogs[fw].time_spent || 0);
+        timeSpentEl.textContent = fmtMins(freshTotalSpent);
+      }
       renderDrawerAttachments(fresh.attachments || []);
       $('drawerUpdated').textContent = fmtDateTime(fresh.updated_at);
       // Refresh custom fields silently (only if no input is focused inside them)
@@ -10731,6 +11247,263 @@ window.openDrawer = openDrawer;
 // through this rather than capturing an autoSave, or they keep saving to the
 // first ticket ever opened. See bindDrawerTitleField.
 var _activeDrawerAutoSave = null;
+
+// ── @mention autocomplete ──────────────────────────────────
+// Parameterized on `el` (rather than closing over one hardcoded element) so it
+// can bind to both the comment-compose box (drawerCommentInput) AND each
+// dynamically-created comment EDIT box (edit-rich-<id>) -- previously this was
+// wired to drawerCommentInput only, so typing "@" while editing an existing
+// comment silently did nothing; there was no autocomplete listening on that
+// element at all. Guarded per-element the same way the original was guarded
+// per-drawer-open, since an edit box's DOM node persists (just hidden) across
+// repeated Edit/Cancel clicks on the same comment without a full re-render.
+function bindMentionAutocomplete(el) {
+  if (!el || el._mentionBound) return;
+  el._mentionBound = true;
+  var dropdown = $('mentionDropdown');
+  var activeMentionCharIdx = -1;
+
+  function getMembers() {
+    return window._drawerMembers || S.data.users || [];
+  }
+
+  function closeMention() {
+    dropdown.style.display = 'none';
+    activeMentionCharIdx = -1;
+  }
+
+  // #mentionDropdown is one shared element, sitting in the markup right after
+  // drawerCommentInput. That was harmless when only drawerCommentInput ever
+  // opened it, but a comment EDIT box lives elsewhere in the activity list --
+  // anchoring the dropdown with a plain `top` offset (relative to whatever
+  // ancestor happens to be positioned) would show it pinned near the compose
+  // box instead of under whichever editor is actually active. Same fix as
+  // positionComboDropdown/positionCFDropdown elsewhere in this file: switch to
+  // position:fixed and place it from el's own live viewport coordinates.
+  function positionMentionDropdown() {
+    dropdown._activeEl = el;
+    var elRect = el.getBoundingClientRect();
+    // Anchor on the CARET, not el's own bottom edge. el.getBoundingClientRect()
+    // covers the whole editor box -- fine for a short single-line compose box,
+    // where "bottom of the box" and "bottom of the visible content" are the
+    // same thing. An edit box with an embedded image (or just a few lines of
+    // text) is much taller, so its bottom edge can sit far below the caret --
+    // even off the bottom of the viewport entirely -- which is exactly why
+    // typing "@" while editing an existing comment looked like nothing
+    // happened: the dropdown WAS opening, just positioned off-screen.
+    var rect = elRect;
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      var caretRects = sel.getRangeAt(0).cloneRange().getClientRects();
+      if (caretRects && caretRects.length) rect = caretRects[caretRects.length - 1];
+    }
+    dropdown.style.position = 'fixed';
+    dropdown.style.left = elRect.left + 'px';
+    dropdown.style.width = elRect.width + 'px';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.right = 'auto';
+  }
+
+  // Keeps the dropdown glued to el while its scroll container moves (the
+  // activity list, a modal body, etc.) -- position:fixed coordinates are only
+  // ever right at the instant they're set otherwise. dropdown._activeEl guards
+  // this so only the element that's actually open right now repositions it;
+  // this listener is added once per el thanks to the _mentionBound guard above.
+  document.addEventListener('scroll', function () {
+    if (dropdown._activeEl === el && dropdown.style.display !== 'none') positionMentionDropdown();
+  }, { passive: true, capture: true });
+
+  // Returns all text before the caret inside a contenteditable element
+  function getTextBeforeCaret(node) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return '';
+    var r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(node);
+    r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+    return r.toString();
+  }
+
+  function insertMentionAtCaret(name, userId) {
+    // e.preventDefault() on mousedown keeps focus so caret is still valid
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+
+    var caretRange = sel.getRangeAt(0);
+    var endNode = caretRange.endContainer;
+    var endOffset = caretRange.endOffset;
+
+    // Find the @ in the current text node (most common case)
+    var atPos = -1;
+    var atNode = null;
+    if (endNode.nodeType === 3) {
+      var textUpToCaret = endNode.textContent.substring(0, endOffset);
+      var idx = textUpToCaret.lastIndexOf('@');
+      if (idx !== -1) {
+        atPos = idx;
+        atNode = endNode;
+      }
+    }
+
+    // If @ wasn't found in the same text node, walk backwards
+    if (atNode === null) {
+      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+      var nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      // build full text before caret
+      var fullText = getTextBeforeCaret(el);
+      var atIdx2 = activeMentionCharIdx;
+      if (atIdx2 < 0) {
+        var active = findActiveMentionAt(fullText);
+        if (!active) return;
+        atIdx2 = active.atIdx;
+      }
+      // count chars to find the node containing @
+      var charCount = 0;
+      for (var ni = 0; ni < nodes.length; ni++) {
+        var nodeLen = nodes[ni] === endNode ? endOffset : nodes[ni].textContent.length;
+        if (charCount + nodeLen > atIdx2) {
+          atNode = nodes[ni];
+          atPos = atIdx2 - charCount;
+          break;
+        }
+        charCount += nodeLen;
+      }
+    }
+
+    if (!atNode) return;
+
+    // Select from @ to current caret position and delete it
+    var delRange = document.createRange();
+    delRange.setStart(atNode, atPos);
+    if (atNode === endNode) {
+      delRange.setEnd(endNode, endOffset);
+    } else {
+      delRange.setEnd(endNode, endOffset);
+    }
+    sel.removeAllRanges();
+    sel.addRange(delRange);
+    document.execCommand('delete', false, null);
+
+    // Insert mention chip + non-breaking space
+    var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
+    document.execCommand('insertHTML', false, chip);
+  }
+
+  function showMention(query) {
+    var members = getMembers().filter(function(m) {
+      return !query || m.name.toLowerCase().indexOf(query.toLowerCase()) !== -1;
+    });
+    if (!members.length) { closeMention(); return; }
+
+    positionMentionDropdown();
+    dropdown.style.display = 'block';
+    dropdown.innerHTML = members.map(function(m) {
+      return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
+        'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
+        'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
+        '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
+        initials(m.name) + '</div>' +
+        '<div><div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
+        (m.email ? '<div style="font-size:11px;color:var(--text2)">' + esc(m.email) + '</div>' : '') +
+        '</div></div>';
+    }).join('');
+
+    dropdown.querySelectorAll('.mention-item').forEach(function(item) {
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault(); // keeps focus in el so selection is intact
+        var name = item.dataset.name;
+        var id = item.dataset.id;
+        if (el.contentEditable === 'true') {
+          insertMentionAtCaret(name, id);
+        } else {
+          var val = el.value;
+          var before = val.substring(0, activeMentionCharIdx);
+          var after = val.substring(el.selectionStart);
+          el.value = before + '@' + name + ' ' + after;
+          var pos = activeMentionCharIdx + name.length + 2;
+          el.setSelectionRange(pos, pos);
+          el.focus();
+        }
+        closeMention();
+        activeMentionCharIdx = -1;
+      });
+    });
+  }
+
+  el.addEventListener('input', function() {
+    var isContentEditable = el.contentEditable === 'true';
+    var textBefore;
+    if (isContentEditable) {
+      textBefore = getTextBeforeCaret(el);
+    } else {
+      textBefore = el.value.substring(0, el.selectionStart);
+    }
+    var active = findActiveMentionAt(textBefore);
+    if (!active) { closeMention(); return; }
+    activeMentionCharIdx = active.atIdx;
+    showMention(active.query);
+  });
+
+  el.addEventListener('keydown', function(e) {
+    if (dropdown.style.display === 'none') return;
+    var items = dropdown.querySelectorAll('.mention-item');
+    var active = dropdown.querySelector('.mention-item.focused');
+    var idx = Array.prototype.indexOf.call(items, active);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (active) active.classList.remove('focused');
+      var next = items[idx + 1] || items[0];
+      next.classList.add('focused');
+      next.style.background = 'var(--bg3)';
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (active) active.classList.remove('focused');
+      var prev = items[idx - 1] || items[items.length - 1];
+      prev.classList.add('focused');
+      prev.style.background = 'var(--bg3)';
+    } else if (e.key === 'Enter' && active) {
+      e.preventDefault();
+      active.click();
+    } else if (e.key === 'Escape') {
+      closeMention();
+    }
+  });
+
+  // Guarded per-element for the same reason as the handlers above.
+  if (!el._mentionOutsideBound) {
+    el._mentionOutsideBound = true;
+    document.addEventListener('click', function(e) {
+      if (!dropdown.contains(e.target) && e.target !== el) closeMention();
+    });
+  }
+}
+
+// A comment EDIT box (edit-rich-<id>) had no image-paste handling at all --
+// unlike the compose box's own _commentFiles flow, or the description
+// editors' document-level delegated listener (which only covers the static
+// DESC_EDITOR_IDS list, not a dynamically-created id like this one). Pasting
+// a screenshot there fell through to the browser's raw default paste,
+// inserting an unbounded base64 data: URI directly into the comment body
+// instead of uploading it. Routes through the exact same handleDescImagePaste
+// the description fields use -- it already uploads via /api/comments/upload,
+// which comments and descriptions share.
+function bindCommentEditImagePaste(el) {
+  if (!el || el._commentEditPasteBound) return;
+  el._commentEditPasteBound = true;
+  el.addEventListener('paste', function (e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items || !items.length) return;
+    var imageFiles = _dedupePasteFiles(items).filter(function (f) { return f.type && f.type.indexOf('image/') === 0; });
+    if (!imageFiles.length) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (el._pasteBusy) return;
+    el._pasteBusy = true;
+    handleDescImagePaste(el, imageFiles[0], 'comment').finally(function () {
+      setTimeout(function () { el._pasteBusy = false; }, 500);
+    });
+  });
+}
 
 function bindDrawerEdits(issue) {
   var issueId = issue.id;
@@ -10806,7 +11579,9 @@ function bindDrawerEdits(issue) {
       e.stopPropagation();
       var old = document.getElementById('_typeMenu');
       if (old) { old.remove(); return; }
-      var types = ISSUE_TYPES;
+      // This issue's own space's configured Type list, not the fixed 5 --
+      // an admin-added type was previously unreachable from this picker.
+      var types = getIssueTypeOptionsForSpace(issue.space_id).map(function (o) { return o.v; });
       var rect = typeEl.getBoundingClientRect();
       var menu = document.createElement('div');
       menu.id = '_typeMenu';
@@ -10816,13 +11591,13 @@ function bindDrawerEdits(issue) {
         item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:13px;border-radius:4px;display:flex;align-items:center;gap:8px;';
         // Use the shared TYPE_ICONS set rather than a local emoji list, so this
         // menu can't drift from the icons shown on boards, tables and drawers.
-        item.innerHTML = '<span style="display:inline-flex;align-items:center">'+ typeIcon(t) +'</span><span>'+(t.charAt(0).toUpperCase()+t.slice(1))+'</span>';
+        item.innerHTML = '<span style="display:inline-flex;align-items:center">'+ typeIcon(t) +'</span><span>'+esc(cap(t))+'</span>';
         item.onmouseover = function(){ this.style.background='#f4f5f7'; };
         item.onmouseout = function(){ this.style.background='';};
         item.onclick = function(){
           menu.remove();
-          typeEl.textContent = t.charAt(0).toUpperCase()+t.slice(1);
-          typeEl.className = 'badge badge-type badge-type-'+t;
+          typeEl.textContent = cap(t);
+          applyTypeBadgeStyle(typeEl, t);
           autoSave('type',t);
         };
         menu.appendChild(item);
@@ -10911,9 +11686,15 @@ function bindDrawerEdits(issue) {
 
   var _drawerDescOriginal = $('drawerDesc') ? $('drawerDesc').innerHTML : (issue.description || '');
   window._drawerDescOriginalHtml = _drawerDescOriginal;
+  attachScopedUndo($('drawerDesc'));
+  // Deliberately NOT re-snapshotting _drawerDescOriginal here — it's already
+  // the correct pre-edit baseline (set once above, then again only after a
+  // successful save). Re-capturing "current == current" on every focus meant
+  // that clicking away mid-edit (e.g. to review) and clicking back in before
+  // hitting Save silently rebaselined to the ALREADY-EDITED text, disabling
+  // Save with no error and no visible cause — reported as "editing the
+  // description doesn't save".
   $('drawerDesc').onfocus = function() {
-    _drawerDescOriginal = $('drawerDesc').innerHTML;
-    window._drawerDescOriginalHtml = _drawerDescOriginal;
     updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
   };
 
@@ -10954,7 +11735,17 @@ function bindDrawerEdits(issue) {
           if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
         } catch(ex) { console.error('img upload failed', ex); }
       }
-      await saveFieldNow('description', descEl.innerHTML.trim());
+      // descEl.innerHTML still carries the LIVE session token baked into every
+      // desc-inline-img src (fileApiUrl() puts it there so the image is visible
+      // while editing) — stripping it here mirrors getDescriptionHtmlForSave(),
+      // which the Create Issue path already uses. Without this, the stored
+      // description keeps today's token forever; augmentFileUrlsInHtml() then
+      // appends a SECOND ?t=... on every later render (its regex stops at the
+      // first "?", so it can't tell the URL already has one), producing a
+      // malformed src that always 401s — the exact "screenshot goes broken
+      // after saving" bug, and re-pasting the same image then reports it as
+      // already attached because the broken <img> is still sitting in the DOM.
+      await saveFieldNow('description', stripFileAuthTokensFromHtml(descEl.innerHTML.trim()));
       _drawerDescOriginal = descEl.innerHTML;
       window._drawerDescOriginalHtml = _drawerDescOriginal;
       var b = $('drawerDescBtns'); if(b) b.style.display='none';
@@ -10975,9 +11766,10 @@ function bindDrawerEdits(issue) {
   };
   var _drawerFixDescOriginal = $('drawerFixDesc') ? $('drawerFixDesc').innerHTML : (issue.fix_description || '');
   window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
+  attachScopedUndo($('drawerFixDesc'));
+  // Same fix as drawerDesc above — don't rebaseline the "original" snapshot
+  // on every focus, only on drawer-open and after a successful save.
   $('drawerFixDesc').onfocus = function() {
-    _drawerFixDescOriginal = $('drawerFixDesc').innerHTML;
-    window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
     updateDrawerDescEditorState('drawerFixDesc', _drawerFixDescOriginal);
   };
   var fixSaveBtn = $('drawerFixDescSave');
@@ -10989,7 +11781,8 @@ function bindDrawerEdits(issue) {
     fixSaveBtn.disabled = true;
     fixSaveBtn.textContent = 'Saving...';
     try {
-      await saveFieldNow('fix_description', fixEl.innerHTML.trim());
+      // Same token-stripping fix as the description save above.
+      await saveFieldNow('fix_description', stripFileAuthTokensFromHtml(fixEl.innerHTML.trim()));
       _drawerFixDescOriginal = fixEl.innerHTML;
       window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
       var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
@@ -11012,191 +11805,8 @@ function bindDrawerEdits(issue) {
   // Expose pending to the global save handler (fallback)
   window._drawerPending = pending;
 
-  // ── @mention autocomplete ─────────────────────────────────
-  (function() {
-    var textarea = $('drawerCommentInput');
-    // Bind once — this block previously re-ran on every drawer open, stacking
-    // duplicate 'input'/'keydown'/'click' listeners on the same persistent element.
-    if (!textarea || textarea._mentionBound) return;
-    textarea._mentionBound = true;
-    var dropdown = $('mentionDropdown');
-    var activeMentionCharIdx = -1;
-
-    function getMembers() {
-      return window._drawerMembers || S.data.users || [];
-    }
-
-    function closeMention() {
-      dropdown.style.display = 'none';
-      activeMentionCharIdx = -1;
-    }
-
-    // Returns all text before the caret inside a contenteditable element
-    function getTextBeforeCaret(el) {
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return '';
-      var r = sel.getRangeAt(0).cloneRange();
-      r.selectNodeContents(el);
-      r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
-      return r.toString();
-    }
-
-    function insertMentionAtCaret(name, userId) {
-      // e.preventDefault() on mousedown keeps focus so caret is still valid
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return;
-
-      var caretRange = sel.getRangeAt(0);
-      var endNode = caretRange.endContainer;
-      var endOffset = caretRange.endOffset;
-
-      // Find the @ in the current text node (most common case)
-      var atPos = -1;
-      var atNode = null;
-      if (endNode.nodeType === 3) {
-        var textUpToCaret = endNode.textContent.substring(0, endOffset);
-        var idx = textUpToCaret.lastIndexOf('@');
-        if (idx !== -1) {
-          atPos = idx;
-          atNode = endNode;
-        }
-      }
-
-      // If @ wasn't found in the same text node, walk backwards
-      if (atNode === null) {
-        var walker = document.createTreeWalker(textarea, NodeFilter.SHOW_TEXT, null, false);
-        var nodes = [];
-        while (walker.nextNode()) nodes.push(walker.currentNode);
-        // build full text before caret
-        var fullText = getTextBeforeCaret(textarea);
-        var atIdx2 = activeMentionCharIdx;
-        if (atIdx2 < 0) {
-          var active = findActiveMentionAt(fullText);
-          if (!active) return;
-          atIdx2 = active.atIdx;
-        }
-        // count chars to find the node containing @
-        var charCount = 0;
-        for (var ni = 0; ni < nodes.length; ni++) {
-          var nodeLen = nodes[ni] === endNode ? endOffset : nodes[ni].textContent.length;
-          if (charCount + nodeLen > atIdx2) {
-            atNode = nodes[ni];
-            atPos = atIdx2 - charCount;
-            break;
-          }
-          charCount += nodeLen;
-        }
-      }
-
-      if (!atNode) return;
-
-      // Select from @ to current caret position and delete it
-      var delRange = document.createRange();
-      delRange.setStart(atNode, atPos);
-      if (atNode === endNode) {
-        delRange.setEnd(endNode, endOffset);
-      } else {
-        delRange.setEnd(endNode, endOffset);
-      }
-      sel.removeAllRanges();
-      sel.addRange(delRange);
-      document.execCommand('delete', false, null);
-
-      // Insert mention chip + non-breaking space
-      var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
-      document.execCommand('insertHTML', false, chip);
-    }
-
-    function showMention(query) {
-      var members = getMembers().filter(function(m) {
-        return !query || m.name.toLowerCase().indexOf(query.toLowerCase()) !== -1;
-      });
-      if (!members.length) { closeMention(); return; }
-
-      dropdown.style.top = (textarea.offsetHeight + 2) + 'px';
-      dropdown.style.display = 'block';
-      dropdown.innerHTML = members.map(function(m) {
-        return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
-          'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
-          'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
-          '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
-          initials(m.name) + '</div>' +
-          '<div><div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
-          (m.email ? '<div style="font-size:11px;color:var(--text2)">' + esc(m.email) + '</div>' : '') +
-          '</div></div>';
-      }).join('');
-
-      dropdown.querySelectorAll('.mention-item').forEach(function(item) {
-        item.addEventListener('mousedown', function(e) {
-          e.preventDefault(); // keeps focus in textarea so selection is intact
-          var name = item.dataset.name;
-          var id = item.dataset.id;
-          if (textarea.contentEditable === 'true') {
-            insertMentionAtCaret(name, id);
-          } else {
-            var val = textarea.value;
-            var before = val.substring(0, activeMentionCharIdx);
-            var after = val.substring(textarea.selectionStart);
-            textarea.value = before + '@' + name + ' ' + after;
-            var pos = activeMentionCharIdx + name.length + 2;
-            textarea.setSelectionRange(pos, pos);
-            textarea.focus();
-          }
-          closeMention();
-          activeMentionCharIdx = -1;
-        });
-      });
-    }
-
-    textarea.addEventListener('input', function() {
-      var isContentEditable = textarea.contentEditable === 'true';
-      var textBefore;
-      if (isContentEditable) {
-        textBefore = getTextBeforeCaret(textarea);
-      } else {
-        textBefore = textarea.value.substring(0, textarea.selectionStart);
-      }
-      var active = findActiveMentionAt(textBefore);
-      if (!active) { closeMention(); return; }
-      activeMentionCharIdx = active.atIdx;
-      showMention(active.query);
-    });
-
-    textarea.addEventListener('keydown', function(e) {
-      if (dropdown.style.display === 'none') return;
-      var items = dropdown.querySelectorAll('.mention-item');
-      var active = dropdown.querySelector('.mention-item.focused');
-      var idx = Array.prototype.indexOf.call(items, active);
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (active) active.classList.remove('focused');
-        var next = items[idx + 1] || items[0];
-        next.classList.add('focused');
-        next.style.background = 'var(--bg3)';
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (active) active.classList.remove('focused');
-        var prev = items[idx - 1] || items[items.length - 1];
-        prev.classList.add('focused');
-        prev.style.background = 'var(--bg3)';
-      } else if (e.key === 'Enter' && active) {
-        e.preventDefault();
-        active.click();
-      } else if (e.key === 'Escape') {
-        closeMention();
-      }
-    });
-
-    // Guarded for the same reason as the handlers above: this is a document-level
-    // listener registered inside bindDrawerEdits(), so without the flag every
-    // drawer open leaked another permanent listener onto document.
-    if (!textarea._mentionOutsideBound) {
-      textarea._mentionOutsideBound = true;
-      document.addEventListener('click', function(e) {
-        if (!dropdown.contains(e.target) && e.target !== textarea) closeMention();
-      });
-    }
-  })();
+  bindMentionAutocomplete($('drawerCommentInput'));
+  attachScopedUndo($('drawerCommentInput'));
 
   // Paste image support for comment box — bind ONCE per drawer element, not per click.
   // (Previously this was registered inside the onclick handler below, so every
@@ -11228,20 +11838,26 @@ function bindDrawerEdits(issue) {
   $('drawerCommentSubmit').onclick = async function () {
     var _ci = $('drawerCommentInput');
     var body;
+    // Whether this comment's body is rich HTML (real <b>/<ul> from the
+    // toolbar) or plain text -- decides which shape file-attachment refs get
+    // appended in below, since bodyHtml()'s render function only expands
+    // [img:...]/[file:...] bracket markup in its PLAIN-TEXT branch; appending
+    // that bracket syntax onto an HTML body would show as literal text.
+    var bodyIsRich = !!(_ci && _ci.value === undefined);
     if (!_ci) { body = ''; }
-    else if (_ci.value !== undefined) {
+    else if (!bodyIsRich) {
       body = _ci.value.trim();
     } else {
-      // contenteditable: convert mention chips to plain @Name text, preserve line breaks
+      // contenteditable: convert mention chips to plain @Name text, keep the
+      // rest of the markup as-is -- this used to flatten to .textContent,
+      // which is what silently discarded every bold/bullet-list the toolbar
+      // had just produced.
       var _clone = _ci.cloneNode(true);
       _clone.querySelectorAll('.mention-chip').forEach(function(chip) {
         chip.replaceWith('@' + chip.textContent.replace(/^@/, ''));
       });
-      _clone.querySelectorAll('br').forEach(function(br) { br.replaceWith('\n'); });
-      _clone.querySelectorAll('div,p').forEach(function(block) {
-        if (block.previousSibling) block.insertBefore(document.createTextNode('\n'), block.firstChild);
-      });
-      body = (_clone.textContent || '').trim();
+      body = _clone.innerHTML.trim();
+      if (body === '<br>') body = '';
     }
     var commentBody = body;
     if (!body && !_commentFiles.length) return;
@@ -11253,11 +11869,17 @@ function bindDrawerEdits(issue) {
     submitBtn.textContent = 'Posting...';
     var commentBody = body;
 
-    // Upload attached files to comment-specific endpoint
+    // Upload attached files to comment-specific endpoint. On failure the files
+    // are kept in _commentFiles (not cleared) so the user can just hit Comment
+    // again instead of re-picking or re-pasting them — and the button is reset
+    // and the whole submit is aborted here, rather than falling through to post
+    // a comment silently missing the attachment the user thought was included
+    // (or, for an image-only comment, posting nothing at all).
     if (_commentFiles.length) {
       var fd = new FormData();
       fd.append('issue_id', issueId);
       _commentFiles.forEach(function(f) { fd.append('files', f); });
+      var uploadFailed = false;
       try {
         toast('Uploading attachment…');
         var uploadRes = await fetch('/api/comments/upload', {
@@ -11268,17 +11890,48 @@ function bindDrawerEdits(issue) {
         var uploadData = await uploadRes.json().catch(function () { return {}; });
         if (!uploadRes.ok) {
           toast(uploadData.error || 'Attachment upload failed', 'error');
+          uploadFailed = true;
         } else if (uploadData.files && uploadData.files.length) {
-          var fileRefs = uploadData.files.map(function(f) {
-            var isImg = f.type && f.type.startsWith('image/');
-            return (isImg ? '[img:' : '[file:') + f.name + '|' + f.url + ']';
-          }).join('\n');
-          commentBody = commentBody ? commentBody + '\n' + fileRefs : fileRefs;
+          if (bodyIsRich) {
+            // Real tags, not [img:...]/[file:...] bracket markup -- bodyHtml()'s
+            // render function only expands that bracket syntax in its plain-text
+            // branch, so appending it onto an HTML body would show as literal
+            // text. fileApiUrl()'s token gets stripped before saving below (same
+            // as the rest of this body), then re-added fresh on every render by
+            // augmentFileUrlsInHtml -- same convention _saveComment already uses.
+            var fileRefsHtml = uploadData.files.map(function(f) {
+              var isImg = f.type && f.type.startsWith('image/');
+              var url = fileApiUrl(f.url);
+              return isImg
+                ? '<div style="margin-top:8px"><img class="desc-inline-img" src="' + esc(url) + '" alt="' + esc(f.name) + '"></div>'
+                : '<div style="margin-top:6px"><a href="' + esc(url) + '" target="_blank">' + esc(f.name) + '</a></div>';
+            }).join('');
+            commentBody = commentBody + fileRefsHtml;
+          } else {
+            var fileRefs = uploadData.files.map(function(f) {
+              var isImg = f.type && f.type.startsWith('image/');
+              return (isImg ? '[img:' : '[file:') + f.name + '|' + f.url + ']';
+            }).join('\n');
+            commentBody = commentBody ? commentBody + '\n' + fileRefs : fileRefs;
+          }
         }
-      } catch(e) { toast('Attachment upload failed', 'error'); }
+      } catch(e) {
+        toast(friendlyFetchErrorMessage(e, 'Attachment upload failed'), 'error');
+        uploadFailed = true;
+      }
+      if (uploadFailed) {
+        submitBtn._submitting = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Comment';
+        return;
+      }
       _commentFiles = [];
       _renderCommentFileList();
     }
+    // Strip the live session token the image ref above just embedded -- it's
+    // only good for today; augmentFileUrlsInHtml adds a fresh one on every
+    // future render instead. Same rule as description/fix-description saves.
+    if (bodyIsRich) commentBody = stripFileAuthTokensFromHtml(commentBody);
 
     if (commentBody) {
       var mentionedUserIds = collectMentionUserIds(_ci, commentBody);
@@ -11332,125 +11985,48 @@ function bindDrawerEdits(issue) {
     openModal('modal-worklog');
   };
 
-  // ⋯ Actions menu — Move to board + Delete issue
-  $('drawerActionsBtn').onclick = function (e) {
-    e.stopPropagation();
-    var existing = document.querySelector('.drawer-actions-menu');
-    if (existing) { existing.remove(); return; }
-
-    // Space role, not org role — a space admin can delete tickets in their own space.
-    var mayDelete = canDeleteIssue(issue.space_id);
-
-    var menu = document.createElement('div');
-    menu.className = 'drawer-actions-menu';
-    menu.innerHTML = mayDelete
-      ? '<div class="drawer-actions-item danger" id="drawerDeleteItem">🗑️ Delete ticket</div>'
-      : '<div class="drawer-actions-item" style="color:var(--text3);padding:8px 12px;font-size:13px">No actions available</div>';
-
-    var rect = $('drawerActionsBtn').getBoundingClientRect();
-    menu.style.cssText = 'position:fixed;right:' + (window.innerWidth - rect.right) + 'px;top:' + (rect.bottom + 4) + 'px;' +
-      'background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:9999;min-width:180px;padding:4px;';
-
-    document.body.appendChild(menu);
-
-
-    if (isOwner) {
-      // Move to another board
-      var drawerMoveItem = document.getElementById('drawerMoveItem'); if (drawerMoveItem) drawerMoveItem.onclick = function () {
-        menu.remove();
-        // Build list of other spaces (boards) excluding current
-        var currentIssue = (S.data.issues || []).find(function(i){ return i.id === issueId; });
-        var currentSpaceId = currentIssue ? currentIssue.space_id : null;
-        var otherSpaces = (S.data.spaces || []).filter(function(sp){ return sp.id !== currentSpaceId; });
-
-        if (!otherSpaces.length) {
-          toast('No other boards available to move to', 'error');
-          return;
-        }
-
-        // Show board picker overlay
-        var overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center;';
-        var picker = document.createElement('div');
-        picker.style.cssText = 'background:var(--bg2);border-radius:12px;padding:24px;min-width:300px;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.25);';
-        picker.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:4px">Move to another board</div>' +
-          '<div style="font-size:12px;color:var(--text2);margin-bottom:16px">Select the destination board</div>' +
-          '<div id="boardPickerList" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;"></div>' +
-          '<div style="margin-top:16px;display:flex;justify-content:flex-end;">' +
-          '<button id="boardPickerCancel" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:none;cursor:pointer;font-size:13px;">Cancel</button>' +
-          '</div>';
-        overlay.appendChild(picker);
-        document.body.appendChild(overlay);
-
-        var list = picker.querySelector('#boardPickerList');
-        otherSpaces.forEach(function(sp) {
-          var btn = document.createElement('button');
-          btn.style.cssText = 'width:100%;text-align:left;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-size:13px;font-weight:500;transition:background 0.15s;';
-          btn.textContent = sp.name;
-          btn.onmouseover = function(){ btn.style.background = 'var(--accent-light, #eff6ff)'; };
-          btn.onmouseout  = function(){ btn.style.background = 'var(--bg)'; };
-          btn.onclick = async function() {
-            overlay.remove();
-            try {
-              await api('/api/issues/' + issueId, 'PUT', { space_id: sp.id, sprint_id: null });
-              goBackToSavedPage();
-              await refreshData();
-              if (S.currentTab) renderTab(S.currentTab);
-              toast('Issue moved to ' + sp.name);
-            } catch(err) {
-              toast('Failed to move issue', 'error');
-            }
-          };
-          list.appendChild(btn);
-        });
-
-        picker.querySelector('#boardPickerCancel').onclick = function(){ overlay.remove(); };
-        overlay.onclick = function(ev){ if (ev.target === overlay) overlay.remove(); };
-      };
-
-      // Delete issue
-      var drawerDeleteItem = document.getElementById('drawerDeleteItem'); if (drawerDeleteItem) drawerDeleteItem.onclick = async function () {
-        menu.remove();
-        // Gate on the SPACE role, matching the backend's 'issue.delete' rule. The
-        // old check was org-role-only, so a space admin — who the API happily lets
-        // delete — was told "only owners and admins can delete issues".
-        if (!canDeleteIssue(issue.space_id)) {
-          toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
-          return;
-        }
-        var key = issueKeyStr(issue) || issueId;
-        var ok = await typedConfirmDialog({
-          title: 'Delete ' + key + '?',
-          intro: issue.title || '',
-          note: softDeleteNote(),
-          phrase: key,
-          phraseHint: 'To confirm, type the ticket number',
-          confirmLabel: 'Delete ticket'
-        });
-        if (!ok) return;
-        try {
-          await api('/api/issues/' + issueId, 'DELETE');
-          toast(key + ' moved to Deleted Items', 'success');
-          var drawer = document.getElementById('issueDrawer');
-          if (drawer) drawer.setAttribute('hidden', '');
-          S.drawerIssueId = null;
-          window.history.replaceState({}, '', '/');
-          await refreshData();
-          renderCurrentView();
-        } catch (err) {
-          toast(err.message || 'Failed to delete ticket', 'error');
-        }
-      };
-    }
-
-    function closeMenu(ev) {
-      if (!menu.contains(ev.target) && ev.target !== $('drawerActionsBtn')) {
-        menu.remove();
-        document.removeEventListener('click', closeMenu);
+  // Delete ticket — a direct control rather than a ⋯ menu. The button is only
+  // rendered for someone the API would actually let through (canDeleteIssue ->
+  // space admin or org admin), so nobody is offered an action that then fails.
+  // This replaces a dropdown whose handler was gated on an `isOwner` variable
+  // that was never declared: the ReferenceError killed the handler mid-run, so
+  // the item bound no click AND the outside-click listener below it never
+  // registered — the menu was inert and would not dismiss.
+  var deleteBtn = $('drawerDeleteBtn');
+  if (deleteBtn) {
+    deleteBtn.style.display = canDeleteIssue(issue.space_id) ? '' : 'none';
+    deleteBtn.onclick = async function (e) {
+      e.stopPropagation();
+      // Re-checked at click time, not just at render: the drawer stays open
+      // across a refreshData(), so the role behind it can change underneath.
+      if (!canDeleteIssue(issue.space_id)) {
+        toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
+        return;
       }
-    }
-    setTimeout(function () { document.addEventListener('click', closeMenu); }, 0);
-  };
+      var key = issueKeyStr(issue) || issueId;
+      var ok = await typedConfirmDialog({
+        title: 'Delete ' + key + '?',
+        intro: issue.title || '',
+        note: softDeleteNote(),
+        phrase: key,
+        phraseHint: 'To confirm, type the ticket number',
+        confirmLabel: 'Delete ticket'
+      });
+      if (!ok) return;
+      try {
+        await api('/api/issues/' + issueId, 'DELETE');
+        toast(key + ' moved to Deleted Items', 'success');
+        var drawer = document.getElementById('issueDrawer');
+        if (drawer) drawer.setAttribute('hidden', '');
+        S.drawerIssueId = null;
+        window.history.replaceState({}, '', '/');
+        await refreshData();
+        renderCurrentView();
+      } catch (err) {
+        toast(err.message || 'Failed to delete ticket', 'error');
+      }
+    };
+  }
 }
 
 function renderDrawerSubtasks(subtasks) {
@@ -11470,11 +12046,9 @@ function renderDrawerSubtasks(subtasks) {
       var isDone = st.status === 'Done';
       html += '<div class="subtask-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;border-bottom:1px solid var(--border)" ' +
         'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
-        '<input type="checkbox" ' + (isDone ? 'checked' : '') + ' onclick="event.stopPropagation();window._toggleSubtaskDone(\'' + st.id + '\',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--success)">' +
         '<span class="subtask-key" style="font-size:11px;font-weight:700;color:var(--accent);min-width:48px;cursor:pointer" onclick="event.stopPropagation();openIssuePage(\'' + st.id + '\')">' + esc(st.key || '') + '</span>' +
         '<span style="flex:1;font-size:13px;' + (isDone ? 'text-decoration:line-through;color:var(--text3)' : '') + '" onclick="openIssuePage(\'' + st.id + '\')">' + esc(st.title) + '</span>' +
-        statusBadge(st.status) +
-        '<button class="btn-icon" style="width:20px;height:20px;font-size:12px;opacity:0.5" onclick="event.stopPropagation();window._deleteSubtask(\'' + st.id + '\')" title="Delete subtask">\u2715</button>' +
+        statusBadge(st.status, true) +
         '</div>';
     }
   } else {
@@ -11546,43 +12120,6 @@ window._submitSubtask = async function() {
     $('subtaskTitleInput').value = '';
     // Refresh drawer
     var issue = await api('/api/issues/' + parentId);
-    renderDrawerSubtasks(issue.subtasks || []);
-    await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
-};
-
-window._toggleSubtaskDone = async function(subtaskId, checked) {
-  var newStatus = checked ? 'Done' : 'To Do';
-  try {
-    await api('/api/issues/' + subtaskId, 'PUT', { status: newStatus });
-    var issue = await api('/api/issues/' + S.drawerIssueId);
-    renderDrawerSubtasks(issue.subtasks || []);
-    await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
-};
-
-window._deleteSubtask = async function(subtaskId) {
-  var sub = (S.data.issues || []).find(function (i) { return i.id === subtaskId; }) || {};
-  var parent = (S.data.issues || []).find(function (i) { return i.id === S.drawerIssueId; }) || {};
-  var spaceId = sub.space_id || parent.space_id || S.currentSpace;
-  if (!canDeleteIssue(spaceId)) {
-    toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
-    return;
-  }
-  var key = issueKeyStr(sub) || 'this subtask';
-  var ok = await typedConfirmDialog({
-    title: 'Delete subtask ' + key + '?',
-    intro: sub.title || '',
-    note: softDeleteNote(),
-    phrase: key,
-    phraseHint: 'To confirm, type the subtask number',
-    confirmLabel: 'Delete subtask'
-  });
-  if (!ok) return;
-  try {
-    await api('/api/issues/' + subtaskId, 'DELETE');
-    toast(key + ' moved to Deleted Items', 'success');
-    var issue = await api('/api/issues/' + S.drawerIssueId);
     renderDrawerSubtasks(issue.subtasks || []);
     await refreshData();
   } catch(e) { toast(e.message, 'error'); }
@@ -11959,7 +12496,12 @@ function _renderActivityTab(tab, issue) {
     var bodyHtml = (function(body) {
       if (/<[a-z][\s\S]*>/i.test(body)) {
         var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
-        return safe;
+        // A comment that has been through the rich-edit-and-save cycle below
+        // stores its images as real <img src="/api/files/id"> (no token, by
+        // design — see _saveComment) rather than the [img:name|url] markup the
+        // bracket branch below handles. Without this, those images would never
+        // get a token at all, on any render, ever.
+        return augmentFileUrlsInHtml(safe);
       }
       var html = highlightMentionsInCommentBody(body);
       html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
@@ -12013,9 +12555,27 @@ function _renderActivityTab(tab, issue) {
     var richEl = document.getElementById('edit-rich-' + id);
     var bodyDiv = document.querySelector('.comment-body-' + id);
     if (!editArea || !richEl) return;
-    // Pre-fill with current HTML content
-    richEl.innerHTML = bodyDiv ? bodyDiv.innerHTML : '';
+    // Hide the read-only render while editing — it used to stay visible the
+    // whole time, so opening Edit just added a second copy of the comment
+    // (text + screenshot) below the original instead of replacing it in place.
+    if (bodyDiv) bodyDiv.style.display = 'none';
+    // Pre-fill from the RAW stored body, not bodyDiv.innerHTML. The read-only
+    // render wraps a pasted screenshot in a styled caption block (small gray
+    // "📷 filename" text) meant only for display — copying that HTML in put the
+    // caret right after that block, so anything typed next inherited its small
+    // gray style instead of normal text. commentBodyToEditableHtml renders the
+    // same image as a plain <img> (like the description editor does), which
+    // leaves nothing after it for typed text to inherit.
+    var cm = ((_drawerIssueData && _drawerIssueData.comments) || []).find(function(c) { return c.id === id; });
+    richEl.innerHTML = cm ? commentBodyToEditableHtml(cm.body) : (bodyDiv ? bodyDiv.innerHTML : '');
+    attachScopedUndo(richEl);
     editArea.style.display = '';
+    // The edit box is a fresh element each time the activity list re-renders,
+    // but re-opening Edit on the SAME comment without a re-render in between
+    // reuses this exact node -- both binders below no-op on a repeat call via
+    // their own bind-once guards, so this is safe to call every time.
+    bindMentionAutocomplete(richEl);
+    bindCommentEditImagePaste(richEl);
     richEl.focus();
     // Move cursor to end
     var range = document.createRange();
@@ -12028,7 +12588,9 @@ function _renderActivityTab(tab, issue) {
 
   window._cancelEditComment = function(id) {
     var editArea = document.querySelector('.comment-edit-area-' + id);
+    var bodyDiv = document.querySelector('.comment-body-' + id);
     if (editArea) editArea.style.display = 'none';
+    if (bodyDiv) bodyDiv.style.display = '';
   };
 
   window._deleteComment = function(id) {
@@ -12046,7 +12608,12 @@ function _renderActivityTab(tab, issue) {
   window._saveComment = function(id) {
     var richEl = document.getElementById('edit-rich-' + id);
     if (!richEl) return;
-    var newBody = richEl.innerHTML.trim();
+    // richEl was pre-filled from the rendered comment body in _editComment,
+    // which means any pasted screenshot's <img> now carries today's live
+    // session token (bodyHtml embeds it for display). Strip it before saving
+    // — same bug and same fix as the drawer description save handlers: saving
+    // the token verbatim bakes today's token in permanently.
+    var newBody = stripFileAuthTokensFromHtml(richEl.innerHTML.trim());
     if (!newBody || newBody === '<br>') return;
     api('/api/comments/' + id, 'PUT', { body: newBody }).then(function() {
       var issueId = S.drawerIssueId;
@@ -12725,25 +13292,58 @@ function parsePtComboSelection(productType, combinationValue) {
     if (sel.combinations.length === 1 && typeof normalizeCombinationLabel === 'function') {
       sel.combinations[0] = normalizeCombinationLabel(sel.combinations[0]);
     }
-    if (!sel.productTypes.length && sel.combinations.length && typeof classifyCombination === 'function') {
-      var inferred = classifyCombination(sel.combinations[0]);
-      if (inferred) sel.productTypes = [inferred];
-    }
   }
   return sel;
+}
+
+// Plain-text render of a Combination field's raw stored value, for contexts
+// (the All Work table) that just print a custom field's value as text rather
+// than driving the combo-box picker UI. Existing rows saved before the
+// serializePtComboSelection fix above can still carry the old
+// {"v":2,"productTypes":[...],"combinations":[]} JSON form, so this has to
+// handle that regardless of what gets newly saved going forward.
+//
+// Deliberately does NOT fall back to showing productTypes when there are no
+// real combinations: that would put the same values in both the Combination
+// and Product Type columns, which is exactly the "one field showing as
+// another" mixing this whole fix exists to undo. No combination selected
+// means the cell is genuinely empty -- the table already renders '' as the
+// dash, so returning '' here is correct, not a missing case.
+function formatCombinationFieldDisplayValue(rawValue) {
+  if (!rawValue) return '';
+  var trimmed = String(rawValue).trim();
+  if (trimmed.charAt(0) !== '{') return rawValue; // already a plain combination string
+  var sel = parsePtComboSelection('', rawValue);
+  if (sel.combinations.length) {
+    return sel.combinations.map(function (c) {
+      return typeof normalizeCombinationLabel === 'function' ? normalizeCombinationLabel(c) : c;
+    }).join(', ');
+  }
+  return '';
 }
 
 function serializePtComboSelection(sel) {
   sel = sel || emptyPtComboSelection();
   var types = (sel.productTypes || []).filter(Boolean);
   var combos = (sel.combinations || []).filter(Boolean);
+  // Product Type and Combination are two different fields (issues.product_type
+  // vs. the "Combination" custom field's own value) and should stay that way.
+  // This used to JSON-encode {productTypes, combinations:[]} into the
+  // COMBINATION field even when zero combinations were selected -- e.g. two
+  // product types picked with no specific combination -- so the All Work
+  // table's Combination column showed a raw {"v":2,"productTypes":[...]}
+  // blob for rows that had no combination at all. That encoding was also
+  // never necessary: product_type below already fully captures a multi-type
+  // selection on its own, and parsePtComboSelection's non-JSON fallback path
+  // reconstructs it from that plain string when combinationValue is empty.
+  // The JSON form is only actually needed when there's more than one REAL
+  // combination to store, or exactly one combination that needs to say which
+  // of several product types it belongs to.
   var combinationValue = null;
-  if (types.length > 1 || combos.length > 1) {
+  if (combos.length > 1 || (combos.length === 1 && types.length > 1)) {
     combinationValue = JSON.stringify({ v: 2, productTypes: types, combinations: combos });
   } else if (combos.length === 1) {
     combinationValue = combos[0];
-  } else if (types.length > 1) {
-    combinationValue = JSON.stringify({ v: 2, productTypes: types, combinations: [] });
   }
   return {
     product_type: types.length ? types.join(',') : null,
@@ -12751,14 +13351,13 @@ function serializePtComboSelection(sel) {
   };
 }
 
+// Every selected product type now participates in combinations -- there's no
+// more fixed subset of "types that get grouped combinations" vs "types that
+// see everything" vs "types that get nothing" (that used to be exactly
+// Message/Email/Content, plus Manage/Infra hardcoded by literal name here).
+// A type with no combinations configured for it yet just has an empty list.
 function getComboTypesFromSelection(types) {
-  return (types || []).filter(function (t) {
-    return productTypeHasCombinations(t) || t === 'Manage' || t === 'Infra';
-  });
-}
-
-function productTypeUsesAllCombinations(productType) {
-  return productType === 'Manage' || productType === 'Infra';
+  return (types || []).slice();
 }
 
 function pruneCombinationsForTypes(sel, meta) {
@@ -12790,6 +13389,24 @@ function getProductTypeOptionsForSpace(spaceId) {
   });
 }
 
+// Type/priority equivalent of getProductTypeOptionsForSpace — order is the
+// order configured in Settings, which for priority IS the severity order
+// (index 0 = most severe) per the admin-facing convention documented on the
+// Combination-group editor's sibling: what's typed in Options is what shows,
+// in that order, everywhere the field is picked.
+function getIssueTypeOptionsForSpace(spaceId) {
+  var field = spaceId ? findSpaceFieldByKey(spaceId, 'type') : null;
+  var vals = field ? normalizeCFOptions(field.options) : [];
+  if (!vals.length) vals = BUILTIN_SELECT_FALLBACKS.type;
+  return vals.map(function (v) { return { v: v, l: cap(v) }; });
+}
+function getIssuePriorityOptionsForSpace(spaceId) {
+  var field = spaceId ? findSpaceFieldByKey(spaceId, 'priority') : null;
+  var vals = field ? normalizeCFOptions(field.options) : [];
+  if (!vals.length) vals = BUILTIN_SELECT_FALLBACKS.priority;
+  return vals.map(function (v) { return { v: v, l: cap(v) }; });
+}
+
 function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, filter) {
   filter = (filter || '').trim();
   var comboTypes = getComboTypesFromSelection(selectedTypes);
@@ -12803,7 +13420,7 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
     });
     if (!combos.length) return;
     html += '<div class="pt-combo-group" data-type="' + esc(type) + '">' +
-      '<div class="pt-combo-group-title">' + esc(productTypeUsesAllCombinations(type) ? getProductTypeLabel(type) + ' — all combinations' : getProductTypeLabel(type)) + '</div>';
+      '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
       // title carries the full value — labels are single-line with an ellipsis.
@@ -12998,24 +13615,63 @@ function normalizeCFOptions(opts) {
   });
 }
 
+// Builds <option> HTML for the builtin Team / Product Type <select>s from
+// whatever the space's own custom_fields.options actually says right now --
+// index.html used to hardcode a fixed 5-option list for each, so editing a
+// space's Team/Product Type options in Custom Field settings never showed up
+// in Create Issue or the drawer at all. currentValue is kept as a visible
+// option even if it's since been removed from the configured list (labeled
+// "(removed)"), so a ticket that already has that value doesn't look like it
+// silently lost it -- but it isn't offered as a fresh choice for anything
+// else, since it no longer appears in the space's real option list.
+var BUILTIN_SELECT_FALLBACKS = {
+  type: ['epic', 'story', 'task', 'bug', 'subtask'],
+  priority: ['highest', 'high', 'medium', 'low', 'lowest']
+};
+
+function buildBuiltinSelectOptionsHtml(fieldKey, spaceId, currentValue, placeholderLabel) {
+  var field = (S.data.custom_fields || []).find(function (f) {
+    return f.space_id == spaceId && f.field_key === fieldKey;
+  });
+  var opts = field ? getCustomFieldOptions(field) : [];
+  // Every space is seeded with a real type/priority custom_fields row (see
+  // seedBuiltinIssueFields), so this only fires before that data has loaded —
+  // still needed so the dropdown isn't empty during that window.
+  if (!opts.length && BUILTIN_SELECT_FALLBACKS[fieldKey]) opts = BUILTIN_SELECT_FALLBACKS[fieldKey];
+  var label = function (v) {
+    if (fieldKey === 'product_type') return getProductTypeLabel(v);
+    if (fieldKey === 'type' || fieldKey === 'priority') return cap(v);
+    return v;
+  };
+  var html = placeholderLabel ? ('<option value="">' + esc(placeholderLabel) + '</option>') : '';
+  var found = false;
+  opts.forEach(function (o) {
+    if (String(o) === String(currentValue)) found = true;
+    html += '<option value="' + escAttr(o) + '">' + esc(label(o)) + '</option>';
+  });
+  if (currentValue && !found) {
+    html += '<option value="' + escAttr(currentValue) + '">' + esc(label(currentValue)) + ' (removed)</option>';
+  }
+  return html;
+}
+
+// Just the configured value itself -- used to map PRODUCT_TYPE_LABELS
+// (combination-options.js), a fixed {Message: 'Message Type', ...} override
+// that didn't cover every value (Manage/Infra passed through unchanged) and
+// disagreed with the plain value shown everywhere else a Product Type is
+// displayed (dropdowns, badges, filters). Removed for consistency.
 function getProductTypeLabel(value) {
-  if (!value) return '';
-  var labels = (typeof PRODUCT_TYPE_LABELS !== 'undefined' ? PRODUCT_TYPE_LABELS : window.PRODUCT_TYPE_LABELS) || {};
-  return labels[value] || value;
+  return value || '';
 }
 
-function productTypeHasCombinations(productType) {
-  var withCombo = (typeof PRODUCT_TYPES_WITH_COMBINATIONS !== 'undefined'
-    ? PRODUCT_TYPES_WITH_COMBINATIONS
-    : window.PRODUCT_TYPES_WITH_COMBINATIONS) || ['Message', 'Email', 'Content'];
-  return withCombo.indexOf(productType) >= 0;
-}
-
+// Any group key, not just the original fixed Message/Email/Content trio --
+// groups now has one entry per Product Type option the space actually has
+// configured (see renderCombinationGroupEditors), which can be any name.
 function flattenCombinationGroups(groups) {
   var out = [];
   var seen = {};
   if (!groups) return out;
-  ['Message', 'Email', 'Content'].forEach(function (k) {
+  Object.keys(groups).forEach(function (k) {
     (groups[k] || []).forEach(function (o) {
       var key = String(o).toLowerCase();
       if (!seen[key]) { seen[key] = true; out.push(o); }
@@ -13035,35 +13691,23 @@ function parseCombinationFieldOptions(field) {
       flat: raw.flat || flattenCombinationGroups(raw.groups)
     };
   }
+  // No groups info at all (a bare flat array, or nothing usable) -- there is
+  // no per-type breakdown to recover here, so this is just the flat list with
+  // an empty groups map, rather than guessing a category for each entry.
   var flat = Array.isArray(raw) ? raw.slice() : getCombinationOptionsList();
-  var groups = { Message: [], Email: [], Content: [] };
-  var classify = typeof classifyCombination === 'function' ? classifyCombination : null;
-  flat.forEach(function (o) {
-    var cat = classify ? classify(o) : 'Content';
-    if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(o);
-  });
-  return { groups: groups, flat: flat };
+  return { groups: {}, flat: flat };
 }
 
+// Every Product Type gets its own group, keyed by whatever that type's real
+// value is -- no more special-casing specific type names to see "all"
+// combinations or none. A type with nothing configured for it yet correctly
+// returns [], which the picker already renders as "No combinations available".
 function getCombinationsForProductType(productType, fieldMeta) {
   var parsed = fieldMeta ? parseCombinationFieldOptions(fieldMeta) : null;
-  var allFlat = parsed && parsed.flat && parsed.flat.length
-    ? parsed.flat.slice()
-    : getCombinationOptionsList(fieldMeta);
-
-  if (productTypeUsesAllCombinations(productType)) {
-    return allFlat.slice();
-  }
-  if (!productTypeHasCombinations(productType)) return [];
   if (parsed && parsed.groups && parsed.groups[productType]) {
     return parsed.groups[productType].slice();
   }
-  var groups = (typeof COMBINATION_GROUPS !== 'undefined' ? COMBINATION_GROUPS : window.COMBINATION_GROUPS);
-  if (groups && groups[productType]) return groups[productType].slice();
-  return allFlat.filter(function (o) {
-    return typeof classifyCombination === 'function' && classifyCombination(o) === productType;
-  });
+  return [];
 }
 
 function getCombinationOptionsList(fieldMeta) {
@@ -13564,9 +14208,25 @@ async function handleSpaceSubmit(e) {
   e.preventDefault();
   var id = $('spaceId').value;
   var spaceName = $('spaceName_input').value;
+  var spaceKey = $('spaceKey_input').value.trim().toUpperCase();
+
+  // Fail fast on a key that is visibly taken, so the user is told before the
+  // round-trip. The server repeats this check and is the real gate — it also
+  // sees ARCHIVED spaces, which /api/data filters out, so a clash this misses
+  // still comes back as a 409 and lands in the popup below.
+  var keyClash = (S.data.spaces || []).find(function (sp) {
+    return sp.id !== id && String(sp.key || '').toUpperCase() === spaceKey;
+  });
+  if (keyClash) {
+    popupAlert('Key already in use',
+      'The key "' + spaceKey + '" belongs to the space "' + keyClash.name + '". Space keys must be unique — pick a different one.',
+      'error');
+    return;
+  }
+
   var payload = {
     name: spaceName,
-    key: $('spaceKey_input').value.toUpperCase(),
+    key: spaceKey,
     description: $('spaceDesc').value,
     icon: $('spaceIconInput').value,
     color: $('spaceColor').value,
@@ -13813,61 +14473,48 @@ async function handleIssueSubmit(e) {
     } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Failed to create issue: " + e.message, "error"); return; }
     closeModal('modal-issue');
     await refreshData();
-    if (parentId && S.drawerIssueId === parentId) {
+    // Captured before anything below navigates: renderCurrentView() ->
+    // navigateToSpace() unconditionally calls _exitIssuePage(), so if a ticket
+    // was open when Create Issue was launched (it opens as an overlay on top
+    // of whatever page is behind it), calling that would silently close it out
+    // from under the user even before the auto-open-new-ticket behavior below
+    // ever ran.
+    var ticketWasOpen = !!S.drawerIssueId;
+    var subtaskOfOpenTicket = parentId && S.drawerIssueId === parentId;
+    if (subtaskOfOpenTicket) {
       var parentIssue = await api('/api/issues/' + parentId);
       renderDrawerSubtasks(parentIssue.subtasks || []);
-    } else {
+    } else if (!ticketWasOpen) {
       renderCurrentView();
     }
-    if (created && created.id && !parentId) {
-      toast('Issue created — opening in new tab…');
-      // Wait for custom fields to be saved before opening
-      setTimeout(async function() {
-        await new Promise(r => setTimeout(r, 500));
-        var fresh = await api('/api/issues/' + created.id);
-        openIssuePage(created.id);
-      }, 300);
+    // else: some ticket is open that isn't this new one's parent -- leave it
+    // on screen untouched; the toast below is the only feedback.
+    if (created && created.id) {
+      if (subtaskOfOpenTicket) {
+        toast('Issue created');
+      } else if (ticketWasOpen) {
+        // Don't yank the user away from whatever they're reading. Offer a way
+        // to jump to the new ticket instead of forcing it.
+        var newKey = issueKeyStr(created) || created.id;
+        toastWithButtons(newKey + ' created', [
+          { label: 'Open', handler: function () { openIssuePage(created.id); } },
+          { label: 'Copy link', handler: function () { copyIssueLinkByKey(newKey); }, dismissOnClick: false }
+        ]);
+      } else if (!parentId) {
+        toast('Issue created — opening in new tab…');
+        // Wait for custom fields to be saved before opening
+        setTimeout(async function() {
+          await new Promise(r => setTimeout(r, 500));
+          var fresh = await api('/api/issues/' + created.id);
+          openIssuePage(created.id);
+        }, 300);
+      } else {
+        toast('Issue created');
+      }
     } else {
       toast('Issue created');
     }
   }
-}
-
-// ═══════════════════════════════════════════════════════════
-// FILTER CRUD
-// ═══════════════════════════════════════════════════════════
-async function handleFilterSubmit(e) {
-  e.preventDefault();
-  var id = $('filterId').value;
-  var condRows = qsa('.filter-condition-row');
-  var conditions = [];
-  condRows.forEach(function (row) {
-    conditions.push({
-      field: row.querySelector('.fc-field').value,
-      operator: row.querySelector('.fc-op').value,
-      value: row.querySelector('.fc-value').value
-    });
-  });
-
-  var payload = {
-    space_id: $('filterSpaceId').value || S.currentSpace,
-    user_id: S.currentUser,
-    name: $('filterNameInput').value,
-    conditions: JSON.stringify(conditions),
-    is_shared: $('filterShared').checked,
-    is_pinned: $('filterPinned').checked
-  };
-
-  if (id) {
-    await api('/api/filters/' + id, 'PUT', payload);
-    toast('Filter updated');
-  } else {
-    await api('/api/filters', 'POST', payload);
-    toast('Filter created');
-  }
-  closeModal('modal-filter');
-  await refreshData();
-  renderFilters();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -14235,6 +14882,34 @@ document.addEventListener('DOMContentLoaded', function () {
       populateSprintSelect(sprintSel, sprints, includeSprintId || null);
       if (!includeSprintId) applySprintDatesToIssueForm('');
     }
+    // Team / Product Type options come from the newly-selected space's own
+    // custom_fields.options, rebuilt every time the space changes.
+    var issueTeamSel = $('issueTeam');
+    if (issueTeamSel) {
+      issueTeamSel.innerHTML = buildBuiltinSelectOptionsHtml('team', spaceId, issueTeamSel.value, '— None —');
+    }
+    var issueProductTypeSel = $('issueProductType');
+    if (issueProductTypeSel) {
+      issueProductTypeSel.innerHTML = buildBuiltinSelectOptionsHtml('product_type', spaceId, issueProductTypeSel.value, '— Select type —');
+    }
+    // Type / Priority are required — no blank placeholder option. A real prior
+    // selection (editing an in-progress form across a space switch) is kept if
+    // still valid; a fresh modal (no prior selection) defaults to task/medium
+    // when offered, else the space's first configured option.
+    function rebuildRequiredBuiltinSelect(sel, fieldKey, fallbackDefault) {
+      if (!sel) return;
+      var prior = sel.value;
+      sel.innerHTML = buildBuiltinSelectOptionsHtml(fieldKey, spaceId, prior || null, null);
+      if (prior && sel.querySelector('option[value="' + prior + '"]')) {
+        sel.value = prior;
+      } else if (sel.querySelector('option[value="' + fallbackDefault + '"]')) {
+        sel.value = fallbackDefault;
+      } else if (sel.options.length) {
+        sel.selectedIndex = 0;
+      }
+    }
+    rebuildRequiredBuiltinSelect($('issueType'), 'type', 'task');
+    rebuildRequiredBuiltinSelect($('issuePriority'), 'priority', 'medium');
     // Render custom fields — always show ALL unique custom fields across all spaces
     var cfContainer = $('issueCustomFieldsContainer');
     if (!cfContainer) return;
@@ -14433,35 +15108,7 @@ document.addEventListener('DOMContentLoaded', function () {
   $('spaceForm').addEventListener('submit', handleSpaceSubmit);
   $('sprintForm').addEventListener('submit', handleSprintSubmit);
   $('issueForm').addEventListener('submit', handleIssueSubmit);
-  $('filterForm').addEventListener('submit', handleFilterSubmit);
   $('worklogForm').addEventListener('submit', handleWorklogSubmit);
-
-  // Create filter
-  $('createFilterBtn').addEventListener('click', function () {
-    $('filterId').value = '';
-    $('filterSpaceId').value = S.currentSpace || '';
-    $('filterNameInput').value = '';
-    $('filterShared').checked = false;
-    $('filterPinned').checked = false;
-    $('filterConditions').innerHTML = '';
-    $('filterModalTitle').textContent = 'Create Filter';
-    openModal('modal-filter');
-  });
-
-  // Add filter condition
-  $('addConditionBtn').addEventListener('click', function () {
-    var row = document.createElement('div');
-    row.className = 'filter-condition-row';
-    row.innerHTML = '<select class="input input-sm fc-field">' +
-      '<option value="status">Status</option><option value="priority">Priority</option>' +
-      '<option value="type">Type</option><option value="assignee_id">Assignee</option></select>' +
-      '<select class="input input-sm fc-op">' +
-      '<option value="equals">equals</option><option value="not_equals">not equals</option>' +
-      '<option value="contains">contains</option></select>' +
-      '<input type="text" class="input input-sm fc-value" value="">' +
-      '<button type="button" class="btn btn-sm btn-outline" onclick="this.closest(\'.filter-condition-row\').remove()">x</button>';
-    $('filterConditions').appendChild(row);
-  });
 
   // Backlog search
   $('backlogSearch').addEventListener('input', function () {
@@ -14751,6 +15398,7 @@ document.addEventListener('click', function(e) {
   var item = e.target.closest('.admin-nav-item');
   if (!item || !item.dataset.section) return;
   renderAdminSettings(item.dataset.section);
+  syncAppUrl();
 });
 
 // ── Org General ──────────────────────────────────────────
@@ -15500,6 +16148,57 @@ function isPlainTextPasteTarget(el) {
   return !!(el.classList &&
     (el.classList.contains('jira-editor-body') || el.classList.contains('rte-content')));
 }
+// Whitelist-based cleanup for pasted text/html -- keeps real formatting
+// (bold/italic/headings/lists/links) but throws away everything that made the
+// old plain-text-only paste necessary in the first place: Word/Google Docs'
+// own inline styles/margins/font tags/classes, and any <script>/<style>/etc.
+// Unknown or disallowed tags are unwrapped (their content kept, the tag
+// dropped) rather than deleted outright, so nothing the user pasted vanishes.
+var PASTE_ALLOWED_TAGS = {
+  B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, STRIKE: 1,
+  H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+  UL: 1, OL: 1, LI: 1, BR: 1, P: 1, A: 1, CODE: 1, PRE: 1, BLOCKQUOTE: 1
+};
+function sanitizeRichPasteHtml(rawHtml) {
+  var source = document.createElement('div');
+  source.innerHTML = rawHtml;
+  source.querySelectorAll('script,style,meta,link,head,title,object,embed,iframe,img,svg').forEach(function (n) { n.remove(); });
+
+  function clean(node) {
+    var out = document.createDocumentFragment();
+    Array.prototype.forEach.call(node.childNodes, function (child) {
+      if (child.nodeType === 3) { out.appendChild(child.cloneNode()); return; }
+      if (child.nodeType !== 1) return; // drop comments (incl. Word's <!--[if]-->) and the rest
+      var tag = child.tagName;
+      // DIV/SPAN/FONT and anything else not on the whitelist: unwrap, keeping
+      // its text/children but dropping the wrapper and whatever inline
+      // style/class/font it carried -- this is what used to cause the giant
+      // gaps between pasted lines that the old plain-text-only paste was
+      // written to avoid.
+      if (!PASTE_ALLOWED_TAGS[tag]) { out.appendChild(clean(child)); return; }
+      var el = document.createElement(tag.toLowerCase());
+      if (tag === 'A') {
+        var href = child.getAttribute('href') || '';
+        if (/^(https?:|mailto:)/i.test(href)) el.setAttribute('href', href);
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
+      }
+      el.appendChild(clean(child));
+      out.appendChild(el);
+    });
+    return out;
+  }
+
+  var wrap = document.createElement('div');
+  wrap.appendChild(clean(source));
+  // Collapse the empty-paragraph runs Word/Docs use for spacing (an empty <p>
+  // that survived cleaning contributes nothing but a blank line).
+  wrap.querySelectorAll('p').forEach(function (p) {
+    if (!p.textContent.trim() && !p.querySelector('br')) p.remove();
+  });
+  return wrap.innerHTML;
+}
+
 document.addEventListener('paste', function(e) {
   var active = document.activeElement;
   if (!isPlainTextPasteTarget(active)) return;
@@ -15507,6 +16206,18 @@ document.addEventListener('paste', function(e) {
   if (!cd) return;
   var items = cd.items || [];
   for (var i = 0; i < items.length; i++) { if (items[i].type.indexOf('image') !== -1) return; } // image handler above
+
+  var htmlSource = cd.getData('text/html');
+  if (htmlSource) {
+    e.preventDefault();
+    document.execCommand('insertHTML', false, sanitizeRichPasteHtml(htmlSource));
+    return;
+  }
+
+  // No text/html on the clipboard (plain-text copy, or a source that only
+  // offers text/plain) -- keep line breaks as before, but no longer flatten
+  // real formatting that WAS on the clipboard, since that case is now handled
+  // above.
   var text = cd.getData('text/plain');
   if (text === '' || text == null) return;
   e.preventDefault();
@@ -15753,7 +16464,10 @@ function awInlineStatus(e, issueId, current) {
 
 function awInlinePriority(e, issueId, current) {
   e.stopPropagation();
-  var priorities = ['highest','high','medium','low','lowest'];
+  // This issue's own space's configured Priority list, not the fixed 5 --
+  // an admin-added priority value was previously unreachable from this menu.
+  var _iss = (S.data.issues || []).find(function (x) { return x.id == issueId; });
+  var priorities = getIssuePriorityOptionsForSpace(_iss ? _iss.space_id : S.currentSpace).map(function (o) { return o.v; });
   var items = priorities.map(function(p) {
     var check = p === current ? '<span style="color:#0052cc;font-weight:700;margin-left:auto">&#10003;</span>' : '';
     return { value: p, html: '<span style="font-size:14px;color:#172b4d;flex:1;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' + cap(p) + '</span>' + check };
@@ -15870,13 +16584,13 @@ function richInsertImage(elId) {
 }
 
 // ── Copy issue link ─────────────────────────────────────
-function copyDrawerLink() {
-  // Use current issue key saved when drawer opened
-  var issueKey = window._currentIssueKey || (window.S && S.drawerIssueId);
+// Shared by the drawer's own copy-link button and the "created while another
+// ticket was open" toast, which offers a copy-link action for the NEW ticket
+// (a different key than whatever is currently open, so it can't just reuse
+// copyDrawerLink's window._currentIssueKey).
+function copyIssueLinkByKey(issueKey) {
   var url = window.location.origin + '/?issue=' + encodeURIComponent(issueKey);
-  navigator.clipboard.writeText(url).then(function() {
-    toast('Link copied!');
-  }).catch(function() {
+  function fallbackCopy() {
     var el = document.createElement('input');
     el.value = url;
     document.body.appendChild(el);
@@ -15884,39 +16598,74 @@ function copyDrawerLink() {
     document.execCommand('copy');
     document.body.removeChild(el);
     toast('Link copied!');
-  });
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function() { toast('Link copied!'); }).catch(fallbackCopy);
+  } else {
+    fallbackCopy();
+  }
+}
+
+function copyDrawerLink() {
+  // Use current issue key saved when drawer opened
+  var issueKey = window._currentIssueKey || (window.S && S.drawerIssueId);
+  copyIssueLinkByKey(issueKey);
+}
+
+// history.back() only QUEUES a navigation -- it doesn't wait for the
+// resulting popstate. Two back-trigger clicks fired before that popstate
+// lands (a real, easy-to-hit case: click the drawer's "Back" button, see no
+// instant visual change while the event settles, click it again) both
+// call history.back(), and browsers do not coalesce them -- the second one
+// consumes a SECOND history entry, skipping past the intended destination
+// entirely. This guard makes a second back-trigger click a no-op until the
+// first one's popstate has actually been handled.
+function _goBackOnce() {
+  if (window._backPending) return;
+  window._backPending = true;
+  window.history.back();
 }
 
 // ── Browser back button support ─────────────────────────
+// _navigatingBack used to be set true only around the last one or two
+// statements, with the reset scheduled via a trailing setTimeout(fn, 0) --
+// if ANYTHING earlier in this handler threw (closing the drawer, resolving
+// the target space/tab, etc.), that setTimeout line was never reached and
+// the flag stayed stuck true forever. Every popstate after that (including
+// the browser's own native Back button, which doesn't go through
+// _goBackOnce at all) hit the early-return at the top and did nothing --
+// exactly a "first click does nothing" symptom, until something else
+// happened to flip the flag back. try/finally guarantees the reset runs no
+// matter which line throws.
 window.addEventListener('popstate', function () {
+  window._backPending = false;
   if (window._navigatingBack) return;
-
-  var issueKey = new URLSearchParams(window.location.search).get('issue');
-
-  if (!issueKey && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
-    stopDrawerLiveSync();
-    window._drawerPending = {};
-    _closeIssueDrawer();
-  }
-
-  if (issueKey) {
-    window._navigatingBack = true;
-    var issueByKey = (S.data && S.data.issues || []).find(function (i) { return i.key === issueKey || i.id === issueKey; });
-    openIssuePage(issueByKey ? issueByKey.id : issueKey, { skipHistory: true });
-    setTimeout(function () { window._navigatingBack = false; }, 0);
-    return;
-  }
-
   window._navigatingBack = true;
-  applyRouteFromUrl({ replaceUrl: true });
-  setTimeout(function () { window._navigatingBack = false; }, 0);
+  try {
+    var issueKey = new URLSearchParams(window.location.search).get('issue');
+
+    if (!issueKey && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
+      stopDrawerLiveSync();
+      window._drawerPending = {};
+      _closeIssueDrawer();
+    }
+
+    if (issueKey) {
+      var issueByKey = (S.data && S.data.issues || []).find(function (i) { return i.key === issueKey || i.id === issueKey; });
+      openIssuePage(issueByKey ? issueByKey.id : issueKey, { skipHistory: true });
+    } else {
+      applyRouteFromUrl({ replaceUrl: true });
+    }
+  } finally {
+    setTimeout(function () { window._navigatingBack = false; }, 0);
+  }
 });
 
 function goBackFromIssue() {
   stopDrawerLiveSync();
   window._drawerPending = {};
   if (window.history.length > 1) {
-    window.history.back();
+    _goBackOnce();
     return;
   }
   _closeIssueDrawer();
@@ -15937,6 +16686,24 @@ function goBackFromIssue() {
     navigateTo('home', { replaceUrl: true });
   }
 }
+
+// Same destination-resolving logic as goBackFromIssue's fallback branch, but
+// never calls window.history.back() / relies on popstate at all -- see the
+// comment on this button's onclick wiring in openIssuePage.
+function closeIssueFromAllWork() {
+  stopDrawerLiveSync();
+  window._drawerPending = {};
+  _closeIssueDrawer();
+  var returnSpace = S._prevSpace || window._issueReturnSpace || S.currentSpace;
+  window._issueReturnTab = null;
+  window._issueReturnSpace = null;
+  if (returnSpace) {
+    navigateToSpace(returnSpace, 'allwork', { replaceUrl: true });
+  } else {
+    navigateTo('home', { replaceUrl: true });
+  }
+}
+window.closeIssueFromAllWork = closeIssueFromAllWork;
 
 // Copy issue URL and number to clipboard
 window._copyIssueUrl = function() {
@@ -16159,7 +16926,7 @@ window._copyIssueUrl = function() {
         var issue = (S.data && S.data.issues || []).find(function(i){ return String(i.id) === String(id); });
         gsClose();
         $('globalSearchInput').value = '';
-        if (issue) openIssuePage(issue.id, issue.key);
+        if (issue) openIssuePage(issue.id);
       });
       el.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') el.dispatchEvent(new MouseEvent('mousedown'));

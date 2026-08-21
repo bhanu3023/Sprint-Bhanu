@@ -32,9 +32,15 @@ sprints           id, space_id, name, goal, start_date, end_date,
 
 issues            id, space_id, sprint_id, parent_id,
                   key (e.g. "PROJ-42"), title, description,
-                  type (epic/story/task/bug/subtask),
-                  status (To Do / In Progress / In Review / Done),
-                  priority (highest/high/medium/low/lowest),
+                  type (no DB CHECK — per-space configurable via custom_fields,
+                        default epic/story/task/bug/subtask; epic & subtask are
+                        reserved and can't be removed, they drive Roadmap
+                        grouping and the Add Subtask flow),
+                  status (To Do / In Progress / In Review / Done / Blocked — fixed,
+                        see .claude/rules/issue-state-machine.md),
+                  priority (no DB CHECK — per-space configurable via custom_fields,
+                        default highest/high/medium/low/lowest; list order IS
+                        severity order, most severe first),
                   assignee_id, reporter_id, story_points, labels[],
                   start_date, due_date, original_estimate, time_spent (minutes),
                   position, team, product_type, deleted_at, deleted_by
@@ -125,6 +131,14 @@ When `PUT /api/issues/:id` is called:
 ## Array & JSON Columns
 - `issues.labels` → PostgreSQL `text[]`
 - `custom_fields.options`, `saved_filters.conditions`, `organizations.email_settings` → `jsonb`
+
+## Analytics & Hotjar Masking (`hotjar.js`)
+- Site ID is **never hardcoded** — `HOTJAR_SITE_ID` env var → `/config.js` route in `server.js` → `window.APP_CONFIG.hotjarSiteId`. Blank/absent means no snippet is injected at all.
+- Read at **runtime**, not build time (there is no build step). Turning recording off = clear the env var + restart. No rebuild, no asset redeploy.
+- `initHotjar()` is called at module scope in `app.js` and in `login.html`. It is idempotent, guarded on the `#hotjar-loader` script element — two snippets would double-count every page view.
+- **Any new view or modal that renders issue text, emails, worklog descriptions, or uploaded filenames must carry `data-hj-suppress` on its static container in `index.html`.** app.js only replaces containers' `innerHTML`, so one attribute covers every future render inside it. `scripts/test-hotjar.js` asserts the current set — add new containers there too.
+- Overlays appended to `document.body` are covered automatically by the observer in `hotjar.js` (default-deny), so they need no attribute.
+- Run `node scripts/test-hotjar.js` after touching any of the above.
 
 ## Hard Rules
 - **Never string-interpolate SQL** — always use parameterized queries: `pool.query(sql, [p1, p2, ...])`

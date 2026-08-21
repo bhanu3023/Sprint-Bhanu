@@ -76,6 +76,28 @@ try {
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// ── Runtime client config (/config.js) ─────────────────────
+// This project has no build step: index.html and login.html load their scripts
+// straight off disk through express.static below, so there is no bundler that
+// could substitute an env var into the frontend at build time. This route
+// synthesizes a tiny script instead, which means every value below is read
+// fresh from process.env on each request — turning Hotjar off later is a config
+// change plus a restart, with no rebuild and no asset redeploy.
+//
+// Registered before express.static so it wins even if a config.js file ever
+// lands on disk. Served unauthenticated to every visitor (the login page needs
+// it too), so only non-secret, publicly-safe values belong here.
+app.get('/config.js', (req, res) => {
+  const cfg = {
+    // Blank/unset means Hotjar never loads and no script is requested — the
+    // committed default, so local dev does not record into the real site.
+    hotjarSiteId: (process.env.HOTJAR_SITE_ID || '').trim()
+  };
+  res.type('application/javascript');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.send('window.APP_CONFIG = ' + JSON.stringify(cfg) + ';');
+});
+
 app.use(express.static(__dirname, {
   setHeaders: function(res, filePath) {
     if (filePath.endsWith('.js') || filePath.endsWith('.html') || filePath.endsWith('.css')) {
@@ -180,8 +202,24 @@ const {
   getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId,
   getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed
 } = require('./lib/permissions');
-const { seedBuiltinIssueFields } = require('./lib/builtin-issue-fields');
+const { seedBuiltinIssueFields, getConfiguredOptions } = require('./lib/builtin-issue-fields');
+
+/**
+ * type/priority have no DB CHECK constraint since migration 016 — each space
+ * configures its own list via custom_fields, same model as team/product_type.
+ * Validates a NEW value being written; callers must skip this when a value is
+ * unchanged so an issue keeping an old, since-removed value stays valid.
+ */
+async function isBuiltinSelectValueAllowed(spaceId, fieldKey, value) {
+  if (value == null) return true;
+  const opts = await getConfiguredOptions(q, spaceId, fieldKey);
+  return opts.indexOf(String(value)) >= 0;
+}
 const { startRetentionSweeper, retentionDays, purgeIssueRows: purgeIssueCascade } = require('./lib/retention');
+const { completeSprint, startSprintAutoCompleter } = require('./lib/sprint-complete');
+// createNotif is a hoisted function declaration further down, so this object can
+// be built here and still hold a live reference by the time anything calls it.
+const sprintDeps = { q, uid, createNotif: (n) => createNotif(n) };
 // One shared cascade for every issue purge — manual, bulk, and the retention sweep.
 const purgeIssueRows = (id) => purgeIssueCascade(q, id);
 const https = require('https');
@@ -392,9 +430,30 @@ app.get('/api/spaces', requireAuth, wrap(async (req, res) => {
   res.json(r.rows);
 }));
 
+// A space key is the /space/:key route segment and what getSpaceByKey() looks
+// up, so two spaces sharing one key means every link to either resolves to
+// whichever the lookup hits first. Checked case-insensitively and against
+// ARCHIVED spaces too: archiving keeps the row and its key, so handing that key
+// to a new space only defers the collision to whenever the old one comes back.
+async function findSpaceKeyConflict(key, excludeSpaceId) {
+  const params = [String(key || '').trim()];
+  let sql = 'SELECT id, name, is_archived FROM spaces WHERE UPPER(key) = UPPER($1)';
+  if (excludeSpaceId) { params.push(excludeSpaceId); sql += ' AND id <> $2'; }
+  return (await q(sql + ' LIMIT 1', params)).rows[0] || null;
+}
+
+function spaceKeyTakenMessage(clash) {
+  return 'That key is already used by the space "' + clash.name + '"' +
+    (clash.is_archived ? ' (archived)' : '') + '. Pick a different key.';
+}
+
 app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
   if (!requireOrgAdmin(req.user, res, 'Only an org admin can create a space.')) return;
-  const { name, key, description, icon, color, space_type, visibility, owner_id } = req.body;
+  const { name, description, icon, color, space_type, visibility, owner_id } = req.body;
+  const key = String(req.body.key || '').trim().toUpperCase();
+  if (!key) return res.status(400).json({ error: 'A space key is required.' });
+  const clash = await findSpaceKeyConflict(key, null);
+  if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
   const id = uid();
   const r = await q(`INSERT INTO spaces(id,name,key,description,icon,color,space_type,visibility,owner_id)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
@@ -418,8 +477,13 @@ app.get('/api/debug/spaces', requireAuth, wrap(async (req, res) => {
 app.post('/api/spaces/recover', requireAuth, wrap(async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'owner')
     return res.status(403).json({ error: 'Admin only' });
-  const { id, name, key, icon, color } = req.body;
+  const { id, name, icon, color } = req.body;
+  const key = String(req.body.key || '').trim().toUpperCase();
   if (!id || !name || !key) return res.status(400).json({ error: 'id, name, key required' });
+  // Recovery re-inserts by id, so it can hand an existing key to a different
+  // space and re-create the collision the unique index exists to prevent.
+  const clash = await findSpaceKeyConflict(key, id);
+  if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
   // Get org_id to satisfy FK if needed
   const orgR = await q(`SELECT id FROM organizations LIMIT 1`);
   const orgId = orgR.rows[0] ? orgR.rows[0].id : null;
@@ -439,6 +503,16 @@ app.post('/api/spaces/recover', requireAuth, wrap(async (req, res) => {
 app.put('/api/spaces/:id', requireAuth, wrap(async (req, res) => {
   const spaceId = req.params.id;
   let body = req.body;
+  // Renaming a key into an existing one breaks routing exactly like creating a
+  // duplicate does. Only org admins can reach `key` at all — it is absent from
+  // UPDATE_WHITELIST.spaces_space_admin — so this guard sits on that branch.
+  if (isOrgAdmin(req.user.role) && Object.prototype.hasOwnProperty.call(body, 'key')) {
+    const key = String(body.key || '').trim().toUpperCase();
+    if (!key) return res.status(400).json({ error: 'A space key is required.' });
+    const clash = await findSpaceKeyConflict(key, spaceId);
+    if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
+    body = Object.assign({}, body, { key: key });
+  }
   if (isOrgAdmin(req.user.role)) {
     const upd = buildDynamicUpdate('spaces', body, 2);
     if (!upd) return res.status(400).json({ error: 'Nothing to update' });
@@ -592,41 +666,11 @@ app.post('/api/sprints/:id/complete', requireAuth, wrap(async (req, res) => {
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1 AND deleted_at IS NULL', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'sprint.manage'))) return;
-  const done = await q("SELECT COALESCE(SUM(story_points),0)::int AS pts FROM issues WHERE sprint_id=$1 AND status='Done'", [sid]);
-  await q("UPDATE sprints SET status='completed',velocity=$2 WHERE id=$1", [sid, done.rows[0].pts]);
-  // Capture spillover issues before moving them to backlog
-  const spilloverIssues = (await q(
-    "SELECT id FROM issues WHERE sprint_id=$1 AND status!='Done' AND deleted_at IS NULL", [sid]
-  )).rows;
-  await q("UPDATE issues SET sprint_id=NULL WHERE sprint_id=$1 AND status!='Done'", [sid]);
-  // Record this as a distinct 'spillover' history entry (not 'sprint_id') so
-  // it can't be confused with a manual mid-sprint removal — PUT /api/issues/:id
-  // already logs field_name='sprint_id' for ANY sprint change (drag to
-  // backlog, editing the Sprint dropdown, etc.), and both the Spillover and
-  // Scope Change reports read issue_history by field_name. Without a
-  // separate marker, a sprint's genuine end-of-sprint spillover and any
-  // manual backlog move made earlier in that same sprint were
-  // indistinguishable, so manually-removed tickets were showing up as
-  // "spillover" instead of under Scope Change's "Removed".
-  for (const issue of spilloverIssues) {
-    q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-       VALUES($1,$2,$3,'spillover',$4,NULL)`,
-      [uid(), issue.id, req.user ? req.user.id : null, sid]).catch(() => {});
-  }
-  const r = await q('SELECT * FROM sprints WHERE id=$1', [sid]);
-  // Notify all space members
-  if (sprint) {
-    const spaceRow = (await q('SELECT key FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
-    const sprintLink = spaceRow ? '/space/' + encodeURIComponent(spaceRow.key) + '/board' : null;
-    const members = await q('SELECT user_id FROM space_members WHERE space_id=$1', [sprint.space_id]);
-    members.rows.forEach(function(m) {
-      createNotif({ user_id: m.user_id, space_id: sprint.space_id, type: 'sprint_completed',
-        title: sprint.name + ' has been completed',
-        body: 'Sprint completed with ' + done.rows[0].pts + ' story points.',
-        link: sprintLink });
-    });
-  }
-  res.json(r.rows[0]);
+  // Every side effect lives in lib/sprint-complete.js so this route and the
+  // 23:59 auto-complete sweeper can never diverge — see the notes there.
+  const completed = await completeSprint(sprintDeps, sid, req.user ? req.user.id : null);
+  if (!completed) return res.status(400).json({ error: 'Sprint is not active' });
+  res.json(completed);
 }));
 
 // ── Issues ────────────────────────────────────────────────
@@ -757,17 +801,45 @@ app.get('/api/issues/deleted', requireAuth, wrap(async (req, res) => {
   res.json({ can_restore: orgAdmin, retention_days: days, items: items });
 }));
 
+// Shared by both restore routes below — one cascade, two callers, same reasoning
+// as purgeIssueRows in lib/retention.js. DELETE /api/issues/:id soft-deletes an
+// issue AND its subtasks (parent_id=$1) together in one UPDATE, so they share the
+// exact same deleted_at timestamp from that statement. Restoring only needs to
+// bring back subtasks whose deleted_at matches the parent's — that is precisely
+// "deleted together with this parent" and excludes a subtask that happened to
+// already be in the bin from an earlier, unrelated delete of its own.
+//
+// The match is done with a subquery INSIDE the UPDATE rather than by fetching
+// the parent's deleted_at into JS first and passing it back as a parameter.
+// issues.deleted_at is `timestamp without time zone` (local server clock), but
+// node-pg's default type parser hands it back as a JS Date assumed to be UTC —
+// so a round-tripped value silently drifts by the server's UTC offset and never
+// matches the raw column again. A subquery never leaves Postgres, so there is
+// nothing to drift: both sides of the comparison are the same on-disk value.
+async function restoreIssueRows(id, userId) {
+  const check = (await q('SELECT key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
+  if (!check) return null;
+  const restored = await q(
+    `UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW()
+     WHERE id=$1
+        OR (parent_id=$1 AND deleted_at = (SELECT deleted_at FROM issues WHERE id=$1))
+     RETURNING id, key`,
+    [id]
+  );
+  for (const r of restored.rows) {
+    q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
+       VALUES($1,$2,$3,'restored',NULL,$4)`, [uid(), r.id, userId, r.key]).catch(() => {});
+  }
+  return { key: check.key, restoredSubtasks: restored.rows.length - 1 };
+}
+
 app.post('/api/issues/:id/restore', requireAuth, wrap(async (req, res) => {
   if (!requireOrgAdmin(req.user, res, 'Only an org admin can restore deleted issues.')) return;
-  const row = (await q('SELECT id, key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [req.params.id])).rows[0];
-  if (!row) return res.status(404).json({ error: 'Deleted issue not found' });
   // Restores in place: space_id/status were never changed by the soft delete, so
   // clearing the tombstone returns the issue to its original space and state.
-  await q('UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1', [req.params.id]);
-  await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-    VALUES($1,$2,$3,'restored',NULL,$4)`,
-    [uid(), req.params.id, req.user.id, row.key]).catch(() => {});
-  res.json({ ok: true });
+  const result = await restoreIssueRows(req.params.id, req.user.id);
+  if (!result) return res.status(404).json({ error: 'Deleted issue not found' });
+  res.json({ ok: true, restored_subtasks: result.restoredSubtasks });
 }));
 
 // ── Generic bin restore / purge (org admin only) ─────────────
@@ -778,12 +850,9 @@ app.post('/api/bin/:type/:id/restore', requireAuth, wrap(async (req, res) => {
   if (!requireOrgAdmin(req.user, res, 'Only an org admin can restore deleted items.')) return;
   const { type, id } = req.params;
   if (type === 'ticket') {
-    const row = (await q('SELECT key FROM issues WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
-    if (!row) return res.status(404).json({ error: 'That ticket is not in the bin.' });
-    await q('UPDATE issues SET deleted_at=NULL, deleted_by=NULL, updated_at=NOW() WHERE id=$1', [id]);
-    await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-      VALUES($1,$2,$3,'restored',NULL,$4)`, [uid(), id, req.user.id, row.key]).catch(() => {});
-    return res.json({ ok: true, label: row.key });
+    const result = await restoreIssueRows(id, req.user.id);
+    if (!result) return res.status(404).json({ error: 'That ticket is not in the bin.' });
+    return res.json({ ok: true, label: result.key, restored_subtasks: result.restoredSubtasks });
   }
   if (type === 'sprint') {
     const row = (await q('SELECT name FROM sprints WHERE id=$1 AND deleted_at IS NOT NULL', [id])).rows[0];
@@ -951,12 +1020,20 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
     [b.space_id, spaceKey]
   )).rows[0];
   const key = `${spaceKey}-${maxRow.mx + 1}`;
+  const finalType = b.type || 'task';
+  const finalPriority = b.priority || 'medium';
+  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'type', finalType))) {
+    return res.status(400).json({ error: 'Not a configured type for this space: ' + finalType });
+  }
+  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'priority', finalPriority))) {
+    return res.status(400).json({ error: 'Not a configured priority for this space: ' + finalPriority });
+  }
   const id = uid();
   const r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
       assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
     [id, key, b.space_id, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
-     b.type || 'task', b.priority || 'medium', b.assignee_id || null, b.reporter_id || null,
+     finalType, finalPriority, b.assignee_id || null, b.reporter_id || null,
      b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
      b.original_estimate || null, b.team || null, b.product_type || null]);
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
@@ -974,6 +1051,17 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   }
   const keys = upd.keys;
   const oldRow = (await q('SELECT * FROM issues WHERE id=$1', [req.params.id])).rows[0];
+  // Only a genuine change needs to satisfy the space's CURRENT list — an issue
+  // resaved with a value it already had (since removed from that list) must
+  // stay exactly as it was, per the "never rewrite stored values" rule.
+  if (keys.includes('type') && req.body.type !== oldRow.type &&
+      !(await isBuiltinSelectValueAllowed(spaceId, 'type', req.body.type))) {
+    return res.status(400).json({ error: 'Not a configured type for this space: ' + req.body.type });
+  }
+  if (keys.includes('priority') && req.body.priority !== oldRow.priority &&
+      !(await isBuiltinSelectValueAllowed(spaceId, 'priority', req.body.priority))) {
+    return res.status(400).json({ error: 'Not a configured priority for this space: ' + req.body.priority });
+  }
   const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
   const newRow = r.rows[0];
   // Same rule as PUT /:id/move — deciding this ticket's sprint by hand retires the
@@ -1051,6 +1139,20 @@ app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
   const bulkSpaceIds = Array.from(new Set(issueRows.map(function (row) { return row.space_id; })));
   for (let i = 0; i < bulkSpaceIds.length; i++) {
     if (!(await denyUnlessCanAct(q, req.user, res, bulkSpaceIds[i], 'issue.bulk'))) return;
+  }
+  // A bulk edit writes the same value across every matched issue regardless of
+  // what it had before, so (unlike the single-issue PUT) there is no "already
+  // had this value" exception here — the value must be configured in EVERY
+  // affected space or the whole batch is rejected rather than partially applied.
+  if (picked.type != null || picked.priority != null) {
+    for (let i = 0; i < bulkSpaceIds.length; i++) {
+      if (picked.type != null && !(await isBuiltinSelectValueAllowed(bulkSpaceIds[i], 'type', picked.type))) {
+        return res.status(400).json({ error: 'Not a configured type for one of the selected spaces: ' + picked.type });
+      }
+      if (picked.priority != null && !(await isBuiltinSelectValueAllowed(bulkSpaceIds[i], 'priority', picked.priority))) {
+        return res.status(400).json({ error: 'Not a configured priority for one of the selected spaces: ' + picked.priority });
+      }
+    }
   }
   const upd = buildDynamicUpdate('issues', picked, 2);
   const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=ANY($1) RETURNING *`, [ids, ...upd.vals]);
@@ -1603,8 +1705,8 @@ app.delete('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
   const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
   if (!field) return res.status(404).json({ error: 'Field not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, field.space_id, 'custom_field.manage'))) return;
-  if (field.is_builtin && field.field_key === 'title') {
-    return res.status(400).json({ error: 'Title is a required built-in field and cannot be removed' });
+  if (field.is_builtin && ['title', 'type', 'priority'].includes(field.field_key)) {
+    return res.status(400).json({ error: 'This is a required built-in field and cannot be removed' });
   }
   await q('DELETE FROM issue_field_values WHERE field_id=$1', [req.params.id]);
   await q('DELETE FROM custom_fields WHERE id=$1', [req.params.id]);
@@ -1949,14 +2051,19 @@ app.get('/api/reports/bugs/:sprintId', requireAuth, wrap(async (req, res) => {
   const sprint = (await q('SELECT space_id FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
+  // "Critical" = this space's most-severe configured priority (list order is
+  // severity order, migration 016) — not the literal string 'highest', which
+  // an admin may have renamed or reordered.
+  const priorityOpts = await getConfiguredOptions(q, sprint.space_id, 'priority');
+  const criticalPriority = priorityOpts[0] || 'highest';
   const r = (await q(`
     SELECT
       COUNT(*) FILTER (WHERE status!='Done')::int AS open_bugs,
       COUNT(*) FILTER (WHERE status='Done')::int AS closed_bugs,
       COUNT(*)::int AS total_bugs,
-      COUNT(*) FILTER (WHERE priority='highest')::int AS critical_bugs
+      COUNT(*) FILTER (WHERE priority=$2)::int AS critical_bugs
     FROM issues WHERE sprint_id=$1 AND type='bug' AND deleted_at IS NULL
-  `, [sid])).rows[0];
+  `, [sid, criticalPriority])).rows[0];
   res.json(r);
 }));
 
@@ -3026,7 +3133,13 @@ app.get([
 ], (req, res) => {
   res.sendFile(SPA_HTML);
 });
-app.get('/space/:key/:tab?', (req, res) => {
+app.get('/space/:key/:tab?/:subtab?', (req, res) => {
+  res.sendFile(SPA_HTML);
+});
+// Org Admin Settings' own sub-sections (/settings/user-management, etc.) —
+// same gap as /space/:key/:tab above: a hard refresh on a valid client-side
+// route 404'd because this list only had the bare parent path.
+app.get('/settings/:section', (req, res) => {
   res.sendFile(SPA_HTML);
 });
 
@@ -3081,6 +3194,7 @@ app.get('/login', (req, res) => {
       console.log('==================================================');
       // Started after listen so a slow first sweep never delays accepting traffic.
       startRetentionSweeper(q);
+      startSprintAutoCompleter(sprintDeps);
     });
   } catch (e) {
     console.error('Failed to connect to database:', e.message);

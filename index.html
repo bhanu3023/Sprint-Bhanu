@@ -79,7 +79,7 @@
             <span class="sidebar-section-label">STARRED</span>
             <button type="button" class="btn-icon sidebar-collapse-toggle" aria-label="Toggle starred issues" aria-expanded="true">▾</button>
           </div>
-          <div id="favIssues" class="sidebar-section-content"></div>
+          <div id="favIssues" data-hj-suppress class="sidebar-section-content"></div>
         </div>
 
         <div class="sidebar-section">
@@ -93,7 +93,7 @@
         <div id="spaceNav" hidden></div>
       </nav>
 
-      <div id="sidebarUserFooter" hidden></div>
+      <div id="sidebarUserFooter" data-hj-suppress hidden></div>
     </aside>
 
     <!-- 3b. Main Content Area -->
@@ -113,7 +113,7 @@
           <svg class="topbar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="globalSearchInput" class="topbar-search-input" placeholder="Search issues, keys…" autocomplete="off">
           <kbd class="topbar-search-kbd">/</kbd>
-          <div id="globalSearchDrop" class="gs-drop" hidden></div>
+          <div id="globalSearchDrop" data-hj-suppress class="gs-drop" hidden></div>
         </div>
         <div class="topbar-right">
           <div class="notif-btn-wrap">
@@ -130,7 +130,7 @@
                 <h3>Notifications</h3>
                 <button class="btn btn-link" id="markAllReadBtn">Mark all read</button>
               </div>
-              <div id="notifList" class="notif-list"></div>
+              <div id="notifList" data-hj-suppress class="notif-list"></div>
             </div>
           </div>
           <button class="btn btn-primary btn-sm" id="createIssueBtn">+ Create Issue</button>
@@ -140,7 +140,7 @@
               <span id="topbarProfileAvatar">BS</span>
             </button>
             <div id="topbarProfileMenu" hidden style="position:absolute;right:0;top:42px;width:220px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.13);z-index:9999;overflow:hidden">
-              <div id="topbarProfileHeader" style="padding:14px 16px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px">
+              <div id="topbarProfileHeader" data-hj-suppress style="padding:14px 16px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px">
                 <div id="topbarProfileAv2" style="width:38px;height:38px;border-radius:50%;background:#0129AC;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">BS</div>
                 <div style="min-width:0">
                   <div id="topbarProfileName" style="font-size:13px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Bhanu srikakulam</div>
@@ -269,7 +269,7 @@
               </a>
             </div>
           </div>
-          <div id="yourWorkContent" class="yw-content"></div>
+          <div id="yourWorkContent" data-hj-suppress class="yw-content"></div>
         </div>
 
         <!-- Global Reports View -->
@@ -284,7 +284,7 @@
               <option value="control">Control Chart</option>
             </select>
           </div>
-          <div id="globalReportContent" class="report-content" style="padding:16px 0"></div>
+          <div id="globalReportContent" data-hj-suppress class="report-content" style="padding:16px 0"></div>
         </div>
 
         <!-- Work Log Report View -->
@@ -367,7 +367,7 @@
           </div><!-- /.wlr-sticky-top -->
 
           <!-- Results -->
-          <div id="wlrContent" class="wlr-content"></div>
+          <div id="wlrContent" data-hj-suppress class="wlr-content"></div>
 
           <!-- Pivot Field List Panel (overlay) -->
           <div id="wlrPivotPanel" class="wlr-pp-overlay" hidden>
@@ -473,7 +473,7 @@
               <button class="btn btn-primary btn-sm" onclick="window._prmOpenModal()">＋ Add Item</button>
             </div>
           </div>
-          <div id="prmContent" class="prm-content"></div>
+          <div id="prmContent" data-hj-suppress class="prm-content"></div>
         </div>
 
         <!-- Admin Settings View -->
@@ -506,7 +506,7 @@
               </div>
             </aside>
             <!-- Right content -->
-            <div class="admin-settings-content" id="adminSettingsContent"></div>
+            <div class="admin-settings-content" id="adminSettingsContent" data-hj-suppress></div>
           </div>
         </div>
 
@@ -520,7 +520,7 @@
         <div class="view" id="view-summary" hidden>
           <div id="summaryStats" class="stats-row"></div>
           <div id="summaryCharts" class="charts-row"></div>
-          <div id="summaryWidgets" class="widgets-grid"></div>
+          <div id="summaryWidgets" data-hj-suppress class="widgets-grid"></div>
         </div>
 
         <!-- Space: Backlog -->
@@ -574,13 +574,13 @@
               <button class="btn btn-primary btn-sm" id="createSprintBtn">+ Create Sprint</button>
             </div>
           </div>
-          <div id="backlogContent" class="backlog-content"></div>
+          <div id="backlogContent" data-hj-suppress class="backlog-content"></div>
         </div>
 
         <!-- Space: Active Sprint -->
         <div class="view" id="view-sprint" hidden>
           <div id="sprintHeader" class="sprint-header"></div>
-          <div id="sprintBoard" class="board-columns"></div>
+          <div id="sprintBoard" data-hj-suppress class="board-columns"></div>
         </div>
 
         <!-- Space: Reports -->
@@ -601,7 +601,7 @@
               <option value="control">Control Chart</option>
             </select>
           </div>
-          <div id="reportContent" class="report-content"></div>
+          <div id="reportContent" data-hj-suppress class="report-content"></div>
         </div>
 
         <!-- Space: MBR (Monthly Business Review) — cross-sprint trends -->
@@ -611,7 +611,7 @@
             <button class="tab-btn" data-mtab="comparison" onclick="window._switchMbrTab('comparison')">Comparison Trends</button>
             <button class="tab-btn" data-mtab="achievements" onclick="window._switchMbrTab('achievements')">Achievements</button>
           </div>
-          <div id="mbrTabContent"></div>
+          <div id="mbrTabContent" data-hj-suppress></div>
         </div>
 
         <!-- Space: All Work -->
@@ -630,6 +630,11 @@
               </div>
             </div>
             <button class="btn btn-outline btn-sm" id="awClearFilters" style="display:none" onclick="window._awClearFilters()">✕ Clear all</button>
+            <div id="awBulkDeleteWrap" style="display:none;align-items:center;gap:8px;margin-left:auto">
+              <span id="awBulkDeleteCount" style="font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap"></span>
+              <button class="btn btn-sm btn-danger" id="awBulkDeleteBtn" onclick="window._bulkDelete()">🗑 Delete</button>
+              <button id="awBulkDeselectBtn" onclick="window._bulkDeselect()" title="Clear selection" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:var(--radius)">✕</button>
+            </div>
           </div>
           <!-- Advanced Filter Panel -->
           <div class="aw-adv-panel" id="awAdvPanel" style="display:none">
@@ -647,7 +652,7 @@
             </div>
           </div>
 
-          <div id="allWorkTable" class="table-container"></div>
+          <div id="allWorkTable" data-hj-suppress class="table-container"></div>
         </div>
 
         <!-- Space: Calendar -->
@@ -657,18 +662,7 @@
             <span id="calendarHeader" class="calendar-header-label"></span>
             <button type="button" class="calendar-nav-btn" id="calendarNext" aria-label="Next month">&#8594;</button>
           </div>
-          <div id="calendarGrid" class="calendar-grid"></div>
-        </div>
-
-        <!-- Space: Filters -->
-        <div class="view" id="view-filters" hidden>
-          <div class="view-toolbar">
-            <div class="toolbar-group"></div>
-            <div class="toolbar-group">
-              <button class="btn btn-primary btn-sm" id="createFilterBtn">+ Create Filter</button>
-            </div>
-          </div>
-          <div id="filtersList" class="filters-list"></div>
+          <div id="calendarGrid" data-hj-suppress class="calendar-grid"></div>
         </div>
 
         <!-- Space: Settings (with sub-tabs: General, People, Custom Fields) -->
@@ -680,20 +674,22 @@
             <button class="tab-btn" data-stab="deleted" onclick="window._switchSettingsTab('deleted')">Deleted Items</button>
             <button class="tab-btn" data-stab="reports" onclick="window._switchSettingsTab('reports')">Reports</button>
           </div>
-          <div id="settingsTabContent"></div>
+          <div id="settingsTabContent" data-hj-suppress></div>
         </div>
 
       </div>
     </div>
 
     <!-- 3c. Issue Detail Drawer (Jira-style) -->
-    <div id="issueDrawer" class="issue-drawer" hidden>
+    <div id="issueDrawer" data-hj-suppress class="issue-drawer" hidden>
       <div class="drawer-overlay" onclick="closeDrawer()"></div>
       <div class="drawer-panel">
         <!-- Drawer Top Bar -->
         <div class="drawer-topbar">
           <div class="drawer-topbar-left">
-            <button onclick="goBackFromIssue()" style="background:none;border:none;cursor:pointer;font-size:13px;color:#172b4d;display:flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;font-weight:600" onmouseover="this.style.background='#f4f5f7'" onmouseout="this.style.background='none'"><span style="font-size:18px;line-height:1">&#8592;</span> Back</button>
+            <!-- onclick is set by openIssuePage in app.js (goBackFromIssue, or a
+                 direct-navigation handler when opened from All Work) -->
+            <button id="drawerBackBtn" style="background:none;border:none;cursor:pointer;font-size:13px;color:#172b4d;display:flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;font-weight:600" onmouseover="this.style.background='#f4f5f7'" onmouseout="this.style.background='none'"><span style="font-size:18px;line-height:1">&#8592;</span> Back</button>
             <div id="drawerParentBreadcrumb" class="drawer-parent-crumb" style="display:none"></div>
             <span id="drawerKey" class="drawer-issue-key"></span>
             <button class="btn-icon" onclick="copyDrawerLink()" title="Copy link" style="font-size:13px;padding:2px 6px">&#128279;</button>
@@ -706,7 +702,7 @@
               Create Issue
             </button>
             <button class="btn-icon" id="drawerStarBtn" title="Star">☆</button>
-            <button class="btn-icon" id="drawerActionsBtn" title="More actions">⋯</button>
+            <button class="btn-icon drawer-delete-btn" id="drawerDeleteBtn" title="Delete ticket" style="display:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
             <button class="btn-icon drawer-close-btn" id="closeDrawer" onclick="closeDrawer()">✕</button>
           </div>
         </div>
@@ -898,13 +894,17 @@
               <table class="drawer-fields-table">
                 <tbody>
                   <tr data-builtin-field="status" data-builtin-locked="true"><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
-                  <tr data-builtin-field="priority"><td class="dfl">Priority</td><td class="dfv"><select id="drawerPriority" class="drawer-select" size="1"><option value="highest">Highest</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></td></tr>
+                  <tr data-builtin-field="priority"><td class="dfl">Priority</td><td class="dfv"><!-- Options rebuilt from the issue's space Priority custom field (renderDrawerIssue in app.js) --><select id="drawerPriority" class="drawer-select" size="1"></select></td></tr>
                   <tr data-builtin-field="assignee"><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
                   <tr data-builtin-field="reporter"><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>
                   <tr data-builtin-field="sprint"><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select"></select></td></tr>
                   <tr data-builtin-field="story_points"><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—"></td></tr>
-                  <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option><option value="Dev">Dev</option><option value="QA">QA</option><option value="Infra">Infra</option><option value="Manage">Manage</option><option value="Product_Team">Product Team</option></select></td></tr>
-                  <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option><option value="Message">Message Type</option><option value="Email">Mail Type</option><option value="Content">Content Type</option><option value="Manage">Manage</option><option value="Infra">Infra</option></select></td></tr>
+                  <!-- Options are rebuilt from the issue's own space's custom_fields.options every
+                       time the drawer renders (buildBuiltinSelectOptionsHtml in app.js) -- never
+                       hardcoded here, since a space admin can add/remove Team or Product Type
+                       options at any time. -->
+                  <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option></select></td></tr>
+                  <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option></select></td></tr>
                   <tr id="drawerCombinationRow" hidden data-builtin-field="combination">
                     <td class="dfv pt-combo-cell" colspan="2"><div id="drawerCombinationField"></div></td>
                   </tr>
@@ -1063,7 +1063,7 @@
   </div>
 
   <!-- Create/Edit Issue Modal -->
-  <div id="modal-issue" class="modal" hidden>
+  <div id="modal-issue" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-issue')"></div>
     <div class="modal-dialog modal-dialog-lg">
       <div class="modal-header">
@@ -1088,23 +1088,15 @@
           <div class="form-row">
             <div class="form-group" data-builtin-field="type">
               <label class="form-label" for="issueType">Type</label>
-              <select id="issueType" class="input">
-                <option value="epic">Epic</option>
-                <option value="story">Story</option>
-                <option value="task" selected>Task</option>
-                <option value="bug">Bug</option>
-                <option value="subtask">Subtask</option>
-              </select>
+              <!-- Options are rebuilt from the selected space's Type custom field
+                   (_onIssueSpaceChange in app.js) — configurable per space, not fixed here. -->
+              <select id="issueType" class="input"></select>
             </div>
             <div class="form-group" data-builtin-field="priority">
               <label class="form-label" for="issuePriority">Priority</label>
-              <select id="issuePriority" class="input">
-                <option value="highest">Highest</option>
-                <option value="high">High</option>
-                <option value="medium" selected>Medium</option>
-                <option value="low">Low</option>
-                <option value="lowest">Lowest</option>
-              </select>
+              <!-- Options are rebuilt from the selected space's Priority custom field
+                   (_onIssueSpaceChange in app.js) — configurable per space, not fixed here. -->
+              <select id="issuePriority" class="input"></select>
             </div>
           </div>
           <div class="form-row">
@@ -1146,26 +1138,19 @@
             </div>
           </div>
           <div class="form-row">
+            <!-- Options are rebuilt from the selected space's custom_fields.options every
+                 time the space picker changes (buildBuiltinSelectOptionsHtml via
+                 _onIssueSpaceChange in app.js) -- never hardcoded here. -->
             <div class="form-group" data-builtin-field="team">
               <label class="form-label" for="issueTeam">Team</label>
               <select id="issueTeam" class="input">
                 <option value="">— None —</option>
-                <option value="Dev">Dev</option>
-                <option value="QA">QA</option>
-                <option value="Infra">Infra</option>
-                <option value="Manage">Manage</option>
-                <option value="Product_Team">Product Team</option>
               </select>
             </div>
             <div class="form-group" id="issueProductTypeGroup" hidden>
               <label class="form-label" for="issueProductType">Product Type</label>
               <select id="issueProductType" class="input">
                 <option value="">— Select type —</option>
-                <option value="Message">Message Type</option>
-                <option value="Email">Mail Type</option>
-                <option value="Content">Content Type</option>
-                <option value="Manage">Manage</option>
-                <option value="Infra">Infra</option>
               </select>
             </div>
           </div>
@@ -1208,46 +1193,8 @@
     </div>
   </div>
 
-  <!-- Create/Edit Filter Modal -->
-  <div id="modal-filter" class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('modal-filter')"></div>
-    <div class="modal-dialog">
-      <div class="modal-header">
-        <h3 id="filterModalTitle">Create Filter</h3>
-        <button class="btn-icon modal-close" onclick="closeModal('modal-filter')">✕</button>
-      </div>
-      <div class="modal-body">
-        <form id="filterForm">
-          <input type="hidden" id="filterId">
-          <input type="hidden" id="filterSpaceId">
-          <div class="form-group">
-            <label class="form-label" for="filterNameInput">Name</label>
-            <input type="text" id="filterNameInput" class="input" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Conditions</label>
-            <div id="filterConditions" class="filter-conditions"></div>
-            <button type="button" class="btn btn-outline btn-sm" id="addConditionBtn">+ Add Condition</button>
-          </div>
-          <div class="form-row">
-            <div class="form-group form-check">
-              <label><input type="checkbox" id="filterShared"> Shared with team</label>
-            </div>
-            <div class="form-group form-check">
-              <label><input type="checkbox" id="filterPinned"> Pin to sidebar</label>
-            </div>
-          </div>
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('modal-filter')">Cancel</button>
-        <button class="btn btn-primary" type="submit" form="filterForm">Save</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Add User to Space Modal -->
-  <div id="modal-invite-member" class="modal" hidden>
+  <div id="modal-invite-member" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-invite-member')"></div>
     <div class="modal-dialog">
       <div class="modal-header">
@@ -1310,13 +1257,8 @@
             <input type="text" id="customFieldOptions" class="input" placeholder="Option 1, Option 2, Option 3">
           </div>
           <div class="form-group" id="customFieldCombinationGroups" hidden>
-            <p style="font-size:12px;color:var(--text2);margin:0 0 10px">Combination options by Product Type — one <strong>Source - Destination</strong> per line.</p>
-            <label class="form-label" for="cfComboMessage">Message Type</label>
-            <textarea id="cfComboMessage" class="input" rows="4" placeholder="Slack - Slack&#10;Teams - Chat"></textarea>
-            <label class="form-label" for="cfComboEmail" style="margin-top:10px">Mail Type</label>
-            <textarea id="cfComboEmail" class="input" rows="3" placeholder="Outlook - Outlook&#10;Gmail - Gmail"></textarea>
-            <label class="form-label" for="cfComboContent" style="margin-top:10px">Content Type</label>
-            <textarea id="cfComboContent" class="input" rows="6" placeholder="Box - SharePoint&#10;SharePoint - SharePoint"></textarea>
+            <p style="font-size:12px;color:var(--text2);margin:0 0 10px">Combination options by Product Type — one <strong>Source - Destination</strong> per line. One box per Product Type option this space currently has configured (renderCombinationGroupEditors in app.js) — add or remove a Product Type option and this list follows automatically.</p>
+            <div id="cfComboGroupsList"></div>
           </div>
           <div class="form-group form-check">
             <label><input type="checkbox" id="customFieldRequired"> Required</label>
@@ -1351,7 +1293,7 @@
   </div>
 
   <!-- Worklog Modal -->
-  <div id="modal-worklog" class="modal" hidden>
+  <div id="modal-worklog" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-worklog')"></div>
     <div class="modal-dialog">
       <div class="modal-header">
@@ -1392,7 +1334,7 @@
   </div>
 
   <!-- Confirm Dialog -->
-  <div id="modal-confirm" class="modal" hidden>
+  <div id="modal-confirm" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-confirm')"></div>
     <div class="modal-dialog modal-dialog-sm">
       <div class="modal-header">
@@ -1410,7 +1352,7 @@
   </div>
 
   <!-- Invite User Modal -->
-  <div id="modal-invite-user" class="modal" hidden>
+  <div id="modal-invite-user" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-invite-user')"></div>
     <div class="modal-dialog">
       <div class="modal-header">
@@ -1448,7 +1390,7 @@
   </div>
 
   <!-- Reset Password Modal -->
-  <div id="modal-reset-pw" class="modal" hidden>
+  <div id="modal-reset-pw" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-reset-pw')"></div>
     <div class="modal-dialog modal-dialog-sm">
       <div class="modal-header">
@@ -1479,6 +1421,9 @@
   <div id="toastContainer" class="toast-container"></div>
 
   <!-- 5. Scripts -->
+  <!-- Runtime config (server-generated) must load before hotjar.js reads it -->
+  <script src="/config.js"></script>
+  <script src="/hotjar.js"></script>
   <script src="combination-options.js"></script>
   <script src="app.js"></script>
 
