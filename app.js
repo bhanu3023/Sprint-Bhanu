@@ -11213,8 +11213,16 @@ function startDrawerLiveSync(issueId) {
       }
       if (activeId !== 'drawerTitle') setDrawerTitleValue(fresh.title || '');
       // Update time tracking, attachments, activity
-      var timeSpentEl = document.querySelector('.drawer-time-spent');
-      if (timeSpentEl) timeSpentEl.textContent = fresh.time_spent || '—';
+      // Sum from fresh.worklogs, matching the initial drawer-open computation
+      // above (not fresh.time_spent, the cached column) — self-heals if that
+      // column and the worklog rows ever drift apart.
+      var timeSpentEl = $('drawerTimeSpent');
+      if (timeSpentEl) {
+        var freshWorklogs = fresh.worklogs || [];
+        var freshTotalSpent = 0;
+        for (var fw = 0; fw < freshWorklogs.length; fw++) freshTotalSpent += (freshWorklogs[fw].time_spent || 0);
+        timeSpentEl.textContent = fmtMins(freshTotalSpent);
+      }
       renderDrawerAttachments(fresh.attachments || []);
       $('drawerUpdated').textContent = fmtDateTime(fresh.updated_at);
       // Refresh custom fields silently (only if no input is focused inside them)
