@@ -10068,13 +10068,14 @@ function normalizeDescInlineImages(editorEl) {
   }
 }
 
-async function handleDescImagePaste(editorEl, file) {
+async function handleDescImagePaste(editorEl, file, fieldLabel) {
+  fieldLabel = fieldLabel || 'description';
   if (!editorEl || !file) return;
   var fp = _fileFingerprint(file);
   var already = editorEl.querySelectorAll('.desc-inline-img[data-fp]');
   for (var i = 0; i < already.length; i++) {
     if (already[i].getAttribute('data-fp') === fp) {
-      toast('This screenshot is already in the description', 'warning');
+      toast('This screenshot is already in the ' + fieldLabel, 'warning');
       return;
     }
   }
@@ -10082,7 +10083,7 @@ async function handleDescImagePaste(editorEl, file) {
     var uploaded = await uploadDescImageFile(file);
     insertDescImageAtCaret(editorEl, uploaded.url, file.name || 'Screenshot', fp);
     if (editorEl.id === 'drawerDesc' || editorEl.id === 'drawerFixDesc') markDrawerDescDirty(editorEl.id);
-    toast('Screenshot added to description', 'success');
+    toast('Screenshot added to ' + fieldLabel, 'success');
   } catch (e) {
     toast(e.message || 'Could not upload screenshot', 'error');
   }
@@ -10717,6 +10718,263 @@ window.openDrawer = openDrawer;
 // first ticket ever opened. See bindDrawerTitleField.
 var _activeDrawerAutoSave = null;
 
+// ── @mention autocomplete ──────────────────────────────────
+// Parameterized on `el` (rather than closing over one hardcoded element) so it
+// can bind to both the comment-compose box (drawerCommentInput) AND each
+// dynamically-created comment EDIT box (edit-rich-<id>) -- previously this was
+// wired to drawerCommentInput only, so typing "@" while editing an existing
+// comment silently did nothing; there was no autocomplete listening on that
+// element at all. Guarded per-element the same way the original was guarded
+// per-drawer-open, since an edit box's DOM node persists (just hidden) across
+// repeated Edit/Cancel clicks on the same comment without a full re-render.
+function bindMentionAutocomplete(el) {
+  if (!el || el._mentionBound) return;
+  el._mentionBound = true;
+  var dropdown = $('mentionDropdown');
+  var activeMentionCharIdx = -1;
+
+  function getMembers() {
+    return window._drawerMembers || S.data.users || [];
+  }
+
+  function closeMention() {
+    dropdown.style.display = 'none';
+    activeMentionCharIdx = -1;
+  }
+
+  // #mentionDropdown is one shared element, sitting in the markup right after
+  // drawerCommentInput. That was harmless when only drawerCommentInput ever
+  // opened it, but a comment EDIT box lives elsewhere in the activity list --
+  // anchoring the dropdown with a plain `top` offset (relative to whatever
+  // ancestor happens to be positioned) would show it pinned near the compose
+  // box instead of under whichever editor is actually active. Same fix as
+  // positionComboDropdown/positionCFDropdown elsewhere in this file: switch to
+  // position:fixed and place it from el's own live viewport coordinates.
+  function positionMentionDropdown() {
+    dropdown._activeEl = el;
+    var elRect = el.getBoundingClientRect();
+    // Anchor on the CARET, not el's own bottom edge. el.getBoundingClientRect()
+    // covers the whole editor box -- fine for a short single-line compose box,
+    // where "bottom of the box" and "bottom of the visible content" are the
+    // same thing. An edit box with an embedded image (or just a few lines of
+    // text) is much taller, so its bottom edge can sit far below the caret --
+    // even off the bottom of the viewport entirely -- which is exactly why
+    // typing "@" while editing an existing comment looked like nothing
+    // happened: the dropdown WAS opening, just positioned off-screen.
+    var rect = elRect;
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      var caretRects = sel.getRangeAt(0).cloneRange().getClientRects();
+      if (caretRects && caretRects.length) rect = caretRects[caretRects.length - 1];
+    }
+    dropdown.style.position = 'fixed';
+    dropdown.style.left = elRect.left + 'px';
+    dropdown.style.width = elRect.width + 'px';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.right = 'auto';
+  }
+
+  // Keeps the dropdown glued to el while its scroll container moves (the
+  // activity list, a modal body, etc.) -- position:fixed coordinates are only
+  // ever right at the instant they're set otherwise. dropdown._activeEl guards
+  // this so only the element that's actually open right now repositions it;
+  // this listener is added once per el thanks to the _mentionBound guard above.
+  document.addEventListener('scroll', function () {
+    if (dropdown._activeEl === el && dropdown.style.display !== 'none') positionMentionDropdown();
+  }, { passive: true, capture: true });
+
+  // Returns all text before the caret inside a contenteditable element
+  function getTextBeforeCaret(node) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return '';
+    var r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(node);
+    r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+    return r.toString();
+  }
+
+  function insertMentionAtCaret(name, userId) {
+    // e.preventDefault() on mousedown keeps focus so caret is still valid
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+
+    var caretRange = sel.getRangeAt(0);
+    var endNode = caretRange.endContainer;
+    var endOffset = caretRange.endOffset;
+
+    // Find the @ in the current text node (most common case)
+    var atPos = -1;
+    var atNode = null;
+    if (endNode.nodeType === 3) {
+      var textUpToCaret = endNode.textContent.substring(0, endOffset);
+      var idx = textUpToCaret.lastIndexOf('@');
+      if (idx !== -1) {
+        atPos = idx;
+        atNode = endNode;
+      }
+    }
+
+    // If @ wasn't found in the same text node, walk backwards
+    if (atNode === null) {
+      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+      var nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      // build full text before caret
+      var fullText = getTextBeforeCaret(el);
+      var atIdx2 = activeMentionCharIdx;
+      if (atIdx2 < 0) {
+        var active = findActiveMentionAt(fullText);
+        if (!active) return;
+        atIdx2 = active.atIdx;
+      }
+      // count chars to find the node containing @
+      var charCount = 0;
+      for (var ni = 0; ni < nodes.length; ni++) {
+        var nodeLen = nodes[ni] === endNode ? endOffset : nodes[ni].textContent.length;
+        if (charCount + nodeLen > atIdx2) {
+          atNode = nodes[ni];
+          atPos = atIdx2 - charCount;
+          break;
+        }
+        charCount += nodeLen;
+      }
+    }
+
+    if (!atNode) return;
+
+    // Select from @ to current caret position and delete it
+    var delRange = document.createRange();
+    delRange.setStart(atNode, atPos);
+    if (atNode === endNode) {
+      delRange.setEnd(endNode, endOffset);
+    } else {
+      delRange.setEnd(endNode, endOffset);
+    }
+    sel.removeAllRanges();
+    sel.addRange(delRange);
+    document.execCommand('delete', false, null);
+
+    // Insert mention chip + non-breaking space
+    var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
+    document.execCommand('insertHTML', false, chip);
+  }
+
+  function showMention(query) {
+    var members = getMembers().filter(function(m) {
+      return !query || m.name.toLowerCase().indexOf(query.toLowerCase()) !== -1;
+    });
+    if (!members.length) { closeMention(); return; }
+
+    positionMentionDropdown();
+    dropdown.style.display = 'block';
+    dropdown.innerHTML = members.map(function(m) {
+      return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
+        'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
+        'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
+        '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
+        initials(m.name) + '</div>' +
+        '<div><div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
+        (m.email ? '<div style="font-size:11px;color:var(--text2)">' + esc(m.email) + '</div>' : '') +
+        '</div></div>';
+    }).join('');
+
+    dropdown.querySelectorAll('.mention-item').forEach(function(item) {
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault(); // keeps focus in el so selection is intact
+        var name = item.dataset.name;
+        var id = item.dataset.id;
+        if (el.contentEditable === 'true') {
+          insertMentionAtCaret(name, id);
+        } else {
+          var val = el.value;
+          var before = val.substring(0, activeMentionCharIdx);
+          var after = val.substring(el.selectionStart);
+          el.value = before + '@' + name + ' ' + after;
+          var pos = activeMentionCharIdx + name.length + 2;
+          el.setSelectionRange(pos, pos);
+          el.focus();
+        }
+        closeMention();
+        activeMentionCharIdx = -1;
+      });
+    });
+  }
+
+  el.addEventListener('input', function() {
+    var isContentEditable = el.contentEditable === 'true';
+    var textBefore;
+    if (isContentEditable) {
+      textBefore = getTextBeforeCaret(el);
+    } else {
+      textBefore = el.value.substring(0, el.selectionStart);
+    }
+    var active = findActiveMentionAt(textBefore);
+    if (!active) { closeMention(); return; }
+    activeMentionCharIdx = active.atIdx;
+    showMention(active.query);
+  });
+
+  el.addEventListener('keydown', function(e) {
+    if (dropdown.style.display === 'none') return;
+    var items = dropdown.querySelectorAll('.mention-item');
+    var active = dropdown.querySelector('.mention-item.focused');
+    var idx = Array.prototype.indexOf.call(items, active);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (active) active.classList.remove('focused');
+      var next = items[idx + 1] || items[0];
+      next.classList.add('focused');
+      next.style.background = 'var(--bg3)';
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (active) active.classList.remove('focused');
+      var prev = items[idx - 1] || items[items.length - 1];
+      prev.classList.add('focused');
+      prev.style.background = 'var(--bg3)';
+    } else if (e.key === 'Enter' && active) {
+      e.preventDefault();
+      active.click();
+    } else if (e.key === 'Escape') {
+      closeMention();
+    }
+  });
+
+  // Guarded per-element for the same reason as the handlers above.
+  if (!el._mentionOutsideBound) {
+    el._mentionOutsideBound = true;
+    document.addEventListener('click', function(e) {
+      if (!dropdown.contains(e.target) && e.target !== el) closeMention();
+    });
+  }
+}
+
+// A comment EDIT box (edit-rich-<id>) had no image-paste handling at all --
+// unlike the compose box's own _commentFiles flow, or the description
+// editors' document-level delegated listener (which only covers the static
+// DESC_EDITOR_IDS list, not a dynamically-created id like this one). Pasting
+// a screenshot there fell through to the browser's raw default paste,
+// inserting an unbounded base64 data: URI directly into the comment body
+// instead of uploading it. Routes through the exact same handleDescImagePaste
+// the description fields use -- it already uploads via /api/comments/upload,
+// which comments and descriptions share.
+function bindCommentEditImagePaste(el) {
+  if (!el || el._commentEditPasteBound) return;
+  el._commentEditPasteBound = true;
+  el.addEventListener('paste', function (e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items || !items.length) return;
+    var imageFiles = _dedupePasteFiles(items).filter(function (f) { return f.type && f.type.indexOf('image/') === 0; });
+    if (!imageFiles.length) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (el._pasteBusy) return;
+    el._pasteBusy = true;
+    handleDescImagePaste(el, imageFiles[0], 'comment').finally(function () {
+      setTimeout(function () { el._pasteBusy = false; }, 500);
+    });
+  });
+}
+
 function bindDrawerEdits(issue) {
   var issueId = issue.id;
   var pending = {};
@@ -11013,191 +11271,7 @@ function bindDrawerEdits(issue) {
   // Expose pending to the global save handler (fallback)
   window._drawerPending = pending;
 
-  // ── @mention autocomplete ─────────────────────────────────
-  (function() {
-    var textarea = $('drawerCommentInput');
-    // Bind once — this block previously re-ran on every drawer open, stacking
-    // duplicate 'input'/'keydown'/'click' listeners on the same persistent element.
-    if (!textarea || textarea._mentionBound) return;
-    textarea._mentionBound = true;
-    var dropdown = $('mentionDropdown');
-    var activeMentionCharIdx = -1;
-
-    function getMembers() {
-      return window._drawerMembers || S.data.users || [];
-    }
-
-    function closeMention() {
-      dropdown.style.display = 'none';
-      activeMentionCharIdx = -1;
-    }
-
-    // Returns all text before the caret inside a contenteditable element
-    function getTextBeforeCaret(el) {
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return '';
-      var r = sel.getRangeAt(0).cloneRange();
-      r.selectNodeContents(el);
-      r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
-      return r.toString();
-    }
-
-    function insertMentionAtCaret(name, userId) {
-      // e.preventDefault() on mousedown keeps focus so caret is still valid
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return;
-
-      var caretRange = sel.getRangeAt(0);
-      var endNode = caretRange.endContainer;
-      var endOffset = caretRange.endOffset;
-
-      // Find the @ in the current text node (most common case)
-      var atPos = -1;
-      var atNode = null;
-      if (endNode.nodeType === 3) {
-        var textUpToCaret = endNode.textContent.substring(0, endOffset);
-        var idx = textUpToCaret.lastIndexOf('@');
-        if (idx !== -1) {
-          atPos = idx;
-          atNode = endNode;
-        }
-      }
-
-      // If @ wasn't found in the same text node, walk backwards
-      if (atNode === null) {
-        var walker = document.createTreeWalker(textarea, NodeFilter.SHOW_TEXT, null, false);
-        var nodes = [];
-        while (walker.nextNode()) nodes.push(walker.currentNode);
-        // build full text before caret
-        var fullText = getTextBeforeCaret(textarea);
-        var atIdx2 = activeMentionCharIdx;
-        if (atIdx2 < 0) {
-          var active = findActiveMentionAt(fullText);
-          if (!active) return;
-          atIdx2 = active.atIdx;
-        }
-        // count chars to find the node containing @
-        var charCount = 0;
-        for (var ni = 0; ni < nodes.length; ni++) {
-          var nodeLen = nodes[ni] === endNode ? endOffset : nodes[ni].textContent.length;
-          if (charCount + nodeLen > atIdx2) {
-            atNode = nodes[ni];
-            atPos = atIdx2 - charCount;
-            break;
-          }
-          charCount += nodeLen;
-        }
-      }
-
-      if (!atNode) return;
-
-      // Select from @ to current caret position and delete it
-      var delRange = document.createRange();
-      delRange.setStart(atNode, atPos);
-      if (atNode === endNode) {
-        delRange.setEnd(endNode, endOffset);
-      } else {
-        delRange.setEnd(endNode, endOffset);
-      }
-      sel.removeAllRanges();
-      sel.addRange(delRange);
-      document.execCommand('delete', false, null);
-
-      // Insert mention chip + non-breaking space
-      var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
-      document.execCommand('insertHTML', false, chip);
-    }
-
-    function showMention(query) {
-      var members = getMembers().filter(function(m) {
-        return !query || m.name.toLowerCase().indexOf(query.toLowerCase()) !== -1;
-      });
-      if (!members.length) { closeMention(); return; }
-
-      dropdown.style.top = (textarea.offsetHeight + 2) + 'px';
-      dropdown.style.display = 'block';
-      dropdown.innerHTML = members.map(function(m) {
-        return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
-          'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
-          'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
-          '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
-          initials(m.name) + '</div>' +
-          '<div><div style="font-size:13px;font-weight:600">' + esc(m.name) + '</div>' +
-          (m.email ? '<div style="font-size:11px;color:var(--text2)">' + esc(m.email) + '</div>' : '') +
-          '</div></div>';
-      }).join('');
-
-      dropdown.querySelectorAll('.mention-item').forEach(function(item) {
-        item.addEventListener('mousedown', function(e) {
-          e.preventDefault(); // keeps focus in textarea so selection is intact
-          var name = item.dataset.name;
-          var id = item.dataset.id;
-          if (textarea.contentEditable === 'true') {
-            insertMentionAtCaret(name, id);
-          } else {
-            var val = textarea.value;
-            var before = val.substring(0, activeMentionCharIdx);
-            var after = val.substring(textarea.selectionStart);
-            textarea.value = before + '@' + name + ' ' + after;
-            var pos = activeMentionCharIdx + name.length + 2;
-            textarea.setSelectionRange(pos, pos);
-            textarea.focus();
-          }
-          closeMention();
-          activeMentionCharIdx = -1;
-        });
-      });
-    }
-
-    textarea.addEventListener('input', function() {
-      var isContentEditable = textarea.contentEditable === 'true';
-      var textBefore;
-      if (isContentEditable) {
-        textBefore = getTextBeforeCaret(textarea);
-      } else {
-        textBefore = textarea.value.substring(0, textarea.selectionStart);
-      }
-      var active = findActiveMentionAt(textBefore);
-      if (!active) { closeMention(); return; }
-      activeMentionCharIdx = active.atIdx;
-      showMention(active.query);
-    });
-
-    textarea.addEventListener('keydown', function(e) {
-      if (dropdown.style.display === 'none') return;
-      var items = dropdown.querySelectorAll('.mention-item');
-      var active = dropdown.querySelector('.mention-item.focused');
-      var idx = Array.prototype.indexOf.call(items, active);
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (active) active.classList.remove('focused');
-        var next = items[idx + 1] || items[0];
-        next.classList.add('focused');
-        next.style.background = 'var(--bg3)';
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (active) active.classList.remove('focused');
-        var prev = items[idx - 1] || items[items.length - 1];
-        prev.classList.add('focused');
-        prev.style.background = 'var(--bg3)';
-      } else if (e.key === 'Enter' && active) {
-        e.preventDefault();
-        active.click();
-      } else if (e.key === 'Escape') {
-        closeMention();
-      }
-    });
-
-    // Guarded for the same reason as the handlers above: this is a document-level
-    // listener registered inside bindDrawerEdits(), so without the flag every
-    // drawer open leaked another permanent listener onto document.
-    if (!textarea._mentionOutsideBound) {
-      textarea._mentionOutsideBound = true;
-      document.addEventListener('click', function(e) {
-        if (!dropdown.contains(e.target) && e.target !== textarea) closeMention();
-      });
-    }
-  })();
+  bindMentionAutocomplete($('drawerCommentInput'));
 
   // Paste image support for comment box — bind ONCE per drawer element, not per click.
   // (Previously this was registered inside the onclick handler below, so every
@@ -11933,6 +12007,12 @@ function _renderActivityTab(tab, issue) {
     var cm = ((_drawerIssueData && _drawerIssueData.comments) || []).find(function(c) { return c.id === id; });
     richEl.innerHTML = cm ? commentBodyToEditableHtml(cm.body) : (bodyDiv ? bodyDiv.innerHTML : '');
     editArea.style.display = '';
+    // The edit box is a fresh element each time the activity list re-renders,
+    // but re-opening Edit on the SAME comment without a re-render in between
+    // reuses this exact node -- both binders below no-op on a repeat call via
+    // their own bind-once guards, so this is safe to call every time.
+    bindMentionAutocomplete(richEl);
+    bindCommentEditImagePaste(richEl);
     richEl.focus();
     // Move cursor to end
     var range = document.createRange();
