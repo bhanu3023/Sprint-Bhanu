@@ -218,6 +218,76 @@
      "to": 17295
     }
    ]
+  },
+  {
+   "original": "server.js",
+   "kind": "server",
+   "parts": [
+    {
+     "file": "src/server/db.js",
+     "ranges": [
+      [
+       190,
+       194
+      ]
+     ],
+     "gluePrefix": "require('dotenv').config();\r\nconst { Pool } = require('pg');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { pool, q };\r\n"
+    },
+    {
+     "file": "src/server/auth.js",
+     "ranges": [
+      [
+       2535,
+       2586
+      ]
+     ],
+     "gluePrefix": "const crypto = require('crypto');\r\nconst { q } = require('./db');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { hashPassword, verifyPassword, generateToken, resolveSessionFromToken, requireAuth, requireAuthFile };\r\n"
+    },
+    {
+     "file": "src/server/email.js",
+     "ranges": [
+      [
+       51,
+       61
+      ],
+      [
+       2911,
+       3019
+      ]
+     ],
+     "gluePrefix": "const { execSync } = require('child_process');\r\nconst { q } = require('./db');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { sendEmail, sendInviteEmail, sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail, getEmailSettings, emailWrapper };\r\n"
+    },
+    {
+     "file": "server.js",
+     "ranges": [
+      [
+       1,
+       50
+      ],
+      [
+       62,
+       189
+      ],
+      [
+       195,
+       2534
+      ],
+      [
+       2587,
+       2910
+      ],
+      [
+       3020,
+       3204
+      ]
+     ],
+     "gluePrefix": "const { pool, q } = require('./src/server/db');\r\nconst { hashPassword, verifyPassword, generateToken, requireAuth, requireAuthFile } = require('./src/server/auth');\r\nconst { sendEmail, sendInviteEmail, sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail } = require('./src/server/email');\r\n",
+     "glueSuffix": ""
+    }
+   ]
   }
  ],
  "pristine": {
