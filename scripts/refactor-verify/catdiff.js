@@ -37,7 +37,12 @@ const toLF = s => s.replace(/\r\n/g, '\n');
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
-const targets = manifest.targets || [];
+// Client targets only. Server targets use a different part shape (ranges +
+// declared glue, because CommonJS extraction cannot avoid a require preamble)
+// and are proven separately by serverdiff.js. Without this filter catdiff
+// silently mis-parsed the server parts -- p.from/p.to are undefined there -- and
+// reported a bogus tiling/concatenation failure.
+const targets = (manifest.targets || []).filter(t => t.kind !== 'server');
 let failed = false;
 
 console.log('=== cat-diff move-purity proof — RAW byte-identity MANDATORY ===');

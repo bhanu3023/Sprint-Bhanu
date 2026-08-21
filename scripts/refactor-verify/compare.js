@@ -83,10 +83,17 @@ say('\n[2b] global identifiers probed by name (catches lost const/let bindings)'
   if (!names.length) {
     say('    -> SKIPPED: snapshots predate the probe (recapture "' + beforeLabel + '" to enable)');
   } else {
-    const changed = names.filter(n => pa[n] !== pb[n]);
-    const lost = names.filter(n => pa[n] && pa[n] !== 'undefined' && pa[n] !== '<throws>' &&
-                                   (pb[n] === 'undefined' || pb[n] === '<throws>' || pb[n] === undefined));
-    say('    probed=' + names.length +
+    // Only names probed on BOTH sides are comparable. A name absent from one
+    // snapshot's probe list was never measured there, so no conclusion can be
+    // drawn about it -- treating "not probed" as "was undefined" produced a
+    // spurious 138-name diff when the expected-globals list grew from 552 to 690.
+    const inBoth = names.filter(n => n in pa && n in pb);
+    const onlyAfter = names.filter(n => !(n in pa) && (n in pb));
+    const changed = inBoth.filter(n => pa[n] !== pb[n]);
+    const lost = inBoth.filter(n => pa[n] && pa[n] !== 'undefined' && pa[n] !== '<throws>' &&
+                                   (pb[n] === 'undefined' || pb[n] === '<throws>'));
+    say('    probed=' + names.length + ' (comparable on both sides: ' + inBoth.length +
+        (onlyAfter.length ? ', newly probed: ' + onlyAfter.length : '') + ')' +
         '  before-missing=' + (a.globalProbeMissing || []).length +
         '  after-missing=' + (b.globalProbeMissing || []).length);
     if (lost.length) {
