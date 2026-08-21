@@ -292,7 +292,9 @@
             ]
           ],
           "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\nconst { execSync } = require('child_process');\r\nconst { q } = require('./db');\r\n",
-          "glueSuffix": "\r\nmodule.exports = { sendEmail, sendInviteEmail, sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail, getEmailSettings, emailWrapper };\r\n"
+          "glueSuffix": "\r\nmodule.exports = { sendEmail, sendInviteEmail, sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail, getEmailSettings, emailWrapper };\r\n",
+          "modified": true,
+          "modifiedReason": "FIX 3 - escape untrusted values interpolated into email HTML bodies"
         },
         {
           "file": "src/server/core.js",
@@ -337,7 +339,9 @@
             ]
           ],
           "gluePrefix": "const { uid } = require('./core');\r\nconst { q } = require('./db');\r\nconst { sendEmail } = require('./email');\r\n",
-          "glueSuffix": "\r\nmodule.exports = { createNotif, sprintDeps };\r\n"
+          "glueSuffix": "\r\nmodule.exports = { createNotif, sprintDeps };\r\n",
+          "modified": true,
+          "modifiedReason": "FIX 3 - escape untrusted values interpolated into email HTML bodies"
         },
         {
           "file": "src/server/express-app.js",
@@ -574,7 +578,9 @@
             ]
           ],
           "gluePrefix": "const { generateToken, requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendEmail, sendInviteEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "FIX 3 - escape untrusted values interpolated into email HTML bodies"
         },
         {
           "file": "src/server/errors.js",

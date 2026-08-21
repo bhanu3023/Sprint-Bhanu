@@ -2,7 +2,7 @@ const { generateToken, requireAuth } = require('../auth');
 const { uid, wrap } = require('../core');
 const { q } = require('../db');
 const { requireOrgAdmin } = require('../deps');
-const { sendEmail, sendInviteEmail } = require('../email');
+const { escapeHtml, sendEmail, sendInviteEmail } = require('../email');
 const { app } = require('../express-app');
 // ── Admin Audit Log ───────────────────────────────────────
 app.get('/api/admin/audit-log', requireAuth, wrap(async (req, res) => {
@@ -45,7 +45,7 @@ app.put('/api/admin/email-settings', requireAuth, wrap(async (req, res) => {
 app.post('/api/admin/email-test', requireAuth, wrap(async (req, res) => {
   if (!requireOrgAdmin(req.user, res)) return;
   const body = `<h2 style="color:#1e293b;margin-top:0">Test Email</h2>
-    <p style="color:#475569">Hi <strong>${req.user.name}</strong>,</p>
+    <p style="color:#475569">Hi <strong>${escapeHtml(req.user.name)}</strong>,</p>
     <p style="color:#475569">This is a test email from SprintBoard. Your SMTP configuration is working correctly!</p>
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:12px;margin-top:16px">
       <p style="color:#16a34a;margin:0;font-weight:600">✅ Email delivery is configured and working.</p>

@@ -1,6 +1,6 @@
 const { uid } = require('./core');
 const { q } = require('./db');
-const { sendEmail } = require('./email');
+const { escapeHtml, sendEmail } = require('./email');
 // createNotif is a hoisted function declaration further down, so this object can
 // be built here and still hold a live reference by the time anything calls it.
 const sprintDeps = { q, uid, createNotif: (n) => createNotif(n) };
@@ -22,11 +22,15 @@ async function createNotif({ user_id, space_id, type, title, body, link }) {
       if (toEmail) {
         const appUrl = process.env.APP_URL || 'http://localhost:3000';
         const issueLink = link ? appUrl + link : appUrl;
+        // `title` and `body` are user-authored -- they carry issue titles and
+        // the first 100 chars of comment text -- so they are escaped for the
+        // HTML body. The subject below deliberately keeps the raw `title`:
+        // a subject is plain text, not HTML.
         const emailBody = `
-          <h2 style="color:#1e293b;margin-top:0">${title}</h2>
-          ${body ? `<p style="color:#475569">${body}</p>` : ''}
+          <h2 style="color:#1e293b;margin-top:0">${escapeHtml(title)}</h2>
+          ${body ? `<p style="color:#475569">${escapeHtml(body)}</p>` : ''}
           <div style="text-align:center;margin:24px 0">
-            <a href="${issueLink}" style="background:#174F96;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">View Issue</a>
+            <a href="${escapeHtml(issueLink)}" style="background:#174F96;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">View Issue</a>
           </div>`;
         sendEmail(toEmail, title, emailBody).catch(() => {});
       }
