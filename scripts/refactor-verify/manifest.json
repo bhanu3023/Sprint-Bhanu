@@ -238,6 +238,7 @@
     "src/server/routes/org",
     "src/server/routes/spaces",
     "src/server/routes/sprints",
+    "src/server/routes/issues",
     "src/server/routes/comments",
     "src/server/routes/worklogs",
     "src/server/routes/roadmap",
@@ -426,6 +427,17 @@
      "glueSuffix": ""
     },
     {
+     "file": "src/server/routes/issues.js",
+     "ranges": [
+      [
+       676,
+       1165
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { createNotif } = require('../notify');\r\n",
+     "glueSuffix": ""
+    },
+    {
      "file": "src/server/routes/comments.js",
      "ranges": [
       [
@@ -595,16 +607,7 @@
      "ranges": [],
      "segments": [
       {
-       "glue": "// Entry point. server.js is now the ordered require list: every module below\r\n// registers its routes when required, so the 117 route registrations still\r\n// happen in exactly their original order. npm start is unchanged.\r\nrequire('./src/server/core');\r\nrequire('./src/server/db');\r\nrequire('./src/server/auth');\r\nrequire('./src/server/email');\r\nrequire('./src/server/deps');\r\nrequire('./src/server/notify');\r\nrequire('./src/server/express-app');\r\nrequire('./src/server/files');\r\nrequire('./src/server/oauth-helpers');\r\nrequire('./src/server/routes/data');\r\nrequire('./src/server/routes/my-issues');\r\nrequire('./src/server/routes/org');\r\nrequire('./src/server/routes/spaces');\r\nrequire('./src/server/routes/sprints');\r\nconst { requireAuth } = require('./src/server/auth');\r\nconst { uid, wrap } = require('./src/server/core');\r\nconst { q } = require('./src/server/db');\r\nconst { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays } = require('./src/server/deps');\r\nconst { app } = require('./src/server/express-app');\r\nconst { createNotif } = require('./src/server/notify');\r\n"
-      },
-      {
-       "range": [
-        676,
-        1165
-       ]
-      },
-      {
-       "glue": "require('./src/server/routes/comments');\r\nrequire('./src/server/routes/worklogs');\r\nrequire('./src/server/routes/roadmap');\r\nrequire('./src/server/routes/links');\r\nrequire('./src/server/routes/attachments');\r\nrequire('./src/server/routes/custom-fields');\r\nrequire('./src/server/routes/filters');\r\nrequire('./src/server/routes/reports');\r\nrequire('./src/server/routes/notifications');\r\nrequire('./src/server/routes/oauth');\r\nrequire('./src/server/routes/users');\r\nrequire('./src/server/routes/admin');\r\nrequire('./src/server/errors');\r\nrequire('./src/server/routes/spa');\r\nrequire('./src/server/startup');\r\n"
+       "glue": "// Entry point. server.js is now the ordered require list: every module below\r\n// registers its routes when required, so the 117 route registrations still\r\n// happen in exactly their original order. npm start is unchanged.\r\nrequire('./src/server/core');\r\nrequire('./src/server/db');\r\nrequire('./src/server/auth');\r\nrequire('./src/server/email');\r\nrequire('./src/server/deps');\r\nrequire('./src/server/notify');\r\nrequire('./src/server/express-app');\r\nrequire('./src/server/files');\r\nrequire('./src/server/oauth-helpers');\r\nrequire('./src/server/routes/data');\r\nrequire('./src/server/routes/my-issues');\r\nrequire('./src/server/routes/org');\r\nrequire('./src/server/routes/spaces');\r\nrequire('./src/server/routes/sprints');\r\nrequire('./src/server/routes/issues');\r\nrequire('./src/server/routes/comments');\r\nrequire('./src/server/routes/worklogs');\r\nrequire('./src/server/routes/roadmap');\r\nrequire('./src/server/routes/links');\r\nrequire('./src/server/routes/attachments');\r\nrequire('./src/server/routes/custom-fields');\r\nrequire('./src/server/routes/filters');\r\nrequire('./src/server/routes/reports');\r\nrequire('./src/server/routes/notifications');\r\nrequire('./src/server/routes/oauth');\r\nrequire('./src/server/routes/users');\r\nrequire('./src/server/routes/admin');\r\nrequire('./src/server/errors');\r\nrequire('./src/server/routes/spa');\r\nrequire('./src/server/startup');\r\n"
       }
      ]
     }
