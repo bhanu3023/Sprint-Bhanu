@@ -82,11 +82,40 @@ async function pickIssueKey(spaceKey) {
     await page.waitForTimeout(SETTLE_MS);
     try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch (_) { /* some pages poll */ }
 
-    const html = await page.evaluate(() => document.body.innerHTML);
+    // document.body.innerHTML contains the <script> block, and this refactor is
+    // DEFINED by rewriting that block -- so a raw body diff can never pass again
+    // at any phase. The script elements and HTML comments are therefore removed
+    // from a CLONE before serializing, and their counts are captured separately:
+    // a change in those counts is itself a signal, and the script block proper
+    // is covered deliberately by check [5] (scriptblock.js), which can actually
+    // interpret it. Nothing else is stripped.
+    const shot = await page.evaluate(() => {
+      const clone = document.body.cloneNode(true);
+      let scriptsRemoved = 0, commentsRemoved = 0, wsRemoved = 0;
+      // Removing an element leaves its indentation behind as a whitespace-only
+      // text node, so N extra <script> tags would still show up as N extra
+      // indentation runs. Take the immediately-preceding whitespace-only text
+      // node with each removal. Whitespace-only, adjacent-only: no content-
+      // bearing node can be caught by this.
+      const dropWithIndent = (node) => {
+        const prev = node.previousSibling;
+        if (prev && prev.nodeType === 3 && !prev.nodeValue.trim()) { prev.parentNode.removeChild(prev); wsRemoved++; }
+        node.parentNode.removeChild(node);
+      };
+      clone.querySelectorAll('script').forEach(s => { dropWithIndent(s); scriptsRemoved++; });
+      const w = document.createTreeWalker(clone, NodeFilter.SHOW_COMMENT);
+      const cs = []; let n;
+      while ((n = w.nextNode())) cs.push(n);
+      cs.forEach(c => { if (c.parentNode) { dropWithIndent(c); commentsRemoved++; } });
+      return { html: clone.innerHTML, scriptsRemoved, commentsRemoved, wsRemoved };
+    });
+    const html = shot.html;
     snapshot.pages[p.name] = {
       url: p.url,
       html: normalizeHtml(html),
       htmlLength: html.length,
+      scriptsRemoved: shot.scriptsRemoved,
+      commentsRemoved: shot.commentsRemoved,
       newConsoleErrors: consoleErrors.slice(before),
       newFailedRequests: failedRequests.slice(beforeReq)
     };

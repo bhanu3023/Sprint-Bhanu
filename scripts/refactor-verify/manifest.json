@@ -1,20 +1,40 @@
 {
- "_doc": "Move-purity manifest. Each target declares the original file and its replacement PARTS, where every part records the ORIGINAL LINE RANGE it covers. catdiff.js asserts: (A) each part's bytes equal the pristine original's bytes for that range, (B) the ranges tile 1..N with no gap or overlap, (C) concatenating them reproduces the whole original byte-for-byte, and (D) for client targets, the <script src> order parsed out of the real 'orderFrom' file equals the parts' ascending line order. Order is derived from the real HTML, never trusted from this file -- a disagreement between the two is reported as the bug.",
- "_lineEndings": "This repo has core.autocrlf=true: files are CRLF on disk, LF in git blobs (app.js is 891641 bytes on disk vs 874347 in the blob -- exactly one extra byte per line). catdiff normalizes both sides to LF before comparing. Line counts and all non-EOL bytes are still compared exactly, so a real edit still fails.",
+ "_doc": "Move-purity manifest. Each target declares the original file and its replacement PARTS, where every part records the ORIGINAL LINE RANGE it covers. catdiff.js asserts: (A) each part's bytes equal the pristine original's bytes for that range, (B) the ranges tile 1..N with no gap or overlap, (C) concatenating them reproduces the whole original byte-for-byte, and (D) for client targets, the <script src> order parsed out of the real 'orderFrom' file equals the parts' ascending line order. Order is derived from the real HTML, never trusted from this file -- a disagreement between the two is reported as the bug. Check [5] (scriptblock.js) additionally validates the script block itself.",
+ "_lineEndings": "This repo has core.autocrlf=true: files are CRLF on disk, LF in git blobs (app.js is 891641 bytes on disk vs 874347 in the blob -- exactly one extra byte per line). RAW byte-identity is MANDATORY for client parts; CRLF->LF is used only as a failure diagnostic and can never produce a PASS.",
  "baselineRef": "c22c688",
  "targets": [
   {
    "original": "app.js",
-   "orderFrom": ".refactor-verify/st3/index.html",
+   "orderFrom": "index.html",
    "parts": [
     {
-     "file": ".refactor-verify/st3/p1.js",
+     "file": "src/client/bootstrap.js",
      "from": 1,
+     "to": 9
+    },
+    {
+     "file": "src/client/state/index.js",
+     "from": 10,
+     "to": 37
+    },
+    {
+     "file": "src/client/utils/index.js",
+     "from": 38,
      "to": 566
     },
     {
-     "file": ".refactor-verify/st3/p2.js",
+     "file": "src/client/services/api.js",
      "from": 567,
+     "to": 649
+    },
+    {
+     "file": "src/client/services/recently-viewed.js",
+     "from": 650,
+     "to": 914
+    },
+    {
+     "file": "app.js",
+     "from": 915,
      "to": 17295
     }
    ]

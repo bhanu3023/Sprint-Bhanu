@@ -103,12 +103,23 @@ say('\n[2b] global identifiers probed by name (catches lost const/let bindings)'
 }
 
 // ── per-page DOM ─────────────────────────────────────────────────────────
-say('\n[3] document.body.innerHTML per page (normalized)');
+// Scripts and HTML comments are removed before serializing (see capture.js);
+// the script block is covered by check [5] instead. The removed-node counts are
+// compared here, because an unexpected change in them is itself a signal.
+say('\n[3] document.body.innerHTML per page (scripts + comments stripped)');
 const names = [...new Set([...a.capturedPages, ...b.capturedPages])];
 let domDiffs = 0;
+let strippedChanges = 0;
 for (const n of names) {
   const pa = a.pages[n], pb = b.pages[n];
   if (!pa || !pb) { failed = true; domDiffs++; say('    ' + n.padEnd(26) + ' MISSING in ' + (pa ? afterLabel : beforeLabel)); continue; }
+  if (pa.scriptsRemoved !== undefined && pb.scriptsRemoved !== undefined &&
+      (pa.scriptsRemoved !== pb.scriptsRemoved || pa.commentsRemoved !== pb.commentsRemoved)) {
+    strippedChanges++;
+    say('    ' + n.padEnd(26) + ' stripped-node count changed: scripts ' +
+        pa.scriptsRemoved + '->' + pb.scriptsRemoved + ', comments ' +
+        pa.commentsRemoved + '->' + pb.commentsRemoved + '  (expected when a phase adds tags)');
+  }
   if (pa.html === pb.html) { say('    ' + n.padEnd(26) + ' identical  (' + pa.htmlLength + ' chars)'); continue; }
   failed = true; domDiffs++;
   say('    ' + n.padEnd(26) + ' *** DIFFERS *** (' + pa.htmlLength + ' -> ' + pb.htmlLength + ' chars)');
@@ -117,7 +128,8 @@ for (const n of names) {
     h.lines.forEach(l => say('        ' + l));
   });
 }
-say('    -> ' + (domDiffs === 0 ? 'ALL PAGES IDENTICAL (empty diff)' : domDiffs + ' page(s) differ'));
+say('    -> ' + (domDiffs === 0 ? 'ALL PAGES IDENTICAL (empty diff)' : domDiffs + ' page(s) differ') +
+    (strippedChanges ? '   [' + strippedChanges + ' page(s) had a stripped-node count change]' : ''));
 
 // ── console errors / failed requests ─────────────────────────────────────
 say('\n[4] console errors & failed requests');
