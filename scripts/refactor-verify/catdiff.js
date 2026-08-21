@@ -127,10 +127,19 @@ for (const t of targets) {
   console.log('   [B] exact tiling    : ' + (bOk ? 'PASS — lines 1-' + totalLines + ' covered exactly once' : 'FAIL'));
 
   // ── C. concatenation ────────────────────────────────────────────────
-  let cOk = false;
+  // Reported at two strengths so the LF normalization can never hide anything
+  // silently: RAW means the parts are byte-identical to the original with no
+  // transformation at all (the strongest result, and what we expect when the
+  // parts were cut from the CRLF disk file). NORMALIZED means they matched only
+  // after CRLF->LF on both sides, i.e. the parts' line endings differ from the
+  // original's -- functionally irrelevant to JS, but worth surfacing rather
+  // than swallowing.
+  let cOk = false, cRaw = false;
   if (parts.every(p => fs.existsSync(path.join(ROOT, p.file)))) {
     const order = t.loadOrder && t.loadOrder.length ? t.loadOrder : sorted.map(p => p.file);
-    const joined = Buffer.concat(order.map(f => toLF(rd(path.join(ROOT, f)))));
+    const rawJoined = Buffer.concat(order.map(f => rd(path.join(ROOT, f))));
+    cRaw = Buffer.compare(rawPristine, rawJoined) === 0;
+    const joined = toLF(rawJoined);
     cOk = Buffer.compare(pristine, joined) === 0;
     if (!cOk) {
       failed = true;
@@ -141,7 +150,10 @@ for (const t of targets) {
                   ' (original line ~' + pristine.slice(0, i).toString('utf8').split('\n').length + ')');
     }
   } else failed = true;
-  console.log('   [C] concatenation   : ' + (cOk ? 'PASS — cat-diff EMPTY' : 'FAIL'));
+  console.log('   [C] concatenation   : ' + (
+    cRaw ? 'PASS — cat-diff EMPTY (RAW byte-identical, no normalization needed)'
+         : cOk ? 'PASS — cat-diff EMPTY (after CRLF->LF on both sides; part line endings differ from original)'
+               : 'FAIL'));
 
   // ── D. declared order vs real index.html ────────────────────────────
   if (t.orderFrom) {
