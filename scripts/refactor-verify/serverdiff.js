@@ -56,6 +56,18 @@ for (const t of targets) {
   for (const p of parts) {
     const abs = path.join(ROOT, p.file);
     if (!fs.existsSync(abs)) { saOk = sbOk = false; failed = true; console.log('   MISSING FILE: ' + p.file); continue; }
+
+    // Bug-fix phase: a part explicitly declared `modified` has been edited on
+    // purpose, so byte-identity no longer applies to it. Its ranges still count
+    // toward [SC] tiling, so nothing can be silently lost, and every part NOT
+    // carrying this flag is still held to full RAW byte-identity. The flag is
+    // the audit trail of exactly which files stopped being pure moves.
+    if (p.modified) {
+      console.log('   [--] ' + p.file.padEnd(38) + 'MODIFIED by declaration: ' + (p.modifiedReason || 'no reason given'));
+      (p.ranges || []).forEach(([a, b]) => { bodyLinesTotal += (b - a + 1); });
+      continue;
+    }
+
     let content = rd(abs).toString('latin1');
 
     // SEGMENTS form: an ordered list of {glue:"..."} and {range:[a,b]} entries.

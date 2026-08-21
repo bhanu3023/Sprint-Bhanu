@@ -26,6 +26,7 @@ require('./src/server/routes/filters');
 require('./src/server/routes/reports');
 require('./src/server/routes/notifications');
 require('./src/server/routes/oauth');
+require('./src/server/routes/auth');
 require('./src/server/routes/users');
 require('./src/server/routes/admin');
 require('./src/server/errors');

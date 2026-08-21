@@ -249,6 +249,7 @@
     "src/server/routes/reports",
     "src/server/routes/notifications",
     "src/server/routes/oauth",
+    "src/server/routes/auth",
     "src/server/routes/users",
     "src/server/routes/admin",
     "src/server/errors",
@@ -541,7 +542,7 @@
      "ranges": [
       [
        2641,
-       2802
+       2728
       ]
      ],
      "gluePrefix": "const { generateToken, hashPassword, requireAuth, verifyPassword } = require('../auth');\r\nconst { crypto, uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { oauthStates, requireOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { APP_BASE_URL, MS_CLIENT_ID, MS_REDIRECT_URI, MS_TENANT_ID, msGraphMe, msTokenExchange } = require('../oauth-helpers');\r\n",
@@ -607,9 +608,20 @@
      "ranges": [],
      "segments": [
       {
-       "glue": "// Entry point. server.js is now the ordered require list: every module below\r\n// registers its routes when required, so the 117 route registrations still\r\n// happen in exactly their original order. npm start is unchanged.\r\nrequire('./src/server/core');\r\nrequire('./src/server/db');\r\nrequire('./src/server/auth');\r\nrequire('./src/server/email');\r\nrequire('./src/server/deps');\r\nrequire('./src/server/notify');\r\nrequire('./src/server/express-app');\r\nrequire('./src/server/files');\r\nrequire('./src/server/oauth-helpers');\r\nrequire('./src/server/routes/data');\r\nrequire('./src/server/routes/my-issues');\r\nrequire('./src/server/routes/org');\r\nrequire('./src/server/routes/spaces');\r\nrequire('./src/server/routes/sprints');\r\nrequire('./src/server/routes/issues');\r\nrequire('./src/server/routes/comments');\r\nrequire('./src/server/routes/worklogs');\r\nrequire('./src/server/routes/roadmap');\r\nrequire('./src/server/routes/links');\r\nrequire('./src/server/routes/attachments');\r\nrequire('./src/server/routes/custom-fields');\r\nrequire('./src/server/routes/filters');\r\nrequire('./src/server/routes/reports');\r\nrequire('./src/server/routes/notifications');\r\nrequire('./src/server/routes/oauth');\r\nrequire('./src/server/routes/users');\r\nrequire('./src/server/routes/admin');\r\nrequire('./src/server/errors');\r\nrequire('./src/server/routes/spa');\r\nrequire('./src/server/startup');\r\n"
+       "glue": "// Entry point. server.js is now the ordered require list: every module below\r\n// registers its routes when required, so the 117 route registrations still\r\n// happen in exactly their original order. npm start is unchanged.\r\nrequire('./src/server/core');\r\nrequire('./src/server/db');\r\nrequire('./src/server/auth');\r\nrequire('./src/server/email');\r\nrequire('./src/server/deps');\r\nrequire('./src/server/notify');\r\nrequire('./src/server/express-app');\r\nrequire('./src/server/files');\r\nrequire('./src/server/oauth-helpers');\r\nrequire('./src/server/routes/data');\r\nrequire('./src/server/routes/my-issues');\r\nrequire('./src/server/routes/org');\r\nrequire('./src/server/routes/spaces');\r\nrequire('./src/server/routes/sprints');\r\nrequire('./src/server/routes/issues');\r\nrequire('./src/server/routes/comments');\r\nrequire('./src/server/routes/worklogs');\r\nrequire('./src/server/routes/roadmap');\r\nrequire('./src/server/routes/links');\r\nrequire('./src/server/routes/attachments');\r\nrequire('./src/server/routes/custom-fields');\r\nrequire('./src/server/routes/filters');\r\nrequire('./src/server/routes/reports');\r\nrequire('./src/server/routes/notifications');\r\nrequire('./src/server/routes/oauth');\r\nrequire('./src/server/routes/auth');\r\nrequire('./src/server/routes/users');\r\nrequire('./src/server/routes/admin');\r\nrequire('./src/server/errors');\r\nrequire('./src/server/routes/spa');\r\nrequire('./src/server/startup');\r\n"
       }
      ]
+    },
+    {
+     "file": "src/server/routes/auth.js",
+     "ranges": [
+      [
+       2729,
+       2802
+      ]
+     ],
+     "modified": true,
+     "modifiedReason": "FIX 1 - login rate limiting added; split out of routes/oauth.js (password login is not an OAuth route)"
     }
    ]
   }
