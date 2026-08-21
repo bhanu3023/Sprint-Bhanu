@@ -2,5 +2,42 @@
  "_doc": "Move-purity manifest. Each target declares the original file and its replacement PARTS, where every part records the ORIGINAL LINE RANGE it covers. catdiff.js asserts: (A) each part's bytes equal the pristine original's bytes for that range, (B) the ranges tile 1..N with no gap or overlap, (C) concatenating them reproduces the whole original byte-for-byte, and (D) for client targets, the <script src> order parsed out of the real 'orderFrom' file equals the parts' ascending line order. Order is derived from the real HTML, never trusted from this file -- a disagreement between the two is reported as the bug.",
  "_lineEndings": "This repo has core.autocrlf=true: files are CRLF on disk, LF in git blobs (app.js is 891641 bytes on disk vs 874347 in the blob -- exactly one extra byte per line). catdiff normalizes both sides to LF before comparing. Line counts and all non-EOL bytes are still compared exactly, so a real edit still fails.",
  "baselineRef": "c22c688",
- "targets": []
+ "targets": [
+  {
+   "original": "app.js",
+   "orderFrom": ".refactor-verify/st3/index.html",
+   "parts": [
+    {
+     "file": ".refactor-verify/st3/p1.js",
+     "from": 1,
+     "to": 566
+    },
+    {
+     "file": ".refactor-verify/st3/p2.js",
+     "from": 567,
+     "to": 17295
+    }
+   ]
+  }
+ ],
+ "pristine": {
+  "app.js": {
+   "bytes": 891641,
+   "sha256": "b66e0f8f382aa7acc3c3a9815961fcf645644600af49141424ed34dbd101222f",
+   "crlf": 17294,
+   "lf": 17294
+  },
+  "server.js": {
+   "bytes": 171150,
+   "sha256": "f3c410375bdd5545764f9ce64fc1809f8d3b2745c7689ced50e5389c4f8c97ae",
+   "crlf": 3203,
+   "lf": 3203
+  },
+  "index.html": {
+   "bytes": 102671,
+   "sha256": "42d593a93d825e8c6795dd74b705c4dc555dcbdd616501f5855c96db9ebcd0fc",
+   "crlf": 1431,
+   "lf": 1431
+  }
+ }
 }

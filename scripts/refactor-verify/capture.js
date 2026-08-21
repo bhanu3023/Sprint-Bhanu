@@ -19,6 +19,7 @@ const { chromium } = require('playwright');
 const { getSession, rankedSpaceKeys, pool } = require('./lib/session');
 const { normalizeHtml } = require('./lib/normalize');
 const { globalPages, spacePages } = require('./lib/pages');
+const { collect } = require('./lib/globals');
 
 const BASE = process.env.SB_BASE || 'http://localhost:3000';
 const OUTDIR = path.join(__dirname, '..', '..', '.refactor-verify');
@@ -102,9 +103,28 @@ async function pickIssueKey(spaceKey) {
   });
   snapshot.windowKeys = win.keys;
   snapshot.windowTypes = win.types;
+
+  // Object.keys(window) does NOT see top-level const/let bindings (S, esc, $,
+  // qs, qsa, cap, escAttr ... are all declarative globals, verified absent from
+  // the key list). Those are the most-used symbols in the codebase, so each
+  // expected global is additionally probed BY NAME in page scope.
+  const expected = collect(path.join(OUTDIR, 'pristine')).all;
+  const probed = await page.evaluate((names) => {
+    const out = {};
+    for (const n of names) {
+      try { out[n] = eval('typeof ' + n); } catch (e) { out[n] = '<throws>'; }
+    }
+    return out;
+  }, expected);
+  snapshot.globalProbe = probed;
+  const undef = Object.entries(probed).filter(([, v]) => v === 'undefined' || v === '<throws>').map(([k]) => k);
+  snapshot.globalProbeMissing = undef;
+
   snapshot.totals = {
     pages: snapshot.capturedPages.length,
     windowKeys: win.keys.length,
+    globalsProbed: expected.length,
+    globalsMissing: undef.length,
     consoleErrors: consoleErrors.length,
     failedRequests: failedRequests.length
   };

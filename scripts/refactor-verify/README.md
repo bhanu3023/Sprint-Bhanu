@@ -17,10 +17,38 @@ covers analytics masking only), so this harness *is* the safety net.
 
 | # | Check | Command | Passing means |
 |---|---|---|---|
-| 1 | **Move purity** | `node scripts/refactor-verify/catdiff.js` | Four sub-checks: **[A]** each part's bytes equal the original's bytes for the line range it claims; **[B]** the ranges tile 1..N with no gap or overlap; **[C]** concatenating them reproduces the whole original byte-for-byte; **[D]** the `<script src>` order parsed from the *real* `index.html` equals the parts' ascending line order. Order is never trusted from the manifest — a disagreement is reported as the bug. |
-| 2 | **Global surface** | part of `compare.js` | `Object.keys(window)` and `typeof window[k]` are unchanged. Catches a lost global — the #1 way this refactor breaks silently, since 268 inline handlers depend on them. |
-| 3 | **Rendered DOM** | part of `compare.js` | Normalized `document.body.innerHTML` is identical on all 47 captured pages. |
+| 1 | **Move purity** | `node scripts/refactor-verify/catdiff.js` | Four sub-checks, all on **RAW untransformed bytes**: **[A]** each part's bytes equal the original's bytes for the line range it claims; **[B]** the ranges tile 1..N with no gap or overlap; **[C]** concatenating them reproduces the whole original byte-for-byte; **[D]** the `<script src>` order parsed from the *real* `index.html` equals the parts' ascending line order. Order is never trusted from the manifest — a disagreement is reported as the bug. |
+| 2 | **Global surface** | part of `compare.js` | `Object.keys(window)` and `typeof window[k]` unchanged. |
+| 2b | **Declarative globals** | part of `compare.js` | Every expected global probed **by name**. `Object.keys(window)` cannot see top-level `const`/`let`, and `S`, `esc`, `$`, `qs`, `qsa`, `cap`, `escAttr` are all in that blind spot — see below. |
+| 3 | **Rendered DOM** | part of `compare.js` | Normalized `document.body.innerHTML` identical on all 47 captured pages. |
 | 4 | **Behaviour** | `node scripts/refactor-verify/flows.js` | The 7 core flows still work end-to-end. |
+
+### Why check 2b exists (a real blind spot, demonstrated)
+
+In a classic `<script>`, `function f(){}` and `var x` become `window` properties,
+but `const x = ...` creates a binding in the global *declarative* record — visible
+to every script and to inline handlers, but **absent from `Object.keys(window)`**.
+Verified on the real baseline: `S`, `esc`, `escAttr`, `qs`, `qsa`, `cap` are all
+invisible to the key list, and they are the most-used symbols in the codebase
+(`$` 122 call sites, `esc` 103, `S` read by 151 functions).
+
+Demonstrated by renaming a `const` and re-running every check:
+
+```
+[1] Object.keys(window)  before=900  after=900   -> IDENTICAL (empty diff)   <- blind
+[2] typeof window[k]                             -> IDENTICAL (empty diff)   <- blind
+[3] DOM, all 47 pages                            -> identical               <- blind
+[2b] *** LOST GLOBALS (1): PRIORITY_ICONS                                   <- caught it
+```
+
+Only 2b caught it. Without it, losing `esc` or `$` in a split could have passed
+every other check.
+
+**RAW byte-identity is mandatory for check 1.** There is no line-ending fallback
+that can produce a PASS. CRLF→LF normalization is used *only* as a failure
+diagnostic: when RAW fails, the output says whether the content was identical and
+only line endings differed, so a line-ending problem is instantly distinguishable
+from lost or edited content.
 
 Plus the existing `node scripts/test-hotjar.js` (138 assertions).
 

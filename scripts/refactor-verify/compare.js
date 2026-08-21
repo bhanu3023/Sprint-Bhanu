@@ -72,6 +72,36 @@ say('\n[2] typeof window[k] for shared keys');
 if (typeChanges.length) { failed = true; typeChanges.forEach(t => say('    CHANGED: ' + t)); }
 else say('    -> IDENTICAL (empty diff)');
 
+// ── declarative globals probed by name ───────────────────────────────────
+// Object.keys(window) misses top-level const/let (S, esc, $, qs, qsa, cap,
+// escAttr ...), which are the most-used symbols in the codebase. These are
+// probed by name instead, so losing one cannot slip past checks [1]/[2].
+say('\n[2b] global identifiers probed by name (catches lost const/let bindings)');
+{
+  const pa = a.globalProbe || {}, pb = b.globalProbe || {};
+  const names = [...new Set([...Object.keys(pa), ...Object.keys(pb)])].sort();
+  if (!names.length) {
+    say('    -> SKIPPED: snapshots predate the probe (recapture "' + beforeLabel + '" to enable)');
+  } else {
+    const changed = names.filter(n => pa[n] !== pb[n]);
+    const lost = names.filter(n => pa[n] && pa[n] !== 'undefined' && pa[n] !== '<throws>' &&
+                                   (pb[n] === 'undefined' || pb[n] === '<throws>' || pb[n] === undefined));
+    say('    probed=' + names.length +
+        '  before-missing=' + (a.globalProbeMissing || []).length +
+        '  after-missing=' + (b.globalProbeMissing || []).length);
+    if (lost.length) {
+      failed = true;
+      say('    *** LOST GLOBALS (' + lost.length + '): ' + lost.join(', '));
+    }
+    const otherChanges = changed.filter(n => !lost.includes(n));
+    if (otherChanges.length) {
+      failed = true;
+      otherChanges.forEach(n => say('    CHANGED: ' + n + ': ' + pa[n] + ' -> ' + pb[n]));
+    }
+    if (!lost.length && !otherChanges.length) say('    -> IDENTICAL (empty diff)');
+  }
+}
+
 // ── per-page DOM ─────────────────────────────────────────────────────────
 say('\n[3] document.body.innerHTML per page (normalized)');
 const names = [...new Set([...a.capturedPages, ...b.capturedPages])];
