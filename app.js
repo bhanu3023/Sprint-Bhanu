@@ -2672,18 +2672,34 @@ function renderSidebar() {
     ? spaces.map(spaceNavItem).join('')
     : '<p class="text-muted sidebar-empty">No spaces</p>';
 
-  // Bind space clicks — always opens that space's menu, never a "toggle closed
-  // to Home" on a second click. That toggle used to fire incorrectly while
-  // viewing an issue too: opening a ticket does not change S.currentSpace/
-  // currentView (they still point at whatever space/tab was open underneath),
-  // so clicking that same space while a ticket was open satisfied the "already
-  // here" check and sent the user to Home instead of opening the menu -- the
-  // reported "first click goes home, second click opens the menu" bug.
+  // Clicking a space in the sidebar is a pure expand/collapse toggle for its
+  // Summary/Backlog/etc submenu -- it never navigates the main content area
+  // by itself (that only happens when a submenu link itself is clicked, via
+  // the .space-subitem delegate below). This is true from anywhere: Home,
+  // All Work, another space, or an open ticket -- clicking a space just
+  // shows or hides its own menu in place.
+  //
+  // An earlier version of this handler tried to distinguish "already viewing
+  // this space" from "not viewing it" using S.currentSpace/currentView, which
+  // is a different kind of state (what's rendered in the main pane) from
+  // "is this space's submenu currently expanded in the sidebar" -- the two
+  // drifted out of sync (e.g. opening a ticket doesn't touch S.currentSpace),
+  // which is what caused the earlier "first click goes home" bug. Reading the
+  // submenu's own DOM presence directly avoids that class of bug entirely.
   qsa('.space-item').forEach(function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
       var spaceId = el.dataset.spaceId;
-      navigateToSpace(spaceId, 'summary');
+      var alreadyExpanded = !!(el.nextElementSibling && el.nextElementSibling.classList.contains('space-subnav'));
+      if (alreadyExpanded) {
+        collapseSpaceSubnav();
+      } else {
+        // Only show the real current tab as active in the submenu if we are
+        // actually navigated into this space right now; otherwise nothing in
+        // the list is marked active until a link in it is clicked.
+        var activeTab = (String(S.currentSpace) === String(spaceId) && S.currentView === 'space') ? S.currentTab : null;
+        mountSpaceSubnav(spaceId, activeTab);
+      }
     });
   });
 
