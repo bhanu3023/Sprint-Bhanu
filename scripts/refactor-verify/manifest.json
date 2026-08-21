@@ -33,8 +33,43 @@
      "to": 914
     },
     {
-     "file": "app.js",
+     "file": "src/client/components/toast.js",
      "from": 915,
+     "to": 996
+    },
+    {
+     "file": "src/client/components/confirm.js",
+     "from": 997,
+     "to": 1102
+    },
+    {
+     "file": "src/client/components/modal-drawer.js",
+     "from": 1103,
+     "to": 1245
+    },
+    {
+     "file": "src/client/constants.js",
+     "from": 1246,
+     "to": 1305
+    },
+    {
+     "file": "src/client/components/badges.js",
+     "from": 1306,
+     "to": 1403
+    },
+    {
+     "file": "src/client/services/data-helpers.js",
+     "from": 1404,
+     "to": 1633
+    },
+    {
+     "file": "src/client/services/theme.js",
+     "from": 1634,
+     "to": 1665
+    },
+    {
+     "file": "app.js",
+     "from": 1666,
      "to": 17295
     }
    ]
