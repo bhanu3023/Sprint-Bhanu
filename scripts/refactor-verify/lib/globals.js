@@ -71,7 +71,14 @@ function collect(baseDir) {
       if (w) winProps.add(w[1]);
     }
     out.byFile[f] = { declared: [...names].sort(), windowProps: [...winProps].sort() };
-    out.all.push(...names);
+    // UNION of column-0 declarations AND window.* assignments. Declarations alone
+    // missed two whole categories: hotjar.js declares nothing at column 0 (its
+    // functions live inside an IIFE and are exported only as window.initHotjar /
+    // window.identifyHotjarUser), and app.js has many window-only globals such as
+    // _prmSetView that are assigned but never declared. Object.keys(window)
+    // covers window props, so combined coverage held -- but [2b] was weaker than
+    // its count suggested, so both categories are now probed by name.
+    out.all.push(...names, ...winProps);
     out.windowProps.push(...winProps);
   }
   out.all = [...new Set(out.all)].sort();

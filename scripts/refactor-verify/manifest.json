@@ -68,8 +68,58 @@
      "to": 1665
     },
     {
-     "file": "app.js",
+     "file": "src/client/init.js",
      "from": 1666,
+     "to": 2080
+    },
+    {
+     "file": "src/client/navigation.js",
+     "from": 2081,
+     "to": 2598
+    },
+    {
+     "file": "src/client/components/sidebar.js",
+     "from": 2599,
+     "to": 2737
+    },
+    {
+     "file": "src/client/components/space-header.js",
+     "from": 2738,
+     "to": 2813
+    },
+    {
+     "file": "src/client/pages/home.js",
+     "from": 2814,
+     "to": 2955
+    },
+    {
+     "file": "src/client/pages/spaces.js",
+     "from": 2956,
+     "to": 3023
+    },
+    {
+     "file": "src/client/pages/my-work.js",
+     "from": 3024,
+     "to": 3350
+    },
+    {
+     "file": "src/client/pages/work-log.js",
+     "from": 3351,
+     "to": 3490
+    },
+    {
+     "file": "src/client/pages/roadmap.js",
+     "from": 3491,
+     "to": 4438
+    },
+    {
+     "file": "src/client/pages/work-log-pivot.js",
+     "from": 4439,
+     "to": 5105
+    },
+    {
+     "file": "app.js",
+     "from": 5106,
      "to": 17295
     }
    ]
