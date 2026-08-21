@@ -77,14 +77,62 @@ app.use('/uploads', requireAuthFile, wrap(async (req, res, next) => {
   next();
 }), express.static(uploadsDir));
 
-// Multer storage config. No artificial size cap here — the practical ceiling is
-// the upload routes below, which buffer the file in memory and store the bytes in
-// file_storage.data (bytea, hard-capped at 1GB per value by Postgres).
+// ── Upload ceilings ───────────────────────────────────────
+// The upload routes buffer each file wholly in memory (multer.memoryStorage)
+// and then write the bytes into file_storage.data, a Postgres `bytea`.
+//
+// Both limits below are chosen so that nothing which currently SUCCEEDS starts
+// failing; they only bound the cases that already could not work:
+//
+//   per file    1,073,741,823 bytes is the hard maximum size of a single bytea
+//               value in Postgres. A larger file provably cannot be stored, so
+//               rejecting it costs no working functionality. Measured before
+//               this change: 150 MB uploaded in 1.8s and 600 MB in 11.6s (both
+//               HTTP 200), while 1100 MB did not fail -- it hung past ten
+//               minutes with the bytes buffered in RAM. That hang is the bug.
+//
+//   per request the browser already refuses more than 1 GiB total per upload
+//               (ISSUE_MAX_TOTAL_ATTACH_BYTES), so no upload the UI permits is
+//               affected. Without it, `files: 20` means one request could pin
+//               20 x 1 GB in memory, and the per-file cap alone would not stop
+//               it. The headroom above 1 GiB covers multipart framing overhead,
+//               because Content-Length counts the envelope, not just the bytes.
+const MAX_UPLOAD_FILE_BYTES = 1073741823;      // Postgres bytea hard maximum
+const MAX_UPLOAD_REQUEST_BYTES = 1100000000;   // 1 GiB payload + multipart overhead
+const MAX_UPLOAD_FILES = 20;
+
+// Checked BEFORE multer parses, so an oversized request is refused on its
+// Content-Length instead of being buffered into memory first. Returns false
+// when it has already answered the request.
+//
+// The socket has to be torn down explicitly. Replying 413 alone is not enough:
+// the client is mid-upload, so without closing the connection the response is
+// not delivered until the body has been fully read -- which is exactly the
+// gigabyte of buffering being avoided. Measured while getting this wrong: curl
+// saw only "100 Continue" and sat for the full 120s timeout.
+//
+// end() rather than destroy(): the client is typically mid-upload behind an
+// `Expect: 100-continue`, and destroy() is an abortive close that can discard
+// the 413 still sitting in the socket buffer -- observed as an intermittent bare
+// "100" on the client with no body. end() flushes the response, then sends FIN,
+// so the client reliably reads the status before the connection goes away.
+function guardUploadSize(req, res) {
+  const len = Number(req.headers['content-length']);
+  if (Number.isFinite(len) && len > MAX_UPLOAD_REQUEST_BYTES) {
+    res.set('Connection', 'close');
+    res.status(413).json({ error: 'Upload too large' });
+    res.on('finish', () => { try { req.socket.end(); } catch (_) {} });
+    return false;
+  }
+  return true;
+}
+
 const storage = multer ? multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, uid() + '-' + file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_'))
 }) : null;
-const upload = multer ? multer({ storage, limits: { fileSize: Infinity, files: Infinity } }) : null;
+const upload = multer ? multer({ storage, limits: { fileSize: MAX_UPLOAD_FILE_BYTES, files: MAX_UPLOAD_FILES } }) : null;
 
 
-module.exports = { fs, uploadsDir, getFileLinkedSpaceIds, denyUnlessCanAccessFile, sanitizeOrgRow, storage, upload };
+module.exports = { fs, uploadsDir, getFileLinkedSpaceIds, denyUnlessCanAccessFile, sanitizeOrgRow, storage, upload,
+  MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_REQUEST_BYTES, MAX_UPLOAD_FILES, guardUploadSize };

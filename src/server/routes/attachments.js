@@ -3,7 +3,7 @@ const { multer, path, uid, wrap } = require('../core');
 const { q } = require('../db');
 const { denyUnlessCanAct, getIssueSpaceId } = require('../deps');
 const { app } = require('../express-app');
-const { fs, uploadsDir } = require('../files');
+const { fs, uploadsDir, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILES, guardUploadSize } = require('../files');
 // ── Attachments ───────────────────────────────────────────
 app.get('/api/issues/:id/attachments', requireAuth, wrap(async (req, res) => {
   const spaceId = await getIssueSpaceId(q, req.params.id);
@@ -16,7 +16,8 @@ app.get('/api/issues/:id/attachments', requireAuth, wrap(async (req, res) => {
 
 app.post('/api/issues/:id/attachments', requireAuth, (req, res, next) => {
   if (!multer) return res.status(503).json({ error: 'File upload not available' });
-  const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Infinity, files: 20 } });
+  if (!guardUploadSize(req, res)) return;
+  const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_FILE_BYTES, files: MAX_UPLOAD_FILES } });
   memUpload.array('files', 20)(req, res, async (err) => {
     if (err) { console.error('[attachments/upload]', err); return res.status(400).json({ error: 'Upload failed' }); }
     try {

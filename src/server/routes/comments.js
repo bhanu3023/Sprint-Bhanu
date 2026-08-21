@@ -3,7 +3,7 @@ const { multer, uid, wrap } = require('../core');
 const { pool, q } = require('../db');
 const { denyUnlessCanAct, getCommentIssueSpaceId } = require('../deps');
 const { app } = require('../express-app');
-const { denyUnlessCanAccessFile, upload } = require('../files');
+const { denyUnlessCanAccessFile, upload, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILES, guardUploadSize } = require('../files');
 const { createNotif } = require('../notify');
 // ── Comments ──────────────────────────────────────────────
 app.post('/api/comments', requireAuth, wrap(async (req, res) => {
@@ -63,8 +63,9 @@ app.delete('/api/comments/:id', requireAuth, wrap(async (req, res) => {
 
 app.post('/api/comments/upload', requireAuth, (req, res) => {
   if (!upload) return res.status(503).json({ error: 'File upload not available' });
+  if (!guardUploadSize(req, res)) return;
   const memStorage = multer.memoryStorage();
-  const memUpload = multer({ storage: memStorage, limits: { fileSize: Infinity, files: 20 } });
+  const memUpload = multer({ storage: memStorage, limits: { fileSize: MAX_UPLOAD_FILE_BYTES, files: MAX_UPLOAD_FILES } });
   memUpload.array('files', 20)(req, res, async (err) => {
     if (err) { console.error('[comments/upload]', err); return res.status(400).json({ error: 'Upload failed' }); }
     if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files' });
