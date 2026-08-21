@@ -1,0 +1,5 @@
+{
+ "_doc": "Move-purity manifest. For each original file, 'originals' lists its replacement files IN LOAD ORDER (the same order as the <script> tags in index.html for client files, or the require() order for server files). catdiff.js concatenates them and byte-compares against git show <baselineRef>:<original>. An empty diff proves the phase moved lines only.",
+ "baselineRef": "c22c688",
+ "originals": {}
+}

@@ -7,3 +7,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+
+# Refactor verification snapshots (large; contain rendered app data)
+.refactor-verify/
