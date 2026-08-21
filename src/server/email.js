@@ -1,3 +1,4 @@
+var __dirname = require("path").dirname(require.resolve("../../package.json"));
 const { execSync } = require('child_process');
 const { q } = require('./db');
 // Install nodemailer if not present

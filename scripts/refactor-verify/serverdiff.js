@@ -57,6 +57,54 @@ for (const t of targets) {
     const abs = path.join(ROOT, p.file);
     if (!fs.existsSync(abs)) { saOk = sbOk = false; failed = true; console.log('   MISSING FILE: ' + p.file); continue; }
     let content = rd(abs).toString('latin1');
+
+    // SEGMENTS form: an ordered list of {glue:"..."} and {range:[a,b]} entries.
+    // Needed because incremental route extraction leaves require() lines
+    // INTERLEAVED with retained original ranges, so glue is no longer just a
+    // prefix/suffix. Every glue segment is still matched byte-for-byte and every
+    // range segment must still be RAW-exact; only the layout is more general.
+    if (p.segments) {
+      let cursor = 0, ok = true;
+      let segGlue = 0, segBody = 0;
+      for (let si = 0; si < p.segments.length; si++) {
+        const s = p.segments[si];
+        if (s.glue !== undefined) {
+          if (content.slice(cursor, cursor + s.glue.length) !== s.glue) {
+            ok = false; saOk = false; failed = true;
+            console.log('   [SA] ' + p.file + ': glue segment #' + si + ' MISMATCH at byte ' + cursor);
+            console.log('        declared=' + JSON.stringify(s.glue.slice(0, 70)));
+            console.log('        actual  =' + JSON.stringify(content.slice(cursor, cursor + 70)));
+            break;
+          }
+          cursor += s.glue.length;
+          segGlue += s.glue.split('\n').length - 1;
+        } else {
+          const [a, b] = s.range;
+          const isFileEnd = b >= totalLines;
+          const lastSeg = si === p.segments.length - 1;
+          const exp = pLines.slice(a - 1, b).join('\n') + ((isFileEnd && lastSeg) ? '' : '\n');
+          if (content.slice(cursor, cursor + exp.length) !== exp) {
+            ok = false; sbOk = false; failed = true;
+            const got = content.slice(cursor, cursor + exp.length);
+            let i = 0; while (i < Math.min(exp.length, got.length) && exp[i] === got[i]) i++;
+            console.log('   [SB] ' + p.file + ': range segment ' + a + '-' + b + ' MISMATCH, first diff at +' + i);
+            console.log('        expected=' + JSON.stringify(exp.slice(Math.max(0, i - 40), i + 40)));
+            console.log('        actual  =' + JSON.stringify(got.slice(Math.max(0, i - 40), i + 40)));
+            break;
+          }
+          cursor += exp.length;
+          segBody += (b - a + 1);
+        }
+      }
+      if (ok && cursor !== content.length) {
+        sbOk = false; failed = true;
+        console.log('   [SB] ' + p.file + ': ' + (content.length - cursor) + ' trailing byte(s) not accounted for by any segment');
+      }
+      glueLinesTotal += segGlue;
+      bodyLinesTotal += segBody;
+      continue;
+    }
+
     const pre = p.gluePrefix || '';
     const suf = p.glueSuffix || '';
 
@@ -101,7 +149,10 @@ for (const t of targets) {
 
   // ── [SC] tiling over the union of all ranges ─────────────────────────
   const all = [];
-  parts.forEach(p => (p.ranges || []).forEach(r => all.push({ from: r[0], to: r[1], file: p.file })));
+  parts.forEach(p => {
+    (p.ranges || []).forEach(r => all.push({ from: r[0], to: r[1], file: p.file }));
+    (p.segments || []).forEach(s => { if (s.range) all.push({ from: s.range[0], to: s.range[1], file: p.file }); });
+  });
   all.sort((a, b) => a.from - b.from);
   let scOk = true, cursor = 1;
   for (const r of all) {

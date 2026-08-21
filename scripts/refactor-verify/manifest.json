@@ -222,6 +222,38 @@
   {
    "original": "server.js",
    "kind": "server",
+   "requireOrderFrom": "server.js",
+   "registrationOrder": [
+    "src/server/core",
+    "src/server/db",
+    "src/server/auth",
+    "src/server/email",
+    "src/server/deps",
+    "src/server/notify",
+    "src/server/express-app",
+    "src/server/files",
+    "src/server/oauth-helpers",
+    "src/server/routes/data",
+    "src/server/routes/my-issues",
+    "src/server/routes/org",
+    "src/server/routes/spaces",
+    "src/server/routes/sprints",
+    "src/server/routes/comments",
+    "src/server/routes/worklogs",
+    "src/server/routes/roadmap",
+    "src/server/routes/links",
+    "src/server/routes/attachments",
+    "src/server/routes/custom-fields",
+    "src/server/routes/filters",
+    "src/server/routes/reports",
+    "src/server/routes/notifications",
+    "src/server/routes/oauth",
+    "src/server/routes/users",
+    "src/server/routes/admin",
+    "src/server/errors",
+    "src/server/routes/spa",
+    "src/server/startup"
+   ],
    "parts": [
     {
      "file": "src/server/db.js",
@@ -257,11 +289,11 @@
        3019
       ]
      ],
-     "gluePrefix": "const { execSync } = require('child_process');\r\nconst { q } = require('./db');\r\n",
+     "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\nconst { execSync } = require('child_process');\r\nconst { q } = require('./db');\r\n",
      "glueSuffix": "\r\nmodule.exports = { sendEmail, sendInviteEmail, sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail, getEmailSettings, emailWrapper };\r\n"
     },
     {
-     "file": "server.js",
+     "file": "src/server/core.js",
      "ranges": [
       [
        1,
@@ -269,23 +301,312 @@
       ],
       [
        62,
-       189
-      ],
+       75
+      ]
+     ],
+     "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\n",
+     "glueSuffix": "\r\nmodule.exports = { express, Pool, path, crypto, execSync, uid, wrap, multer, RESERVED_FIELD_NAMES, normalizeFieldName, isReservedFieldName, LINK_TYPE_INVERSE, reservedNameBlockedForUpdate };\r\n"
+    },
+    {
+     "file": "src/server/deps.js",
+     "ranges": [
       [
        195,
-       2534
+       219
       ],
+      [
+       223,
+       233
+      ]
+     ],
+     "gluePrefix": "const { q } = require('./db');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { validateSchemaReadOnly, logProductTeamCombinationStatus, logDuplicateKeyWarning, runMigrations, buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin, UPDATE_WHITELIST, validateSpaceRoleAssignment, canRemoveSpaceMember, getSpaceMemberRole, getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId, getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed, seedBuiltinIssueFields, getConfiguredOptions, isBuiltinSelectValueAllowed, startRetentionSweeper, retentionDays, purgeIssueCascade, purgeIssueRows, completeSprint, startSprintAutoCompleter, https, oauthStates };\r\n"
+    },
+    {
+     "file": "src/server/notify.js",
+     "ranges": [
+      [
+       220,
+       222
+      ],
+      [
+       2474,
+       2503
+      ]
+     ],
+     "gluePrefix": "const { uid } = require('./core');\r\nconst { q } = require('./db');\r\nconst { sendEmail } = require('./email');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { createNotif, sprintDeps };\r\n"
+    },
+    {
+     "file": "src/server/express-app.js",
+     "ranges": [
+      [
+       76,
+       107
+      ]
+     ],
+     "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\nconst { express } = require('./core');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { app };\r\n"
+    },
+    {
+     "file": "src/server/files.js",
+     "ranges": [
+      [
+       108,
+       189
+      ]
+     ],
+     "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\nconst { requireAuthFile } = require('./auth');\r\nconst { express, multer, path, uid, wrap } = require('./core');\r\nconst { q } = require('./db');\r\nconst { canActInSpace, denyUnlessCanAct, isOrgAdmin } = require('./deps');\r\nconst { app } = require('./express-app');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { fs, uploadsDir, getFileLinkedSpaceIds, denyUnlessCanAccessFile, sanitizeOrgRow, storage, upload };\r\n"
+    },
+    {
+     "file": "src/server/oauth-helpers.js",
+     "ranges": [
       [
        2587,
+       2640
+      ]
+     ],
+     "gluePrefix": "const { https } = require('./deps');\r\n",
+     "glueSuffix": "\r\nmodule.exports = { MS_CLIENT_ID, MS_CLIENT_SECRET, MS_TENANT_ID, MS_REDIRECT_URI, APP_BASE_URL, msTokenExchange, msGraphMe };\r\n"
+    },
+    {
+     "file": "src/server/routes/data.js",
+     "ranges": [
+      [
+       234,
+       318
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { retentionDays } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { sanitizeOrgRow } = require('../files');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/my-issues.js",
+     "ranges": [
+      [
+       319,
+       399
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { getMemberSpaceIds, getVisibleSpaceIds, isOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/org.js",
+     "ranges": [
+      [
+       400,
+       414
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { isOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { sanitizeOrgRow } = require('../files');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/spaces.js",
+     "ranges": [
+      [
+       415,
+       604
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { UPDATE_WHITELIST, buildDynamicUpdate, canRemoveSpaceMember, denyUnlessCanAct, getSpaceMemberRecord, isOrgAdmin, pickAllowed, requireOrgAdmin, seedBuiltinIssueFields, validateSpaceRoleAssignment } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/sprints.js",
+     "ranges": [
+      [
+       605,
+       675
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { buildDynamicUpdate, completeSprint, denyUnlessCanAct, getSprintSpaceId } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { createNotif, sprintDeps } = require('../notify');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/comments.js",
+     "ranges": [
+      [
+       1166,
+       1252
+      ]
+     ],
+     "gluePrefix": "const { requireAuth, requireAuthFile } = require('../auth');\r\nconst { multer, uid, wrap } = require('../core');\r\nconst { pool, q } = require('../db');\r\nconst { denyUnlessCanAct, getCommentIssueSpaceId } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { denyUnlessCanAccessFile, upload } = require('../files');\r\nconst { createNotif } = require('../notify');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/worklogs.js",
+     "ranges": [
+      [
+       1253,
+       1325
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { denyUnlessCanAct, getIssueSpaceId, getVisibleSpaceIds, isOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/roadmap.js",
+     "ranges": [
+      [
+       1326,
+       1432
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { denyUnlessCanAct, isOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/links.js",
+     "ranges": [
+      [
+       1433,
+       1479
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { LINK_TYPE_INVERSE, uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { denyUnlessCanAct, getIssueSpaceId } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/attachments.js",
+     "ranges": [
+      [
+       1480,
+       1542
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { multer, path, uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { denyUnlessCanAct, getIssueSpaceId } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { fs, uploadsDir } = require('../files');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/custom-fields.js",
+     "ranges": [
+      [
+       1543,
+       1715
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { isReservedFieldName, reservedNameBlockedForUpdate, uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isOrgAdmin, requireOrgAdmin, seedBuiltinIssueFields } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/filters.js",
+     "ranges": [
+      [
+       1716,
+       1784
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { buildDynamicUpdate, denyUnlessCanAct, getFilterSpaceId, getIssueSpaceId, isOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/reports.js",
+     "ranges": [
+      [
+       1785,
+       2473
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { denyUnlessCanAct, getConfiguredOptions, isOrgAdmin, requireOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/notifications.js",
+     "ranges": [
+      [
+       2504,
+       2534
+      ]
+     ],
+     "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/oauth.js",
+     "ranges": [
+      [
+       2641,
+       2802
+      ]
+     ],
+     "gluePrefix": "const { generateToken, hashPassword, requireAuth, verifyPassword } = require('../auth');\r\nconst { crypto, uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { oauthStates, requireOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { APP_BASE_URL, MS_CLIENT_ID, MS_REDIRECT_URI, MS_TENANT_ID, msGraphMe, msTokenExchange } = require('../oauth-helpers');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/users.js",
+     "ranges": [
+      [
+       2803,
        2910
-      ],
+      ]
+     ],
+     "gluePrefix": "const { hashPassword, requireAuth, verifyPassword } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/admin.js",
+     "ranges": [
       [
        3020,
+       3104
+      ]
+     ],
+     "gluePrefix": "const { generateToken, requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendEmail, sendInviteEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/errors.js",
+     "ranges": [
+      [
+       3105,
+       3118
+      ]
+     ],
+     "gluePrefix": "const { app } = require('./express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/routes/spa.js",
+     "ranges": [
+      [
+       3119,
+       3152
+      ]
+     ],
+     "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../../package.json\"));\r\nconst { path } = require('../core');\r\nconst { app } = require('../express-app');\r\n",
+     "glueSuffix": ""
+    },
+    {
+     "file": "src/server/startup.js",
+     "ranges": [
+      [
+       3153,
        3204
       ]
      ],
-     "gluePrefix": "const { pool, q } = require('./src/server/db');\r\nconst { hashPassword, verifyPassword, generateToken, requireAuth, requireAuthFile } = require('./src/server/auth');\r\nconst { sendEmail, sendInviteEmail, sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail } = require('./src/server/email');\r\n",
+     "gluePrefix": "const { pool, q } = require('./db');\r\nconst { logDuplicateKeyWarning, logProductTeamCombinationStatus, runMigrations, startRetentionSweeper, startSprintAutoCompleter, validateSchemaReadOnly } = require('./deps');\r\nconst { app } = require('./express-app');\r\nconst { sprintDeps } = require('./notify');\r\n",
      "glueSuffix": ""
+    },
+    {
+     "file": "server.js",
+     "ranges": [],
+     "segments": [
+      {
+       "glue": "// Entry point. server.js is now the ordered require list: every module below\r\n// registers its routes when required, so the 117 route registrations still\r\n// happen in exactly their original order. npm start is unchanged.\r\nrequire('./src/server/core');\r\nrequire('./src/server/db');\r\nrequire('./src/server/auth');\r\nrequire('./src/server/email');\r\nrequire('./src/server/deps');\r\nrequire('./src/server/notify');\r\nrequire('./src/server/express-app');\r\nrequire('./src/server/files');\r\nrequire('./src/server/oauth-helpers');\r\nrequire('./src/server/routes/data');\r\nrequire('./src/server/routes/my-issues');\r\nrequire('./src/server/routes/org');\r\nrequire('./src/server/routes/spaces');\r\nrequire('./src/server/routes/sprints');\r\nconst { requireAuth } = require('./src/server/auth');\r\nconst { uid, wrap } = require('./src/server/core');\r\nconst { q } = require('./src/server/db');\r\nconst { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays } = require('./src/server/deps');\r\nconst { app } = require('./src/server/express-app');\r\nconst { createNotif } = require('./src/server/notify');\r\n"
+      },
+      {
+       "range": [
+        676,
+        1165
+       ]
+      },
+      {
+       "glue": "require('./src/server/routes/comments');\r\nrequire('./src/server/routes/worklogs');\r\nrequire('./src/server/routes/roadmap');\r\nrequire('./src/server/routes/links');\r\nrequire('./src/server/routes/attachments');\r\nrequire('./src/server/routes/custom-fields');\r\nrequire('./src/server/routes/filters');\r\nrequire('./src/server/routes/reports');\r\nrequire('./src/server/routes/notifications');\r\nrequire('./src/server/routes/oauth');\r\nrequire('./src/server/routes/users');\r\nrequire('./src/server/routes/admin');\r\nrequire('./src/server/errors');\r\nrequire('./src/server/routes/spa');\r\nrequire('./src/server/startup');\r\n"
+      }
+     ]
     }
    ]
   }
