@@ -32,9 +32,15 @@ sprints           id, space_id, name, goal, start_date, end_date,
 
 issues            id, space_id, sprint_id, parent_id,
                   key (e.g. "PROJ-42"), title, description,
-                  type (epic/story/task/bug/subtask),
-                  status (To Do / In Progress / In Review / Done),
-                  priority (highest/high/medium/low/lowest),
+                  type (no DB CHECK — per-space configurable via custom_fields,
+                        default epic/story/task/bug/subtask; epic & subtask are
+                        reserved and can't be removed, they drive Roadmap
+                        grouping and the Add Subtask flow),
+                  status (To Do / In Progress / In Review / Done / Blocked — fixed,
+                        see .claude/rules/issue-state-machine.md),
+                  priority (no DB CHECK — per-space configurable via custom_fields,
+                        default highest/high/medium/low/lowest; list order IS
+                        severity order, most severe first),
                   assignee_id, reporter_id, story_points, labels[],
                   start_date, due_date, original_estimate, time_spent (minutes),
                   position, team, product_type, deleted_at, deleted_by

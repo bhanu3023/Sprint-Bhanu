@@ -687,7 +687,9 @@
         <!-- Drawer Top Bar -->
         <div class="drawer-topbar">
           <div class="drawer-topbar-left">
-            <button onclick="goBackFromIssue()" style="background:none;border:none;cursor:pointer;font-size:13px;color:#172b4d;display:flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;font-weight:600" onmouseover="this.style.background='#f4f5f7'" onmouseout="this.style.background='none'"><span style="font-size:18px;line-height:1">&#8592;</span> Back</button>
+            <!-- onclick is set by openIssuePage in app.js (goBackFromIssue, or a
+                 direct-navigation handler when opened from All Work) -->
+            <button id="drawerBackBtn" style="background:none;border:none;cursor:pointer;font-size:13px;color:#172b4d;display:flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;font-weight:600" onmouseover="this.style.background='#f4f5f7'" onmouseout="this.style.background='none'"><span style="font-size:18px;line-height:1">&#8592;</span> Back</button>
             <div id="drawerParentBreadcrumb" class="drawer-parent-crumb" style="display:none"></div>
             <span id="drawerKey" class="drawer-issue-key"></span>
             <button class="btn-icon" onclick="copyDrawerLink()" title="Copy link" style="font-size:13px;padding:2px 6px">&#128279;</button>
@@ -892,13 +894,17 @@
               <table class="drawer-fields-table">
                 <tbody>
                   <tr data-builtin-field="status" data-builtin-locked="true"><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
-                  <tr data-builtin-field="priority"><td class="dfl">Priority</td><td class="dfv"><select id="drawerPriority" class="drawer-select" size="1"><option value="highest">Highest</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="lowest">Lowest</option></select></td></tr>
+                  <tr data-builtin-field="priority"><td class="dfl">Priority</td><td class="dfv"><!-- Options rebuilt from the issue's space Priority custom field (renderDrawerIssue in app.js) --><select id="drawerPriority" class="drawer-select" size="1"></select></td></tr>
                   <tr data-builtin-field="assignee"><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
                   <tr data-builtin-field="reporter"><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>
                   <tr data-builtin-field="sprint"><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select"></select></td></tr>
                   <tr data-builtin-field="story_points"><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—"></td></tr>
-                  <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option><option value="Dev">Dev</option><option value="QA">QA</option><option value="Infra">Infra</option><option value="Manage">Manage</option><option value="Product_Team">Product Team</option></select></td></tr>
-                  <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option><option value="Message">Message Type</option><option value="Email">Mail Type</option><option value="Content">Content Type</option><option value="Manage">Manage</option><option value="Infra">Infra</option></select></td></tr>
+                  <!-- Options are rebuilt from the issue's own space's custom_fields.options every
+                       time the drawer renders (buildBuiltinSelectOptionsHtml in app.js) -- never
+                       hardcoded here, since a space admin can add/remove Team or Product Type
+                       options at any time. -->
+                  <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option></select></td></tr>
+                  <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option></select></td></tr>
                   <tr id="drawerCombinationRow" hidden data-builtin-field="combination">
                     <td class="dfv pt-combo-cell" colspan="2"><div id="drawerCombinationField"></div></td>
                   </tr>
@@ -1082,23 +1088,15 @@
           <div class="form-row">
             <div class="form-group" data-builtin-field="type">
               <label class="form-label" for="issueType">Type</label>
-              <select id="issueType" class="input">
-                <option value="epic">Epic</option>
-                <option value="story">Story</option>
-                <option value="task" selected>Task</option>
-                <option value="bug">Bug</option>
-                <option value="subtask">Subtask</option>
-              </select>
+              <!-- Options are rebuilt from the selected space's Type custom field
+                   (_onIssueSpaceChange in app.js) — configurable per space, not fixed here. -->
+              <select id="issueType" class="input"></select>
             </div>
             <div class="form-group" data-builtin-field="priority">
               <label class="form-label" for="issuePriority">Priority</label>
-              <select id="issuePriority" class="input">
-                <option value="highest">Highest</option>
-                <option value="high">High</option>
-                <option value="medium" selected>Medium</option>
-                <option value="low">Low</option>
-                <option value="lowest">Lowest</option>
-              </select>
+              <!-- Options are rebuilt from the selected space's Priority custom field
+                   (_onIssueSpaceChange in app.js) — configurable per space, not fixed here. -->
+              <select id="issuePriority" class="input"></select>
             </div>
           </div>
           <div class="form-row">
@@ -1140,26 +1138,19 @@
             </div>
           </div>
           <div class="form-row">
+            <!-- Options are rebuilt from the selected space's custom_fields.options every
+                 time the space picker changes (buildBuiltinSelectOptionsHtml via
+                 _onIssueSpaceChange in app.js) -- never hardcoded here. -->
             <div class="form-group" data-builtin-field="team">
               <label class="form-label" for="issueTeam">Team</label>
               <select id="issueTeam" class="input">
                 <option value="">— None —</option>
-                <option value="Dev">Dev</option>
-                <option value="QA">QA</option>
-                <option value="Infra">Infra</option>
-                <option value="Manage">Manage</option>
-                <option value="Product_Team">Product Team</option>
               </select>
             </div>
             <div class="form-group" id="issueProductTypeGroup" hidden>
               <label class="form-label" for="issueProductType">Product Type</label>
               <select id="issueProductType" class="input">
                 <option value="">— Select type —</option>
-                <option value="Message">Message Type</option>
-                <option value="Email">Mail Type</option>
-                <option value="Content">Content Type</option>
-                <option value="Manage">Manage</option>
-                <option value="Infra">Infra</option>
               </select>
             </div>
           </div>
@@ -1266,13 +1257,8 @@
             <input type="text" id="customFieldOptions" class="input" placeholder="Option 1, Option 2, Option 3">
           </div>
           <div class="form-group" id="customFieldCombinationGroups" hidden>
-            <p style="font-size:12px;color:var(--text2);margin:0 0 10px">Combination options by Product Type — one <strong>Source - Destination</strong> per line.</p>
-            <label class="form-label" for="cfComboMessage">Message Type</label>
-            <textarea id="cfComboMessage" class="input" rows="4" placeholder="Slack - Slack&#10;Teams - Chat"></textarea>
-            <label class="form-label" for="cfComboEmail" style="margin-top:10px">Mail Type</label>
-            <textarea id="cfComboEmail" class="input" rows="3" placeholder="Outlook - Outlook&#10;Gmail - Gmail"></textarea>
-            <label class="form-label" for="cfComboContent" style="margin-top:10px">Content Type</label>
-            <textarea id="cfComboContent" class="input" rows="6" placeholder="Box - SharePoint&#10;SharePoint - SharePoint"></textarea>
+            <p style="font-size:12px;color:var(--text2);margin:0 0 10px">Combination options by Product Type — one <strong>Source - Destination</strong> per line. One box per Product Type option this space currently has configured (renderCombinationGroupEditors in app.js) — add or remove a Product Type option and this list follows automatically.</p>
+            <div id="cfComboGroupsList"></div>
           </div>
           <div class="form-group form-check">
             <label><input type="checkbox" id="customFieldRequired"> Required</label>

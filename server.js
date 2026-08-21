@@ -202,7 +202,19 @@ const {
   getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId,
   getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed
 } = require('./lib/permissions');
-const { seedBuiltinIssueFields } = require('./lib/builtin-issue-fields');
+const { seedBuiltinIssueFields, getConfiguredOptions } = require('./lib/builtin-issue-fields');
+
+/**
+ * type/priority have no DB CHECK constraint since migration 016 — each space
+ * configures its own list via custom_fields, same model as team/product_type.
+ * Validates a NEW value being written; callers must skip this when a value is
+ * unchanged so an issue keeping an old, since-removed value stays valid.
+ */
+async function isBuiltinSelectValueAllowed(spaceId, fieldKey, value) {
+  if (value == null) return true;
+  const opts = await getConfiguredOptions(q, spaceId, fieldKey);
+  return opts.indexOf(String(value)) >= 0;
+}
 const { startRetentionSweeper, retentionDays, purgeIssueRows: purgeIssueCascade } = require('./lib/retention');
 const { completeSprint, startSprintAutoCompleter } = require('./lib/sprint-complete');
 // createNotif is a hoisted function declaration further down, so this object can
@@ -1008,12 +1020,20 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
     [b.space_id, spaceKey]
   )).rows[0];
   const key = `${spaceKey}-${maxRow.mx + 1}`;
+  const finalType = b.type || 'task';
+  const finalPriority = b.priority || 'medium';
+  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'type', finalType))) {
+    return res.status(400).json({ error: 'Not a configured type for this space: ' + finalType });
+  }
+  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'priority', finalPriority))) {
+    return res.status(400).json({ error: 'Not a configured priority for this space: ' + finalPriority });
+  }
   const id = uid();
   const r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
       assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
     [id, key, b.space_id, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
-     b.type || 'task', b.priority || 'medium', b.assignee_id || null, b.reporter_id || null,
+     finalType, finalPriority, b.assignee_id || null, b.reporter_id || null,
      b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
      b.original_estimate || null, b.team || null, b.product_type || null]);
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
@@ -1031,6 +1051,17 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   }
   const keys = upd.keys;
   const oldRow = (await q('SELECT * FROM issues WHERE id=$1', [req.params.id])).rows[0];
+  // Only a genuine change needs to satisfy the space's CURRENT list — an issue
+  // resaved with a value it already had (since removed from that list) must
+  // stay exactly as it was, per the "never rewrite stored values" rule.
+  if (keys.includes('type') && req.body.type !== oldRow.type &&
+      !(await isBuiltinSelectValueAllowed(spaceId, 'type', req.body.type))) {
+    return res.status(400).json({ error: 'Not a configured type for this space: ' + req.body.type });
+  }
+  if (keys.includes('priority') && req.body.priority !== oldRow.priority &&
+      !(await isBuiltinSelectValueAllowed(spaceId, 'priority', req.body.priority))) {
+    return res.status(400).json({ error: 'Not a configured priority for this space: ' + req.body.priority });
+  }
   const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
   const newRow = r.rows[0];
   // Same rule as PUT /:id/move — deciding this ticket's sprint by hand retires the
@@ -1108,6 +1139,20 @@ app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
   const bulkSpaceIds = Array.from(new Set(issueRows.map(function (row) { return row.space_id; })));
   for (let i = 0; i < bulkSpaceIds.length; i++) {
     if (!(await denyUnlessCanAct(q, req.user, res, bulkSpaceIds[i], 'issue.bulk'))) return;
+  }
+  // A bulk edit writes the same value across every matched issue regardless of
+  // what it had before, so (unlike the single-issue PUT) there is no "already
+  // had this value" exception here — the value must be configured in EVERY
+  // affected space or the whole batch is rejected rather than partially applied.
+  if (picked.type != null || picked.priority != null) {
+    for (let i = 0; i < bulkSpaceIds.length; i++) {
+      if (picked.type != null && !(await isBuiltinSelectValueAllowed(bulkSpaceIds[i], 'type', picked.type))) {
+        return res.status(400).json({ error: 'Not a configured type for one of the selected spaces: ' + picked.type });
+      }
+      if (picked.priority != null && !(await isBuiltinSelectValueAllowed(bulkSpaceIds[i], 'priority', picked.priority))) {
+        return res.status(400).json({ error: 'Not a configured priority for one of the selected spaces: ' + picked.priority });
+      }
+    }
   }
   const upd = buildDynamicUpdate('issues', picked, 2);
   const r = await q(`UPDATE issues SET ${upd.set},updated_at=NOW() WHERE id=ANY($1) RETURNING *`, [ids, ...upd.vals]);
@@ -1660,8 +1705,8 @@ app.delete('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
   const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
   if (!field) return res.status(404).json({ error: 'Field not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, field.space_id, 'custom_field.manage'))) return;
-  if (field.is_builtin && field.field_key === 'title') {
-    return res.status(400).json({ error: 'Title is a required built-in field and cannot be removed' });
+  if (field.is_builtin && ['title', 'type', 'priority'].includes(field.field_key)) {
+    return res.status(400).json({ error: 'This is a required built-in field and cannot be removed' });
   }
   await q('DELETE FROM issue_field_values WHERE field_id=$1', [req.params.id]);
   await q('DELETE FROM custom_fields WHERE id=$1', [req.params.id]);
@@ -2006,14 +2051,19 @@ app.get('/api/reports/bugs/:sprintId', requireAuth, wrap(async (req, res) => {
   const sprint = (await q('SELECT space_id FROM sprints WHERE id=$1', [sid])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'report.view'))) return;
+  // "Critical" = this space's most-severe configured priority (list order is
+  // severity order, migration 016) — not the literal string 'highest', which
+  // an admin may have renamed or reordered.
+  const priorityOpts = await getConfiguredOptions(q, sprint.space_id, 'priority');
+  const criticalPriority = priorityOpts[0] || 'highest';
   const r = (await q(`
     SELECT
       COUNT(*) FILTER (WHERE status!='Done')::int AS open_bugs,
       COUNT(*) FILTER (WHERE status='Done')::int AS closed_bugs,
       COUNT(*)::int AS total_bugs,
-      COUNT(*) FILTER (WHERE priority='highest')::int AS critical_bugs
+      COUNT(*) FILTER (WHERE priority=$2)::int AS critical_bugs
     FROM issues WHERE sprint_id=$1 AND type='bug' AND deleted_at IS NULL
-  `, [sid])).rows[0];
+  `, [sid, criticalPriority])).rows[0];
   res.json(r);
 }));
 
@@ -3083,7 +3133,13 @@ app.get([
 ], (req, res) => {
   res.sendFile(SPA_HTML);
 });
-app.get('/space/:key/:tab?', (req, res) => {
+app.get('/space/:key/:tab?/:subtab?', (req, res) => {
+  res.sendFile(SPA_HTML);
+});
+// Org Admin Settings' own sub-sections (/settings/user-management, etc.) —
+// same gap as /space/:key/:tab above: a hard refresh on a valid client-side
+// route 404'd because this list only had the bare parent path.
+app.get('/settings/:section', (req, res) => {
   res.sendFile(SPA_HTML);
 });
 

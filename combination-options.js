@@ -10,9 +10,6 @@ function normalizeCombinationLabel(s) {
     .trim();
 }
 
-var MESSAGE_KEYWORDS = ['slack', 'teams', 'team', 'chat', 'meta', 'viva'];
-var MAIL_KEYWORDS = ['gmail', 'outlook'];
-
 var COMBINATION_OPTIONS_RAW = [
   'Amazon S3 - SharePoint',
   'Amazon workdocs - NFS',
@@ -111,48 +108,19 @@ COMBINATION_OPTIONS_RAW.forEach(function (item) {
 });
 COMBINATION_OPTIONS.sort(function (a, b) { return a.localeCompare(b); });
 
-function partMatchesKeywords(part, keywords) {
-  var p = String(part || '').toLowerCase();
-  return keywords.some(function (k) { return p.indexOf(k) >= 0; });
-}
-
-/** Classify combination → Message | Email | Content (matches issues.product_type values). */
-function classifyCombination(option) {
-  var parts = String(option || '').split(' - ');
-  var src = (parts[0] || '').trim();
-  var dst = (parts[1] || src).trim();
-  if (partMatchesKeywords(src, MAIL_KEYWORDS) && partMatchesKeywords(dst, MAIL_KEYWORDS)) {
-    return 'Email';
-  }
-  if (partMatchesKeywords(src, MESSAGE_KEYWORDS) && partMatchesKeywords(dst, MESSAGE_KEYWORDS)) {
-    return 'Message';
-  }
-  return 'Content';
-}
-
-var COMBINATION_GROUPS = { Message: [], Email: [], Content: [] };
-COMBINATION_OPTIONS.forEach(function (opt) {
-  var cat = classifyCombination(opt);
-  if (!COMBINATION_GROUPS[cat]) COMBINATION_GROUPS[cat] = [];
-  COMBINATION_GROUPS[cat].push(opt);
-});
-Object.keys(COMBINATION_GROUPS).forEach(function (k) {
-  COMBINATION_GROUPS[k].sort(function (a, b) { return a.localeCompare(b); });
-});
-
-var PRODUCT_TYPES_WITH_COMBINATIONS = ['Message', 'Email', 'Content'];
-var PRODUCT_TYPE_LABELS = {
-  Message: 'Message Type',
-  Email: 'Mail Type',
-  Content: 'Content Type',
-  Manage: 'Manage',
-  Infra: 'Infra'
-};
-
+// Combination groups are entirely per-space and admin-configured (mirroring
+// whatever Product Type options that space has) -- a brand-new space starts
+// with NO groups at all, just this flat catalogue of known real-world values
+// as a starting point to pick from. There is no fixed Message/Email/Content
+// classification here any more (there used to be one, keyword-matched by
+// source/destination name into exactly those 3 buckets regardless of what
+// Product Types the space actually had -- removed because it silently
+// mis-seeded every new space's Combination field with the old hardcoded
+// shape, bypassing the real per-space admin configuration entirely).
 function buildCombinationOptionsPayload() {
   return {
     v: 2,
-    groups: COMBINATION_GROUPS,
+    groups: {},
     flat: COMBINATION_OPTIONS.slice()
   };
 }
@@ -160,18 +128,10 @@ function buildCombinationOptionsPayload() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = COMBINATION_OPTIONS;
   module.exports.normalizeCombinationLabel = normalizeCombinationLabel;
-  module.exports.classifyCombination = classifyCombination;
-  module.exports.COMBINATION_GROUPS = COMBINATION_GROUPS;
-  module.exports.PRODUCT_TYPES_WITH_COMBINATIONS = PRODUCT_TYPES_WITH_COMBINATIONS;
-  module.exports.PRODUCT_TYPE_LABELS = PRODUCT_TYPE_LABELS;
   module.exports.buildCombinationOptionsPayload = buildCombinationOptionsPayload;
 }
 if (typeof window !== 'undefined') {
   window.COMBINATION_OPTIONS = COMBINATION_OPTIONS;
   window.normalizeCombinationLabel = normalizeCombinationLabel;
-  window.classifyCombination = classifyCombination;
-  window.COMBINATION_GROUPS = COMBINATION_GROUPS;
-  window.PRODUCT_TYPES_WITH_COMBINATIONS = PRODUCT_TYPES_WITH_COMBINATIONS;
-  window.PRODUCT_TYPE_LABELS = PRODUCT_TYPE_LABELS;
   window.buildCombinationOptionsPayload = buildCombinationOptionsPayload;
 }

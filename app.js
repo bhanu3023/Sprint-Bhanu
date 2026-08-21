@@ -28,6 +28,7 @@ const S = {
   ywExcludeDone: false,
   awFilters: {
     type: [], status: [], priority: [], assignee: [], sprint: [],
+    productType: [], team: [], desc: '',
     createdFrom: '', createdTo: '',
     updatedFrom: '', updatedTo: '',
     dueDateFrom: '', dueDateTo: '',
@@ -112,8 +113,87 @@ function richTextMediaSignature(html) {
   return parts.join(';');
 }
 
+// Tag-name sequence only (no attributes/styles) -- a change here means pure
+// formatting changed (bold/bullet-list/heading applied to the same words)
+// even though normalizeRichTextForCompare's plain-text view sees no
+// difference at all. Without this, reformatting existing text and clicking
+// Save was a silent no-op: the button stayed clickable, the click handler's
+// own richTextHasMeaningfulChange re-check said "nothing changed", and the
+// old, unformatted text just stayed in the database.
+function richTextTagSignature(html) {
+  if (!html) return '';
+  var d = document.createElement('div');
+  d.innerHTML = String(html);
+  var tags = [];
+  d.querySelectorAll('*').forEach(function (el) { tags.push(el.tagName); });
+  return tags.join(',');
+}
+
+// ── Scoped undo/redo for rich-text editors ──────────────────
+// Native Ctrl+Z on contenteditable is not reliably scoped per element in
+// Chromium/Edge — with several contenteditable regions on one page (here:
+// Description, Fix Description, the comment box), the browser's own undo
+// history can be shared across all of them, so undoing inside the comment
+// box could pop a change from an entirely different field that was edited
+// (and already saved) earlier — reported as "Ctrl+Z in the comment box
+// reverts the description". Each field gets its own real, self-contained
+// undo/redo stack instead, and native undo/redo is blocked for these fields
+// entirely so the browser's shared history can never be reached from them.
+// Call again (safe/cheap) whenever an editor's content is freshly set (drawer
+// opened for a different issue, comment edit box (re)built) to reset the
+// stack to that content — the event bindings themselves attach only once.
+function attachScopedUndo(el) {
+  if (!el) return;
+  el._undoStack = [el.innerHTML];
+  el._redoStack = [];
+  if (el._scopedUndoBound) return;
+  el._scopedUndoBound = true;
+  function snapshot() {
+    var last = el._undoStack[el._undoStack.length - 1];
+    if (el.innerHTML === last) return;
+    el._undoStack.push(el.innerHTML);
+    if (el._undoStack.length > 50) el._undoStack.shift();
+    el._redoStack = [];
+  }
+  function placeCaretAtEnd() {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  el.addEventListener('input', function () {
+    clearTimeout(el._undoTimer);
+    el._undoTimer = setTimeout(snapshot, 350);
+  });
+  el.addEventListener('keydown', function (e) {
+    var mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    var key = e.key.toLowerCase();
+    var isUndo = key === 'z' && !e.shiftKey;
+    var isRedo = (key === 'z' && e.shiftKey) || key === 'y';
+    if (!isUndo && !isRedo) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(el._undoTimer);
+    snapshot(); // capture whatever was typed right before undo, so it isn't lost
+    if (isRedo) {
+      if (!el._redoStack.length) return;
+      el._undoStack.push(el._redoStack.pop());
+    } else {
+      if (el._undoStack.length <= 1) return;
+      el._redoStack.push(el._undoStack.pop());
+    }
+    el.innerHTML = el._undoStack[el._undoStack.length - 1];
+    placeCaretAtEnd();
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 function richTextHasMeaningfulChange(originalHtml, currentHtml) {
   if (normalizeRichTextForCompare(originalHtml) !== normalizeRichTextForCompare(currentHtml)) return true;
+  if (richTextTagSignature(originalHtml) !== richTextTagSignature(currentHtml)) return true;
   return richTextMediaSignature(originalHtml) !== richTextMediaSignature(currentHtml);
 }
 
@@ -145,11 +225,6 @@ function updateDrawerDescEditorState(editorId, originalHtml) {
 function markDrawerDescDirty(editorId) {
   var origKey = editorId === 'drawerDesc' ? '_drawerDescOriginalHtml' : '_drawerFixDescOriginalHtml';
   updateDrawerDescEditorState(editorId, window[origKey] || '');
-}
-
-function getPtComboTypesNeedingCombination() {
-  return (typeof window !== 'undefined' && window.PRODUCT_TYPES_WITH_COMBINATIONS)
-    || ['Message', 'Email', 'Content'];
 }
 
 // Maps a built-in field_key to how to read its value in the drawer and on a
@@ -264,15 +339,13 @@ function validateIssueForDone(issueOrId) {
   // Combination field was removed from being unable to reach Done at all
   // (the old check read an empty picker and always reported Product Type missing).
   if (comboMode) {
+    var meta = findCombinationFieldMeta(spaceId);
     var comboVal = null;
-    if (!useDrawer && issue) {
-      var meta = findCombinationFieldMeta(spaceId);
-      if (meta && meta.id) {
-        var cfv = (S.data.issue_field_values || []).find(function (v) {
-          return String(v.issue_id) === String(issue.id) && String(v.field_id) === String(meta.id);
-        });
-        comboVal = cfv ? cfv.value : null;
-      }
+    if (!useDrawer && issue && meta && meta.id) {
+      var cfv = (S.data.issue_field_values || []).find(function (v) {
+        return String(v.issue_id) === String(issue.id) && String(v.field_id) === String(meta.id);
+      });
+      comboVal = cfv ? cfv.value : null;
     }
     var sel = useDrawer
       ? (_drawerPtComboSel || readPtComboSelectionFromContainer($('drawerCombinationField')))
@@ -280,8 +353,13 @@ function validateIssueForDone(issueOrId) {
     if (!sel || !sel.productTypes || !sel.productTypes.length) {
       missing.push('Product Type');
     } else {
+      // A type only REQUIRES picking a combination if this space actually has
+      // at least one configured for it -- every type has its own group now
+      // (see getCombinationsForProductType), and one an admin hasn't filled
+      // in yet has nothing valid to select, so it shouldn't block Done on a
+      // field with no real options.
       var needsCombo = sel.productTypes.some(function (t) {
-        return productTypeHasCombinations(t) || productTypeUsesAllCombinations(t);
+        return getCombinationsForProductType(t, meta).length > 0;
       });
       if (needsCombo && (!sel.combinations || !sel.combinations.length)) missing.push('Combination');
     }
@@ -1051,7 +1129,7 @@ function closeDrawer() {
   stopDrawerLiveSync();
   window._drawerPending = {};
   if (window.history.length > 1 && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
-    window.history.back();
+    _goBackOnce();
     return;
   }
   _closeIssueDrawer();
@@ -1112,7 +1190,6 @@ window.goBackToSavedPage = goBackToSavedPage;
 // Opens an issue in a new browser tab
 function openIssuePage(issueId, opts) {
   opts = opts || {};
-  collapseSpaceSubnav();
   if (!opts.skipHistory) {
     S._prevView = S.currentView;
     S._prevTab = S.currentTab;
@@ -1122,10 +1199,39 @@ function openIssuePage(issueId, opts) {
     S._prevScrollY = window.scrollY;
     S._issueReturnUrl = window.location.pathname + window.location.search;
   }
+  // goBackFromIssue() relies on window.history.back()/popstate, which has an
+  // unresolved intermittent issue reported specifically for tickets opened
+  // from All Work (not reproducible in automated testing so far). For that
+  // one entry point, this button is rewired to navigate straight back to
+  // All Work directly -- no history.back(), no popstate, so whatever that
+  // issue is, it can't apply. (The ✕ close button isn't a usable fallback
+  // here: body.issue-page .drawer-close-btn is CSS-hidden by design in this
+  // full-page ticket view, this button is the only in-app way out.)
+  var backBtn = $('drawerBackBtn');
+  if (backBtn) {
+    if (S._prevTab === 'allwork') {
+      backBtn.onclick = function () { closeIssueFromAllWork(); };
+    } else {
+      backBtn.onclick = function () { goBackFromIssue(); };
+    }
+  }
   var issueObj = (S.data.issues || []).find(function(i){ return i.id == issueId; });
   var issueKey = issueObj ? issueObj.key : issueId;
+  // Leave the sidebar's expanded space submenu as it is rather than collapsing
+  // it (used to call collapseSpaceSubnav() here unconditionally) -- if we
+  // already know this issue's space, make sure THAT space's menu is the one
+  // showing; openDrawer does the same once the full issue loads, for the case
+  // where the issue wasn't in the local cache yet.
+  if (issueObj && issueObj.space_id) mountSpaceSubnav(issueObj.space_id, S.currentTab);
   if (!opts.skipHistory) {
-    window.history.pushState({ issueId: issueId, returnUrl: S._issueReturnUrl }, '', '/?issue=' + encodeURIComponent(issueKey));
+    // &from=<tab-slug> so a hard refresh on this ticket page can still recover
+    // which tab it was opened from (S._prevTab/currentTab are in-memory JS
+    // state, gone on reload) -- without it, the boot deep-link path had no way
+    // to know the real origin and always assumed Backlog, so "Back" after a
+    // refresh sent an All-Work-opened ticket to Backlog & Sprints instead.
+    var fromSlug = (S.currentView === 'space' && S.currentTab) ? (SPACE_TAB_TO_SLUG[S.currentTab] || '') : '';
+    var issueUrl = '/?issue=' + encodeURIComponent(issueKey) + (fromSlug ? '&from=' + fromSlug : '');
+    window.history.pushState({ issueId: issueId, returnUrl: S._issueReturnUrl }, '', issueUrl);
   }
   document.body.classList.add('issue-page');
   openDrawer(issueId);
@@ -1184,6 +1290,20 @@ var SPRINT_STATUS_COLORS = {
   planning: '#6b7280', active: '#3b82f6', completed: '#10b981'
 };
 
+// Type/priority are admin-configurable per space (migration 016) — an admin
+// can add a value with no entry in PRIORITY_COLORS/badge-type-* CSS. Rather
+// than every such value collapsing to the same flat gray (indistinguishable
+// on a chart, invisible as a badge with no background at all), derive a
+// stable color from the string itself so new values still read as distinct.
+function _hashHue(v) {
+  var s = String(v || ''), h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+function fallbackAccentColor(v) { return 'hsl(' + _hashHue(v) + ',65%,45%)'; }
+function fallbackBadgeBg(v) { return 'hsl(' + _hashHue(v) + ',70%,93%)'; }
+function fallbackBadgeText(v) { return 'hsl(' + _hashHue(v) + ',60%,32%)'; }
+
 // ═══════════════════════════════════════════════════════════
 // HTML BADGE / AVATAR HELPERS
 // ═══════════════════════════════════════════════════════════
@@ -1210,7 +1330,7 @@ function priorityBadge(priority, noCaret) {
   var colors = {
     highest: '#dc2626', high: '#ef4444', medium: '#f59e0b', low: '#3b82f6', lowest: '#6b7280'
   };
-  var color = colors[priority] || '#6b7280';
+  var color = colors[priority] || fallbackAccentColor(priority);
   // No margin-top nudge on the caret — the flex container centres it, and the
   // nudge left it sitting a few pixels below the label.
   var caret = noCaret ? ''
@@ -1233,6 +1353,24 @@ function typeIcon(type) {
 
 function typeLabel(type) {
   return cap(type || 'task');
+}
+
+// badge-type-<type> in styles.css only has rules for the original 5 types --
+// an admin-added type has no matching class, and plain .badge-type has no
+// background/color of its own, so the badge would render as invisible text.
+// Known types keep the real CSS classes (best visual quality); anything else
+// gets an inline-style fallback so it's still a readable, distinct pill.
+function applyTypeBadgeStyle(el, type) {
+  if (!el) return;
+  if (TYPE_ICONS[type]) {
+    el.className = 'badge badge-type badge-type-' + type;
+    el.style.background = '';
+    el.style.color = '';
+  } else {
+    el.className = 'badge badge-type';
+    el.style.background = fallbackBadgeBg(type);
+    el.style.color = fallbackBadgeText(type);
+  }
 }
 
 function sprintStatusBadge(status) {
@@ -1656,20 +1794,40 @@ async function init() {
             if (S._prevSpace === undefined || S._prevSpace === null) S._prevSpace = S.currentSpace;
             S.currentSpace = iss.space_id;
             S.currentView = 'space';
-            S.currentTab = 'backlog';
+            // &from=<tab-slug> (set by openIssuePage when the ticket was
+            // originally opened) survives a hard refresh; without it there was
+            // no way to recover which tab this was opened from, so it always
+            // fell back to Backlog even for a ticket opened from All Work.
+            var fromSlug = new URLSearchParams(window.location.search).get('from');
+            var bootTab = SPACE_SLUG_TO_TAB[fromSlug] || 'backlog';
+            S.currentTab = bootTab;
             var space = getSpace(iss.space_id);
             if (space) {
-              // $('spaceNav').removeAttribute('hidden'); // Already have top nav
-              // Removed: navSection hiding - keep visible
-              qsa('.space-item').forEach(function(el) {
-                el.classList.toggle('active', el.dataset.spaceId === iss.space_id);
-              });
+              // mountSpaceSubnav (not just toggling .active) so the sidebar's
+              // Summary/Backlog/Active Sprint/etc submenu actually exists in the
+              // DOM. Without it, S.currentSpace/currentView already claimed
+              // "in this space" while the subnav was never inserted, so the
+              // next real click on this space item saw "already there" and
+              // toggled it CLOSED (navigateTo('home')) instead of opening it —
+              // the reported "needs a second click to open" bug.
+              mountSpaceSubnav(iss.space_id, bootTab);
               qsa('.nav-item[data-tab]').forEach(function(el) {
-                el.classList.toggle('active', el.dataset.tab === 'backlog');
+                el.classList.toggle('active', el.dataset.tab === bootTab);
               });
             }
           }
         } catch(_) {}
+        // openIssuePage normally wires this button's onclick -- this boot path
+        // calls openDrawer directly (the URL is already the deep link, nothing
+        // to push), so it has to be wired here too or the button is dead.
+        var bootBackBtn = $('drawerBackBtn');
+        if (bootBackBtn) {
+          if (S.currentTab === 'allwork') {
+            bootBackBtn.onclick = function () { closeIssueFromAllWork(); };
+          } else {
+            bootBackBtn.onclick = function () { goBackFromIssue(); };
+          }
+        }
         openDrawer(issueParam);
         setTimeout(function() {
           var key = $('drawerKey') && $('drawerKey').textContent;
@@ -1982,13 +2140,36 @@ function getSpaceByKey(key) {
   }) || null;
 }
 
-function spacePath(spaceId, tab) {
+// Space Settings' own sub-tabs (General/People/Custom Fields/Deleted Items/
+// Reports) previously shared one URL no matter which was open — this gives
+// each its own path segment, same pattern as SPACE_TAB_TO_SLUG above.
+var SETTINGS_TAB_TO_SLUG = {
+  general: '', people: 'people', customfields: 'custom-fields',
+  deleted: 'deleted', reports: 'reports'
+};
+var SETTINGS_SLUG_TO_TAB = {
+  '': 'general', people: 'people', 'custom-fields': 'customfields',
+  deleted: 'deleted', reports: 'reports'
+};
+// Same gap, same fix, for MBR's own sub-tabs (Overview/Comparison Trends/Achievements).
+var MBR_TAB_TO_SLUG = { overview: '', comparison: 'comparison', achievements: 'achievements' };
+var MBR_SLUG_TO_TAB = { '': 'overview', comparison: 'comparison', achievements: 'achievements' };
+
+function spacePath(spaceId, tab, subTab) {
   var sp = getSpace(spaceId) || getSpaceByKey(spaceId);
   if (!sp || !sp.key) return '/';
   tab = tab || 'summary';
   var slug = SPACE_TAB_TO_SLUG[tab] || 'summary';
   if (slug === 'summary') return '/space/' + encodeURIComponent(sp.key);
-  return '/space/' + encodeURIComponent(sp.key) + '/' + slug;
+  var base = '/space/' + encodeURIComponent(sp.key) + '/' + slug;
+  if (tab === 'space-settings') {
+    var subSlug = SETTINGS_TAB_TO_SLUG[subTab || _settingsActiveTab];
+    if (subSlug) base += '/' + subSlug;
+  } else if (tab === 'mbr') {
+    var mSlug = MBR_TAB_TO_SLUG[subTab || _mbrActiveTab];
+    if (mSlug) base += '/' + mSlug;
+  }
+  return base;
 }
 
 function yourWorkPath(tab, opts) {
@@ -1998,6 +2179,16 @@ function yourWorkPath(tab, opts) {
   return tab === 'assigned' ? '/my-work' : '/my-work/' + tab;
 }
 
+// Org Admin Settings' left-nav sections previously all shared /settings no
+// matter which was open — same gap as Space Settings/MBR above. Slugs match
+// the section keys themselves (already kebab-case) so there's no separate
+// naming to keep in sync; org-general is the default (empty slug).
+var ADMIN_SECTIONS_WITH_URL = [
+  'org-general', 'org-security', 'org-notifications', 'user-management',
+  'roles-permissions', 'all-spaces', 'global-custom-fields', 'email-settings',
+  'audit-log', 'deleted-tickets'
+];
+
 function appPathForView(view, extras) {
   extras = extras || {};
   if (view === 'yourwork') return yourWorkPath(extras.yourWorkTab || S.yourWorkTab);
@@ -2006,7 +2197,10 @@ function appPathForView(view, extras) {
   if (view === 'global-reports') return '/reports';
   if (view === 'worklog-report') return '/work-log';
   if (view === 'product-roadmap') return '/roadmap';
-  if (view === 'settings') return '/settings';
+  if (view === 'settings') {
+    var section = extras.section || _adminSection;
+    return (section && section !== 'org-general') ? '/settings/' + section : '/settings';
+  }
   return '/';
 }
 
@@ -2043,13 +2237,23 @@ function parseAppRoute() {
   var path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
   var issueKey = new URLSearchParams(window.location.search).get('issue');
   if (issueKey) return { view: 'issue', issueKey: issueKey };
-  var spaceMatch = path.match(/^\/space\/([^/]+)(?:\/([^/]+))?$/i);
+  var spaceMatch = path.match(/^\/space\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/i);
   if (spaceMatch) {
-    return {
+    var spaceTab = SPACE_SLUG_TO_TAB[spaceMatch[2]] || 'summary';
+    var route = {
       view: 'space',
       spaceKey: decodeURIComponent(spaceMatch[1]),
-      tab: SPACE_SLUG_TO_TAB[spaceMatch[2]] || 'summary'
+      tab: spaceTab
     };
+    // Third segment only means something under /settings/<sub-tab> or
+    // /mbr/<sub-tab> — a stray extra segment anywhere else (or an unrecognized
+    // sub-tab slug) falls back to the default sub-tab rather than a broken route.
+    if (spaceTab === 'space-settings' && spaceMatch[3] != null) {
+      route.settingsSubTab = SETTINGS_SLUG_TO_TAB[spaceMatch[3]] || 'general';
+    } else if (spaceTab === 'mbr' && spaceMatch[3] != null) {
+      route.mbrSubTab = MBR_SLUG_TO_TAB[spaceMatch[3]] || 'overview';
+    }
+    return route;
   }
   if (path === '/my-work/open') return { view: 'yourwork', yourWorkTab: 'assigned', openOnly: true };
   if (path === '/my-work' || path === '/my-work/assigned') return { view: 'yourwork', yourWorkTab: 'assigned' };
@@ -2060,6 +2264,10 @@ function parseAppRoute() {
   if (path === '/work-log') return { view: 'worklog-report' };
   if (path === '/roadmap') return { view: 'product-roadmap' };
   if (path === '/settings') return { view: 'settings' };
+  var settingsMatch = path.match(/^\/settings\/([^/]+)$/i);
+  if (settingsMatch && ADMIN_SECTIONS_WITH_URL.indexOf(settingsMatch[1]) >= 0) {
+    return { view: 'settings', adminSection: settingsMatch[1] };
+  }
   return { view: 'home' };
 }
 
@@ -2096,12 +2304,15 @@ function applyRouteFromUrl(opts) {
   if (route.view === 'space') {
     var sp = getSpaceByKey(route.spaceKey);
     if (sp) {
-      navigateToSpace(sp.id, route.tab || 'summary', { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+      navigateToSpace(sp.id, route.tab || 'summary', {
+        skipUrlUpdate: true, replaceUrl: opts.replaceUrl,
+        settingsSubTab: route.settingsSubTab, mbrSubTab: route.mbrSubTab
+      });
       return true;
     }
   }
   if (route.view !== 'home') {
-    navigateTo(route.view, { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
+    navigateTo(route.view, { skipUrlUpdate: true, replaceUrl: opts.replaceUrl, adminSection: route.adminSection });
     return true;
   }
   navigateTo('home', { skipUrlUpdate: true, replaceUrl: opts.replaceUrl });
@@ -2183,7 +2394,7 @@ function navigateTo(view, opts) {
   else if (view === 'spaces') renderSpacesView();
   else if (view === 'worklog-report') renderWorklogReport();
   else if (view === 'product-roadmap') renderProductRoadmap();
-  else if (view === 'settings') { document.body.classList.add('settings-active'); collapseSidebarForSettings(); renderAdminSettings('org-general'); }
+  else if (view === 'settings') { document.body.classList.add('settings-active'); collapseSidebarForSettings(); renderAdminSettings(opts.adminSection || 'org-general'); }
   else if (view === 'global-reports') renderGlobalReports();
 }
 
@@ -2268,6 +2479,8 @@ function navigateToSpace(spaceId, tab, opts) {
   mountSpaceSubnav(spaceId, tab);
   saveNavState();
 
+  if (tab === 'space-settings' && opts.settingsSubTab) _settingsActiveTab = opts.settingsSubTab;
+  if (tab === 'mbr' && opts.mbrSubTab) _mbrActiveTab = opts.mbrSubTab;
   if (!opts.skipUrlUpdate) syncAppUrl({ replace: opts.replaceUrl });
 
   renderTab(tab, { skipUrlUpdate: true });
@@ -2320,6 +2533,11 @@ function renderTab(tab, opts) {
         S._dataLoadedSpace = S.currentSpace;
       }
       await _initAwMultiSelects();
+      // Restores whatever was last saved for THIS space -- safe to do on every
+      // entry into the tab, not just the first: _awSaveFilterState() runs on
+      // every filter change (inside renderAllWork itself), so localStorage is
+      // always already current and this never clobbers an unsaved edit.
+      _awLoadFilterState();
       renderAllWork();
     })(); break;
     case 'calendar': renderCalendar(); break;
@@ -2454,16 +2672,18 @@ function renderSidebar() {
     ? spaces.map(spaceNavItem).join('')
     : '<p class="text-muted sidebar-empty">No spaces</p>';
 
-  // Bind space clicks — open sub-nav for selected space only
+  // Bind space clicks — always opens that space's menu, never a "toggle closed
+  // to Home" on a second click. That toggle used to fire incorrectly while
+  // viewing an issue too: opening a ticket does not change S.currentSpace/
+  // currentView (they still point at whatever space/tab was open underneath),
+  // so clicking that same space while a ticket was open satisfied the "already
+  // here" check and sent the user to Home instead of opening the menu -- the
+  // reported "first click goes home, second click opens the menu" bug.
   qsa('.space-item').forEach(function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
       var spaceId = el.dataset.spaceId;
-      if (String(S.currentSpace) === String(spaceId) && S.currentView === 'space') {
-        navigateTo('home');
-      } else {
-        navigateToSpace(spaceId, 'summary');
-      }
+      navigateToSpace(spaceId, 'summary');
     });
   });
 
@@ -2792,25 +3012,31 @@ function _drawSpacesGrid(spaces) {
 var _ywCache = null; // { assigned, reported, recent }
 
 var YW_FILTER_DEFS = {
-  type: {
-    opts: [
-      { v: 'task', l: 'Task' }, { v: 'bug', l: 'Bug' }, { v: 'story', l: 'Story' },
-      { v: 'epic', l: 'Epic' }, { v: 'subtask', l: 'Subtask' }
-    ]
-  },
+  // status is a true fixed workflow (issue-state-machine.md) -- type/priority
+  // are NOT: they're per-space configurable (migration 016), and Your Work
+  // spans every space the user belongs to, so there's no single space to read
+  // an option list from. Same "distinct values actually on tickets" approach
+  // used for the All Work filters — see _ywGetTypeOrPriorityOpts below.
   status: {
     opts: [
       { v: 'To Do', l: 'To Do' }, { v: 'In Progress', l: 'In Progress' },
       { v: 'In Review', l: 'In Review' }, { v: 'Done', l: 'Done' }, { v: 'Blocked', l: 'Blocked' }
     ]
-  },
-  priority: {
-    opts: [
-      { v: 'highest', l: 'Highest' }, { v: 'high', l: 'High' }, { v: 'medium', l: 'Medium' },
-      { v: 'low', l: 'Low' }, { v: 'lowest', l: 'Lowest' }
-    ]
   }
 };
+
+function _ywGetTypeOrPriorityOpts(key, issues) {
+  var seen = {};
+  var opts = [];
+  (issues || []).forEach(function (iss) {
+    var v = iss[key];
+    if (!v || seen[v]) return;
+    seen[v] = true;
+    opts.push({ v: v, l: cap(v) });
+  });
+  opts.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return opts;
+}
 
 function _ywGetSpaceOpts(issues) {
   var seen = {};
@@ -2862,6 +3088,7 @@ function _ywGetKeyOpts(issues) {
 function _ywGetFilterOpts(key, issues) {
   if (key === 'space') return _ywGetSpaceOpts(issues);
   if (key === 'key') return _ywGetKeyOpts(issues);
+  if (key === 'type' || key === 'priority') return _ywGetTypeOrPriorityOpts(key, issues);
   return (YW_FILTER_DEFS[key] && YW_FILTER_DEFS[key].opts) || [];
 }
 
@@ -4939,11 +5166,13 @@ function renderSummary() {
     { label: 'In Review', count: inRev, color: STATUS_COLORS['In Review'] },
     { label: 'Done', count: done, color: STATUS_COLORS['Done'] }
   ];
-  var prioGroups = ['highest', 'high', 'medium', 'low', 'lowest'].map(function (p) {
+  // Space's own configured priority list, not the fixed 5 -- an admin-added
+  // priority value's issues used to be silently excluded from this chart.
+  var prioGroups = getIssuePriorityOptionsForSpace(S.currentSpace).map(function (o) {
     return {
-      label: cap(p),
-      count: issues.filter(function (iss) { return iss.priority === p; }).length,
-      color: PRIORITY_COLORS[p]
+      label: o.l,
+      count: issues.filter(function (iss) { return iss.priority === o.v; }).length,
+      color: PRIORITY_COLORS[o.v] || fallbackAccentColor(o.v)
     };
   });
 
@@ -5905,7 +6134,11 @@ window._showReportIssues = function(key) {
     row.onclick = function() {
       var id = row.dataset.id;
       close();
-      openDrawer(id);
+      // openIssuePage (not openDrawer directly) so this push a history entry
+      // like every other drawer-opening path — opening straight via openDrawer
+      // only does a replaceState internally, so Back from here used to skip
+      // past the drawer entirely instead of closing it first.
+      openIssuePage(id);
     };
   });
 };
@@ -7112,7 +7345,7 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
   var canEditSpillover = !!data.can_edit_spillover;
   var tableRows = issues.map(function(i) {
     var sc = SCOLORS[i.status] || '#42526e';
-    var pc = PCOLORS[i.priority] || '#6b7280';
+    var pc = PCOLORS[i.priority] || fallbackAccentColor(i.priority);
     var assigneeName = i.assignee ? esc(i.assignee.name) : '<span style="color:var(--text3)">Unassigned</span>';
     var typeIcon = {story:'◈',task:'☑',bug:'⚡',epic:'⬡',subtask:'⊡'}[i.type] || '◈';
     return '<tr style="border-bottom:1px solid var(--border)">' +
@@ -7274,6 +7507,7 @@ async function renderMBR(subTab) {
 
 window._switchMbrTab = function (tab) {
   renderMBR(tab);
+  syncAppUrl();
 };
 
 // Sprint names in this app tend to be long descriptive titles ("Sprint-2:
@@ -8129,22 +8363,117 @@ var AW_FILTER_FIELDS = [
     fromKey: 'dueDateFrom',   toKey: 'dueDateTo' },
   { key: 'startdate', label: 'Start Date', kind: 'date',
     fromKey: 'startDateFrom', toKey: 'startDateTo' },
+  // Same reasoning as the columns fix: Product Type, Team and Description are
+  // builtin fields whose real value lives on the issue row itself, never in
+  // issue_field_values, so filtering them through the generic cf_<id> path
+  // (like _awGetCFFilterFields() used to offer) would silently match nothing.
+  // opts for productType/team are filled in by _awLoadDynamicOpts() from the
+  // space's own custom_fields.options, the same source _awGetCFFilterFields()
+  // would have used -- so this doesn't hardcode a fixed option list that
+  // could drift from what's actually configured for the space.
+  { key: 'productType', label: 'Product Type', kind: 'multi', opts: [] },
+  { key: 'team',         label: 'Team',          kind: 'multi', opts: [] },
+  { key: 'desc',         label: 'Description',   kind: 'cftext' },
 ];
 
 // Which fields are currently shown as rows in the panel
 var _awActiveFields = [];
 
-// Build filter field defs from space custom fields
+// Persist the All Work advanced filters (which fields are shown, plus every
+// value including custom-field ones like Combination) to localStorage, keyed
+// per space. Before this, the whole thing -- _awActiveFields and S.awFilters
+// -- lived only in memory, so a hard refresh reset it to defaults exactly
+// like starting the app fresh; there was never anywhere it survived to.
+function _awFilterStorageKey() {
+  return S.currentSpace ? ('aw-filters-' + S.currentSpace) : null;
+}
+function _awSaveFilterState() {
+  var key = _awFilterStorageKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ activeFields: _awActiveFields, filters: S.awFilters }));
+  } catch (e) { /* storage unavailable/full -- filters just won't persist this time */ }
+}
+function _awLoadFilterState() {
+  var key = _awFilterStorageKey();
+  if (!key) return;
+  try {
+    var raw = localStorage.getItem(key);
+    if (!raw) return;
+    var parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.activeFields)) _awActiveFields = parsed.activeFields;
+    if (parsed && parsed.filters && typeof parsed.filters === 'object') {
+      // Merge onto the default shape rather than replacing outright, so a
+      // stored blob from before some field existed still has every key the
+      // rest of the filter code expects to find.
+      S.awFilters = Object.assign({
+        type: [], status: [], priority: [], assignee: [], sprint: [],
+        productType: [], team: [], desc: '',
+        createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '',
+        dueDateFrom: '', dueDateTo: '', startDateFrom: '', startDateTo: ''
+      }, parsed.filters);
+    }
+  } catch (e) { /* corrupt/unavailable storage -- fall back to current defaults silently */ }
+}
+
+// Distinct values ACTUALLY saved for one custom multi-select field, scoped to
+// issues in the current space. Combination stores a structured
+// {combinations:[...], productTypes:[...]} value (or a bare string for the
+// simple single-combination case) rather than the plain comma-joined string
+// every other multi_select custom field uses -- see the multi-select custom
+// field filter block in renderAllWork() for that plain-comma-joined
+// convention -- so it's parsed with parsePtComboSelection and only its real
+// .combinations are counted; productTypes is a different field entirely and
+// has nothing to do with this one.
+function _awDistinctCFOptions(field) {
+  var spaceIssueIds = {};
+  getSpaceIssues(S.currentSpace).forEach(function (i) { spaceIssueIds[i.id] = true; });
+  var seen = {}, out = [];
+  function add(v) {
+    if (v == null) return;
+    v = String(v).trim();
+    if (!v || seen[v]) return;
+    seen[v] = true;
+    out.push(v);
+  }
+  (S.data.issue_field_values || []).forEach(function (fv) {
+    if (fv.field_id != field.id || !fv.value || !spaceIssueIds[fv.issue_id]) return;
+    if (isCombinationField(field)) {
+      parsePtComboSelection('', fv.value).combinations.forEach(add);
+    } else {
+      String(fv.value).split(',').forEach(add);
+    }
+  });
+  return out.sort(function (a, b) { return a.localeCompare(b); }).map(function (v) { return { v: v, l: v }; });
+}
+
+// Build filter field defs from space custom fields. Excludes builtin fields
+// (Product Type, Team, Description, etc. -- see DONE_BUILTIN_READERS) for the
+// same reason _awGetCFColumns() does: their real value lives on the issue row
+// itself, never in issue_field_values, so a cf_<id> filter for one of them
+// would silently match nothing no matter what the user picks. Those three now
+// have proper native entries in AW_FILTER_FIELDS instead. Genuinely custom
+// fields like Combination, which really do store in issue_field_values, are
+// unaffected.
 function _awGetCFFilterFields() {
   return (S.data.custom_fields || [])
-    .filter(function(f){ return f.space_id == S.currentSpace; })
+    .filter(function(f){ return f.space_id == S.currentSpace && !DONE_BUILTIN_READERS[f.field_key]; })
     .map(function(f) {
       var kind = (f.field_type === 'select' || f.field_type === 'multi_select') ? 'multi'
                : (f.field_type === 'date') ? 'cfdate'
                : 'cftext';
       var fd = { key: 'cf_' + f.id, label: f.name, kind: kind, cfId: f.id, cfType: f.field_type };
       if (kind === 'multi') {
-        fd.opts = (Array.isArray(f.options) ? f.options : []).map(function(o){ return {v: o, l: o}; });
+        // Distinct values ACTUALLY saved on this space's issues for this
+        // field, not the field's configured option list -- same reasoning as
+        // _awDistinctOpts above: a configured option nobody's used yet would
+        // otherwise show up as filterable-but-matches-nothing, and the config
+        // can drift from reality over time. This object is rebuilt fresh on
+        // every call (see _awGetFieldDef), so there's nowhere to persist a
+        // dynamically-loaded value the way the static AW_FILTER_FIELDS entries
+        // do -- computing it inline here every time is the correct fix rather
+        // than a workaround.
+        fd.opts = _awDistinctCFOptions(f);
       }
       if (kind === 'cfdate') {
         fd.fromKey = 'cf_' + f.id + '_from';
@@ -8175,20 +8504,43 @@ function _awAnyActive() {
 }
 
 // Populate dynamic opts for assignee & sprint
+// Distinct values ACTUALLY present on this space's issues right now, for one
+// field. Deliberately not the DB's fixed enum, not the space's member/sprint
+// list, and not a custom field's configured options -- any of those three
+// can drift from what's really on tickets (an option nobody's used yet, a
+// member no ticket is assigned to, an option since removed from config but
+// still saved somewhere). extract(issue) returns an array of raw values found
+// on that issue (usually one, but product_type is a comma-joined multi-value
+// string); label(value) formats it for display, defaulting to the raw value.
+function _awDistinctOpts(extract, label) {
+  var seen = {}, out = [];
+  getSpaceIssues(S.currentSpace).forEach(function (iss) {
+    (extract(iss) || []).forEach(function (v) {
+      if (v == null || v === '') return;
+      var key = String(v);
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(v);
+    });
+  });
+  return out.map(function (v) { return { v: v, l: label ? label(v) : v }; })
+    .sort(function (a, b) { return String(a.l).localeCompare(String(b.l)); });
+}
+
 async function _awLoadDynamicOpts() {
-  var assigneeFd = _awGetFieldDef('assignee');
-  var sprintFd   = _awGetFieldDef('sprint');
-  try {
-    var members = await api('/api/spaces/' + S.currentSpace + '/members');
-    assigneeFd.opts = (members || []).map(function(m){ return {v: m.user_id, l: m.name}; });
-  } catch(_) {}
-  try {
-    var sprintRows = await api('/api/sprints?space_id=' + S.currentSpace);
-    sprintFd.opts = (sprintRows || []).map(function(sp){ return {v: sp.id, l: sp.name}; });
-  } catch(_) {
-    var sprints = (S.data.sprints || []).filter(function(sp){ return sp.space_id == S.currentSpace; });
-    sprintFd.opts = sprints.map(function(sp){ return {v: sp.id, l: sp.name}; });
-  }
+  _awGetFieldDef('type').opts     = _awDistinctOpts(function(i){ return [i.type]; }, typeLabel);
+  _awGetFieldDef('status').opts   = _awDistinctOpts(function(i){ return [i.status]; });
+  _awGetFieldDef('priority').opts = _awDistinctOpts(function(i){ return [i.priority]; }, cap);
+  _awGetFieldDef('assignee').opts = _awDistinctOpts(function(i){ return [i.assignee_id]; }, function(v){
+    var u = findUser(v); return u ? u.name : v;
+  });
+  _awGetFieldDef('sprint').opts   = _awDistinctOpts(function(i){ return [i.sprint_id]; }, function(v){
+    var sp = (S.data.sprints || []).find(function(s){ return s.id == v; }); return sp ? sp.name : v;
+  });
+  _awGetFieldDef('productType').opts = _awDistinctOpts(function(i){
+    return (i.product_type || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+  });
+  _awGetFieldDef('team').opts = _awDistinctOpts(function(i){ return [i.team]; });
 }
 
 // Toggle the filter panel open/closed
@@ -8387,6 +8739,7 @@ window._awClearFilters = function() {
   if (srch) srch.value = '';
   S.awFilters = {
     type: [], status: [], priority: [], assignee: [], sprint: [],
+    productType: [], team: [], desc: '',
     createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '',
     dueDateFrom: '', dueDateTo: '', startDateFrom: '', startDateTo: ''
   };
@@ -8418,6 +8771,16 @@ var AW_ALL_COLUMNS = [
   { key: 'start_date',      label: 'Start Date',     sortCol: 'start_date',   def: false },
   { key: 'created_at',      label: 'Created',        sortCol: 'created_at',   def: false },
   { key: 'fix_description', label: 'Fix Description',sortCol: null,           def: false },
+  // These three had no native column at all -- only a generic cf_<id> one via
+  // _awGetCFColumns(), which reads issue_field_values. Product Type, Team and
+  // Description are builtin fields whose real value lives on the issue row
+  // itself (issues.product_type/team/description, per DONE_BUILTIN_READERS),
+  // never in issue_field_values, so that column always rendered "--" no
+  // matter how much real data existed. Reading the issue property directly
+  // instead, same as every other native column here already does.
+  { key: 'product_type',    label: 'Product Type',   sortCol: null,           def: false },
+  { key: 'team',            label: 'Team',            sortCol: null,           def: false },
+  { key: 'description',     label: 'Description',    sortCol: null,           def: false },
 ];
 var _AW_COL_STORE_KEY = 'sb_aw_cols';
 
@@ -8437,9 +8800,18 @@ function _awSaveVisibleCols(keys) {
   localStorage.setItem(_AW_COL_STORE_KEY, JSON.stringify(keys));
 }
 
-// Get custom field columns for current space
+// Get custom field columns for current space. Excludes any field whose
+// field_key is one of DONE_BUILTIN_READERS's keys -- those store their real
+// value directly on the issue row (issues.product_type, issues.team, etc.),
+// never in issue_field_values, so a cf_<id> column for one of them would
+// always render "--" and would just duplicate a column that already exists
+// natively above (or, for product_type/team/description, the native column
+// added above). Genuinely custom fields like Combination -- whose value
+// really does live in issue_field_values -- still come through normally.
 function _awGetCFColumns() {
-  var spaceFields = (S.data.custom_fields || []).filter(function(f){ return f.space_id == S.currentSpace; });
+  var spaceFields = (S.data.custom_fields || []).filter(function(f){
+    return f.space_id == S.currentSpace && !DONE_BUILTIN_READERS[f.field_key];
+  });
   return spaceFields.map(function(f){
     return { key: 'cf_' + f.id, label: f.name, sortCol: null, def: false, cfId: f.id };
   });
@@ -8482,13 +8854,19 @@ window._awToggleColKey = function(key, on) {
 S.allWorkSort = { col: 'key', dir: 'desc' };
 function renderAllWork(opts) {
   if (!opts || !opts.keepPage) S.allWorkPage = 1;
+  // Every filter mutator (_awAddField, _awRemoveField, _awMultiToggle,
+  // _awSetDate, _awSetCFText, _awClearFilters) calls renderAllWork() right
+  // after changing _awActiveFields/S.awFilters, so this is the one place that
+  // sees every change and can keep localStorage in sync with all of them.
+  _awSaveFilterState();
   var search = ($('allWorkSearch') ? $('allWorkSearch').value : '').toLowerCase().trim();
   var f = S.awFilters;
 
-  var anyFilter = search ||
-    f.type.length || f.status.length || f.priority.length || f.assignee.length || f.sprint.length ||
-    f.createdFrom || f.createdTo || f.updatedFrom || f.updatedTo ||
-    f.dueDateFrom || f.dueDateTo || f.startDateFrom || f.startDateTo;
+  // _awAnyActive() checks every ACTIVE field generically by kind, so unlike
+  // the fixed list this replaced, it correctly covers Product Type/Team/
+  // Description and any custom field (Combination) too -- filtering by only
+  // one of those used to leave the "Clear all" button hidden.
+  var anyFilter = _awAnyActive();
   var clearBtn = $('awClearFilters');
   if (clearBtn) clearBtn.style.display = anyFilter ? '' : 'none';
   var colBtn = $('awColBtn');
@@ -8508,6 +8886,20 @@ function renderAllWork(opts) {
   if (f.priority.length) issues = issues.filter(function(i) { return f.priority.indexOf(i.priority) >= 0; });
   if (f.assignee.length) issues = issues.filter(function(i) { return f.assignee.indexOf(i.assignee_id) >= 0; });
   if (f.sprint.length)   issues = issues.filter(function(i) { return f.sprint.indexOf(i.sprint_id) >= 0; });
+  // Product Type / Team / Description read straight off the issue row, same
+  // as the fields above -- see the AW_FILTER_FIELDS comment for why these
+  // aren't handled through the generic custom-field filter block below.
+  if (f.productType && f.productType.length) {
+    issues = issues.filter(function(i) {
+      var vals = (i.product_type || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+      return f.productType.some(function(a){ return vals.indexOf(a) >= 0; });
+    });
+  }
+  if (f.team && f.team.length) issues = issues.filter(function(i) { return f.team.indexOf(i.team) >= 0; });
+  if (f.desc) {
+    var descQ = f.desc.toLowerCase();
+    issues = issues.filter(function(i) { return (i.description || '').toLowerCase().indexOf(descQ) >= 0; });
+  }
   // Date range filters
   if (f.createdFrom)   issues = issues.filter(function(i) { return i.created_at && i.created_at.slice(0,10) >= f.createdFrom; });
   if (f.createdTo)     issues = issues.filter(function(i) { return i.created_at && i.created_at.slice(0,10) <= f.createdTo; });
@@ -8646,12 +9038,19 @@ function renderAllWork(opts) {
           case 'created_at':      cell = '<td onclick="' + nav + '">' + (fmtDateShort(iss.created_at) || '\u2014') + '</td>'; break;
           case 'reporter':        cell = '<td onclick="' + nav + '">' + (reporter ? esc(reporter.name) : '\u2014') + '</td>'; break;
           case 'fix_description': cell = '<td onclick="' + nav + '">' + (iss.fix_description ? esc(iss.fix_description.slice(0,60)) + (iss.fix_description.length>60?'…':'') : '\u2014') + '</td>'; break;
+          case 'product_type':    cell = '<td onclick="' + nav + '">' + (iss.product_type ? esc(iss.product_type.split(',').map(function(t){ return t.trim(); }).join(', ')) : '—') + '</td>'; break;
+          case 'team':             cell = '<td onclick="' + nav + '">' + (iss.team ? esc(iss.team) : '—') + '</td>'; break;
+          case 'description':      cell = '<td onclick="' + nav + '">' + (iss.description ? esc(iss.description.slice(0,60)) + (iss.description.length>60?'…':'') : '—') + '</td>'; break;
           default:
             // Custom field column (cf_<fieldId>)
             if (col.key.indexOf('cf_') === 0) {
               var cfId = col.cfId || col.key.replace('cf_','');
               var cfVal = (S.data.issue_field_values || []).find(function(v){ return v.issue_id == iss.id && v.field_id == cfId; });
-              cell = '<td onclick="' + nav + '">' + (cfVal && cfVal.value ? esc(cfVal.value) : '\u2014') + '</td>';
+              var cfField = (S.data.custom_fields || []).find(function(f){ return f.id == cfId; });
+              var cfDisplay = cfVal && cfVal.value
+                ? (isCombinationField(cfField) ? formatCombinationFieldDisplayValue(cfVal.value) : cfVal.value)
+                : '';
+              cell = '<td onclick="' + nav + '">' + (cfDisplay ? esc(cfDisplay) : '\u2014') + '</td>';
             } else {
               cell = '<td onclick="' + nav + '">\u2014</td>';
             }
@@ -8807,6 +9206,7 @@ function renderSpaceSettings(subTab) {
 window._switchSettingsTab = function (tab) {
   _settingsActiveTab = tab;
   renderSpaceSettings(tab);
+  syncAppUrl();
 };
 
 function renderSettingsGeneral(space) {
@@ -9235,7 +9635,10 @@ function formatFieldShowIn(field) {
 }
 
 function isLockedBuiltinField(field) {
-  return !!(field && field.is_builtin && field.field_key === 'title');
+  // Options are now freely editable on type/priority (migration 016), but the
+  // field itself must always exist — deleting it would leave the space with no
+  // way to set a value that Create Issue always shows as required.
+  return !!(field && field.is_builtin && ['title', 'type', 'priority'].indexOf(field.field_key) >= 0);
 }
 
 function isCombinationField(field) {
@@ -9300,10 +9703,6 @@ function readShowInFromForm() {
 // on a bug. `required_types` narrows is_required to the listed types.
 // An EMPTY or missing list means "every type", so every field that was already
 // required before this feature keeps behaving exactly the same.
-// Derived from ISSUE_TYPES so the checkbox list can never offer a type the
-// database would reject, or miss one that was added.
-var REQUIRED_TYPE_CHOICES = enumOpts(ISSUE_TYPES);
-
 function normalizeTypeList(list) {
   if (!Array.isArray(list)) return [];
   return list.map(function (t) { return String(t).toLowerCase().trim(); }).filter(Boolean);
@@ -9317,12 +9716,17 @@ function fieldRequiredForType(field, type) {
   return types.indexOf(String(type || '').toLowerCase().trim()) >= 0;
 }
 
-function renderRequiredTypeChoices(selected) {
+// Type is admin-configurable per space (migration 016) — the checkbox list
+// must reflect the SPACE's own current Type options, not the fixed 5, or a
+// newly-added type could never be selected here and a removed one would show
+// as a stale, unremovable checkbox.
+function renderRequiredTypeChoices(selected, spaceId) {
   var box = $('customFieldRequiredTypes');
   if (!box) return;
+  var choices = getIssueTypeOptionsForSpace(spaceId || S.currentSpace);
   var sel = normalizeTypeList(selected);
   var all = sel.length === 0;                     // unset shows as "all ticked"
-  box.innerHTML = REQUIRED_TYPE_CHOICES.map(function (c) {
+  box.innerHTML = choices.map(function (c) {
     var on = all || sel.indexOf(c.v) >= 0;
     return '<label><input type="checkbox" class="cf-req-type" value="' + c.v + '"' +
       (on ? ' checked' : '') + '> ' + c.l + '</label>';
@@ -9346,9 +9750,10 @@ function syncRequiredTypesVisibility() {
 
 function formatRequiredForTypes(field) {
   if (!field || !field.is_required) return 'No';
+  var choices = getIssueTypeOptionsForSpace(field.space_id);
   var types = normalizeTypeList(field.required_types);
-  if (!types.length || types.length === REQUIRED_TYPE_CHOICES.length) return 'Yes — all types';
-  var labels = REQUIRED_TYPE_CHOICES
+  if (!types.length || types.length === choices.length) return 'Yes — all types';
+  var labels = choices
     .filter(function (c) { return types.indexOf(c.v) >= 0; })
     .map(function (c) { return c.l; });
   return 'Yes — ' + (labels.length ? labels.join(', ') : 'no types');
@@ -9383,9 +9788,10 @@ function paintSettingsCustomFields(space) {
     var optionsDisplay = '\u2014';
     if (isCombinationField(f)) {
       var pg = parseCombinationFieldOptions(f);
-      optionsDisplay = 'Message: ' + (pg.groups.Message || []).length +
-        ', Mail: ' + (pg.groups.Email || []).length +
-        ', Content: ' + (pg.groups.Content || []).length;
+      var ptOpts = getProductTypeOptionsForSpace(space.id);
+      optionsDisplay = ptOpts.length
+        ? ptOpts.map(function (o) { return o.l + ': ' + (pg.groups[o.v] || []).length; }).join(', ')
+        : 'No Product Type options configured';
     } else if (f.is_builtin && (f.field_key === 'product_type' || f.field_key === 'team' || f.field_key === 'type' || f.field_key === 'priority')) {
       var optVals = normalizeCFOptions(f.options);
       optionsDisplay = optVals.length ? optVals.join(', ') : formatFieldOptionsForEditor(f);
@@ -9694,12 +10100,13 @@ function openCustomFieldModal(field) {
   var isBuiltin = !!(field && field.is_builtin);
   var isProductTypeBuiltin = field && isBuiltinProductTypeField(field);
   // Built-in selects whose choices are NOT ours to edit:
-  //   type, priority → fixed by CHECK constraints on the issues table, so a value
-  //                    added here can never be saved (the insert would fail);
-  //   sprint         → the choices come from the sprints table, not from options.
-  // The Options box was offered for all three even though nothing reads it — a
-  // dead control that invited an admin to configure something that cannot work.
-  var FIXED_OPTION_BUILTINS = ['type', 'priority', 'status', 'sprint'];
+  //   status  → the workflow state machine (.claude/rules/issue-state-machine.md)
+  //             hardcodes these 4 values and the transitions between them;
+  //   sprint  → the choices come from the sprints table, not from options.
+  // type/priority WERE in this list too, back when the issues table had a DB
+  // CHECK constraint pinning them to 5 fixed values each (migration 016 dropped
+  // it) — they're now configurable exactly like Team/Product Type.
+  var FIXED_OPTION_BUILTINS = ['status', 'sprint'];
   var optionsAreFixed = isBuiltin && FIXED_OPTION_BUILTINS.indexOf(field.field_key) >= 0;
   var canEditOptions = isCombo || isProductTypeBuiltin ||
     (isBuiltin && field.field_type === 'select' && !optionsAreFixed) ||
@@ -9710,20 +10117,15 @@ function openCustomFieldModal(field) {
     $('customFieldName').value = field.name || '';
     $('customFieldType').value = field.field_type || field.type || 'text';
     $('customFieldRequired').checked = !!(field.is_required || field.required);
-    renderRequiredTypeChoices(field.required_types);
+    renderRequiredTypeChoices(field.required_types, field.space_id);
     writeShowInToForm(field);
     if (isCombo) {
-      var parsed = parseCombinationFieldOptions(field);
-      $('cfComboMessage').value = (parsed.groups.Message || []).join('\n');
-      $('cfComboEmail').value = (parsed.groups.Email || []).join('\n');
-      $('cfComboContent').value = (parsed.groups.Content || []).join('\n');
       $('customFieldOptions').value = '';
     } else {
       $('customFieldOptions').value = formatFieldOptionsForEditor(field);
-      $('cfComboMessage').value = '';
-      $('cfComboEmail').value = '';
-      $('cfComboContent').value = '';
     }
+    // renderCombinationGroupEditors runs from toggleCustomFieldOptions below,
+    // which is always called at the end of this function with the real field.
   } else {
     $('customFieldModalTitle').textContent = 'Add Custom Field';
     $('customFieldId').value = '';
@@ -9732,9 +10134,6 @@ function openCustomFieldModal(field) {
     $('customFieldRequired').checked = false;
     renderRequiredTypeChoices([]);
     $('customFieldOptions').value = '';
-    $('cfComboMessage').value = '';
-    $('cfComboEmail').value = '';
-    $('cfComboContent').value = '';
     if ($('customFieldShowInCreate')) $('customFieldShowInCreate').checked = true;
     if ($('customFieldShowInDrawer')) $('customFieldShowInDrawer').checked = true;
     if ($('customFieldName')) $('customFieldName').readOnly = false;
@@ -9758,26 +10157,75 @@ function openCustomFieldModal(field) {
     reqBox._reqTypesBound = true;
     reqBox.addEventListener('change', syncRequiredTypesVisibility);
   }
-  toggleCustomFieldOptions(isCombo ? field : (canEditOptions ? field : null));
+  toggleCustomFieldOptions(isCombo ? field : (canEditOptions ? field : null), !isCombo && !canEditOptions);
   openModal('modal-custom-field');
 }
 window.openCustomFieldModal = openCustomFieldModal;
 
-function toggleCustomFieldOptions(editingField) {
+function toggleCustomFieldOptions(editingField, forceHide) {
   var type = $('customFieldType').value;
   var isCombo = editingField && isCombinationField(editingField);
   if (!isCombo && $('customFieldName') && ($('customFieldName').value || '').toLowerCase().trim() === 'combination') {
     isCombo = true;
   }
   var isProductType = editingField && isBuiltinProductTypeField(editingField);
-  var show = ((type === 'select' || type === 'multi_select') && !isCombo) || isProductType;
+  // forceHide is set by openCustomFieldModal for builtins whose options are NOT
+  // editable (status/sprint) — without it, this fell back to reading the Field
+  // Type select's raw DOM value ('select'), which stays 'select' for those
+  // fields too, so the box showed anyway and a saved edit silently no-op'd.
+  var show = !forceHide && (((type === 'select' || type === 'multi_select') && !isCombo) || isProductType);
   $('customFieldOptionsGroup').hidden = !show;
   if ($('customFieldCombinationGroups')) {
     $('customFieldCombinationGroups').hidden = !isCombo;
+    if (isCombo) {
+      var existingGroups = (editingField && isCombinationField(editingField))
+        ? parseCombinationFieldOptions(editingField).groups
+        : {};
+      renderCombinationGroupEditors(existingGroups);
+    }
   }
   if ($('customFieldOptions') && isProductType) {
     $('customFieldOptions').placeholder = 'Message, Email, Content, Manage, Infra';
   }
+}
+
+// One textarea per Product Type option THIS SPACE currently has configured
+// (getProductTypeOptionsForSpace already reads that from custom_fields.options
+// -- see the buildProductTypeComboPickerHtml call site, which was already
+// wired this way). Combination used to offer exactly 3 fixed boxes
+// (Message/Email/Content) regardless of what Product Type actually had
+// configured, so a space could never set up combinations for any type beyond
+// those three, no matter what it added to Product Type's own options.
+// existingGroups keys that no longer match a current Product Type option are
+// intentionally dropped from view here -- their combinations still exist in
+// storage until this form is actually saved, but there's no live product type
+// left to attach the box to.
+function renderCombinationGroupEditors(existingGroups) {
+  var container = $('cfComboGroupsList');
+  if (!container) return;
+  existingGroups = existingGroups || {};
+  var ptOptions = getProductTypeOptionsForSpace(S.currentSpace);
+  if (!ptOptions.length) {
+    container.innerHTML = '<p class="text-muted" style="font-size:12px">' +
+      'This space has no Product Type options configured yet — add some on the Product Type field first.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  ptOptions.forEach(function (o, i) {
+    var label = document.createElement('label');
+    label.className = 'form-label';
+    label.style.marginTop = i === 0 ? '0' : '10px';
+    label.style.display = 'block';
+    label.textContent = o.l;
+    var ta = document.createElement('textarea');
+    ta.className = 'input';
+    ta.dataset.ptGroup = o.v;
+    ta.rows = 4;
+    ta.placeholder = 'Source - Destination';
+    ta.value = (existingGroups[o.v] || []).join('\n');
+    container.appendChild(label);
+    container.appendChild(ta);
+  });
 }
 
 function parseCombinationLines(text) {
@@ -9787,11 +10235,10 @@ function parseCombinationLines(text) {
 }
 
 function buildCombinationOptionsFromEditor() {
-  var groups = {
-    Message: parseCombinationLines($('cfComboMessage') && $('cfComboMessage').value),
-    Email: parseCombinationLines($('cfComboEmail') && $('cfComboEmail').value),
-    Content: parseCombinationLines($('cfComboContent') && $('cfComboContent').value)
-  };
+  var groups = {};
+  qsa('#cfComboGroupsList textarea[data-pt-group]').forEach(function (ta) {
+    groups[ta.dataset.ptGroup] = parseCombinationLines(ta.value);
+  });
   return {
     v: 2,
     groups: groups,
@@ -10324,9 +10771,23 @@ $('customFieldForm').addEventListener('submit', async function (e) {
     return;
   }
 
+  var savingField = id ? (S.data.custom_fields || []).find(function (f) { return String(f.id) === String(id); }) : null;
+  // 'epic' and 'subtask' are load-bearing string literals elsewhere (Roadmap
+  // grouping, the Add Subtask flow) — unlike every other Type value, they can't
+  // become admin-removable without rewriting those features, so the editor
+  // blocks it here instead of silently letting a save break them.
+  if (savingField && savingField.is_builtin && savingField.field_key === 'type') {
+    var RESERVED_TYPES = ['epic', 'subtask'];
+    var missingReserved = RESERVED_TYPES.filter(function (t) { return options.indexOf(t) < 0; });
+    if (missingReserved.length) {
+      toast('"' + missingReserved.join('", "') + '" can’t be removed from Type — required by Roadmap/subtasks.', 'error');
+      return;
+    }
+  }
+
   try {
     if (id) {
-      var editingField = (S.data.custom_fields || []).find(function (f) { return String(f.id) === String(id); });
+      var editingField = savingField;
       var payload;
       if (editingField && editingField.is_builtin) {
         payload = { is_required: required, options: options, show_in: showIn, required_types: requiredTypes };
@@ -10474,6 +10935,19 @@ async function openDrawer(issueId) {
   }
 
   if (!issue) { toast('Could not load issue', 'error'); return; }
+  // The fetch above is async — if the user hit Back (popstate → _closeIssueDrawer
+  // clears drawerIssueId) or opened a different issue while it was in flight,
+  // this response is stale. Rendering it anyway re-opens a drawer the user just
+  // closed and stomps the URL popstate just restored, which is why Back
+  // sometimes looked like it needed two clicks: the first click's popstate ran
+  // correctly, then this exact code below undid it a moment later.
+  if (S.drawerIssueId !== issueId) return;
+  // Fallback for openIssuePage's same mount call — only needed when the issue
+  // wasn't already in the local cache at click time, so its space_id wasn't
+  // known synchronously yet.
+  if (issue.space_id && !document.querySelector('.space-item[data-space-id="' + issue.space_id + '"] + .space-subnav')) {
+    mountSpaceSubnav(issue.space_id, S.currentTab);
+  }
   trackRecentIssueView(issue);
   updateDrawerStarBtn(issue.id);
   var starBtn = $('drawerStarBtn');
@@ -10484,7 +10958,16 @@ async function openDrawer(issueId) {
       toggleIssueFavorite(S.drawerIssueId);
     };
   }
-  if (issue.key) { history.replaceState({ issueId: issueId }, '', '/?issue=' + encodeURIComponent(issue.key)); window._currentIssueKey = issue.key; }
+  if (issue.key) {
+    // Preserve an existing &from=<tab> query param rather than rebuilding the
+    // URL bare -- this used to silently drop it, so a hard refresh landed back
+    // on the boot path's hardcoded 'backlog' assumption every time regardless
+    // of what openIssuePage had just encoded.
+    var existingFrom = new URLSearchParams(window.location.search).get('from');
+    var replaceUrl = '/?issue=' + encodeURIComponent(issue.key) + (existingFrom ? '&from=' + existingFrom : '');
+    history.replaceState({ issueId: issueId }, '', replaceUrl);
+    window._currentIssueKey = issue.key;
+  }
   document.body.classList.add('issue-page'); void document.body.offsetHeight; var dp = document.querySelector('.drawer-panel'); if(dp){ dp.style.position='fixed'; dp.style.inset='0'; dp.style.width='100vw'; dp.style.maxWidth='100vw'; dp.style.height='100vh'; dp.style.zIndex='99999'; dp.style.display='flex'; dp.style.flexDirection='column'; } $('issueDrawer').removeAttribute('hidden');
 
   // Parent breadcrumb for subtasks
@@ -10505,7 +10988,7 @@ async function openDrawer(issueId) {
 
   $('drawerKey').textContent = issue.key || (issue.project_key ? issue.project_key + '-?' : '#' + issue.id);
   $('drawerType').textContent = typeLabel(issue.type);
-  $('drawerType').className = 'badge badge-type badge-type-' + (issue.type || 'task');
+  applyTypeBadgeStyle($('drawerType'), issue.type || 'task');
   setDrawerTitleValue(issue.title || '');
   // Render description - convert plain text to HTML safely
   var descText = issue.description || '';
@@ -10544,6 +11027,10 @@ async function openDrawer(issueId) {
   var fixBtns = $('drawerFixDescBtns'); if (fixBtns) fixBtns.style.display = 'none';
 
   $('drawerStatus').value = issue.status || 'To Do';
+  // Rebuilt from this issue's own space's Priority custom field — same reason
+  // as Team/Product Type below: index.html's old fixed 5-option list never
+  // reflected an admin's actual configured priority values for the space.
+  $('drawerPriority').innerHTML = buildBuiltinSelectOptionsHtml('priority', issue.space_id, issue.priority, null);
   $('drawerPriority').value = issue.priority || 'medium';
 
   var spaceId = issue.space_id || S.currentSpace;
@@ -10600,8 +11087,18 @@ async function openDrawer(issueId) {
   $('drawerPoints').value = issue.story_points != null ? issue.story_points : '';
   $('drawerStartDate').value = fmtDateISO(issue.start_date);
   $('drawerDueDate').value = fmtDateISO(issue.due_date);
-  if ($('drawerTeam')) $('drawerTeam').value = issue.team || '';
-  if ($('drawerProductType')) $('drawerProductType').value = issue.product_type || '';
+  // Rebuilt from this issue's own space's custom_fields.options every render
+  // -- see buildBuiltinSelectOptionsHtml -- rather than the fixed HTML option
+  // list index.html used to carry, which never reflected an admin's actual
+  // Team/Product Type configuration for the space.
+  if ($('drawerTeam')) {
+    $('drawerTeam').innerHTML = buildBuiltinSelectOptionsHtml('team', issue.space_id, issue.team, '— None —');
+    $('drawerTeam').value = issue.team || '';
+  }
+  if ($('drawerProductType')) {
+    $('drawerProductType').innerHTML = buildBuiltinSelectOptionsHtml('product_type', issue.space_id, issue.product_type, '— None —');
+    $('drawerProductType').value = issue.product_type || '';
+  }
   // Estimate field removed
 
   var totalSpent = 0;
@@ -10665,7 +11162,10 @@ function startDrawerLiveSync(issueId) {
       // Update right-side fields silently (only if not focused by user)
       var activeId = document.activeElement && document.activeElement.id;
       if (activeId !== 'drawerStatus')    $('drawerStatus').value    = fresh.status    || '';
-      if (activeId !== 'drawerPriority')  $('drawerPriority').value  = fresh.priority  || '';
+      if (activeId !== 'drawerPriority') {
+        $('drawerPriority').innerHTML = buildBuiltinSelectOptionsHtml('priority', fresh.space_id, fresh.priority, null);
+        $('drawerPriority').value = fresh.priority || '';
+      }
       if (activeId !== 'drawerAssignee') {
         // Ensure the new assignee is in the dropdown options before setting value
         var members = window._drawerMembers || [];
@@ -10687,8 +11187,14 @@ function startDrawerLiveSync(issueId) {
       if (activeId !== 'drawerPoints')      $('drawerPoints').value      = fresh.story_points != null ? fresh.story_points : '';
       if (activeId !== 'drawerStartDate')   $('drawerStartDate').value   = fresh.start_date  ? fresh.start_date.slice(0,10) : '';
       if (activeId !== 'drawerDueDate')     $('drawerDueDate').value     = fresh.due_date    ? fresh.due_date.slice(0,10)   : '';
-      if (activeId !== 'drawerTeam'        && $('drawerTeam'))        $('drawerTeam').value        = fresh.team         || '';
-      if (activeId !== 'drawerProductType' && $('drawerProductType')) $('drawerProductType').value = fresh.product_type || '';
+      if (activeId !== 'drawerTeam'        && $('drawerTeam')) {
+        $('drawerTeam').innerHTML = buildBuiltinSelectOptionsHtml('team', fresh.space_id, fresh.team, '— None —');
+        $('drawerTeam').value = fresh.team || '';
+      }
+      if (activeId !== 'drawerProductType' && $('drawerProductType')) {
+        $('drawerProductType').innerHTML = buildBuiltinSelectOptionsHtml('product_type', fresh.space_id, fresh.product_type, '— None —');
+        $('drawerProductType').value = fresh.product_type || '';
+      }
       if (activeId !== 'drawerTitle') setDrawerTitleValue(fresh.title || '');
       // Update time tracking, attachments, activity
       var timeSpentEl = document.querySelector('.drawer-time-spent');
@@ -11049,7 +11555,9 @@ function bindDrawerEdits(issue) {
       e.stopPropagation();
       var old = document.getElementById('_typeMenu');
       if (old) { old.remove(); return; }
-      var types = ISSUE_TYPES;
+      // This issue's own space's configured Type list, not the fixed 5 --
+      // an admin-added type was previously unreachable from this picker.
+      var types = getIssueTypeOptionsForSpace(issue.space_id).map(function (o) { return o.v; });
       var rect = typeEl.getBoundingClientRect();
       var menu = document.createElement('div');
       menu.id = '_typeMenu';
@@ -11059,13 +11567,13 @@ function bindDrawerEdits(issue) {
         item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:13px;border-radius:4px;display:flex;align-items:center;gap:8px;';
         // Use the shared TYPE_ICONS set rather than a local emoji list, so this
         // menu can't drift from the icons shown on boards, tables and drawers.
-        item.innerHTML = '<span style="display:inline-flex;align-items:center">'+ typeIcon(t) +'</span><span>'+(t.charAt(0).toUpperCase()+t.slice(1))+'</span>';
+        item.innerHTML = '<span style="display:inline-flex;align-items:center">'+ typeIcon(t) +'</span><span>'+esc(cap(t))+'</span>';
         item.onmouseover = function(){ this.style.background='#f4f5f7'; };
         item.onmouseout = function(){ this.style.background='';};
         item.onclick = function(){
           menu.remove();
-          typeEl.textContent = t.charAt(0).toUpperCase()+t.slice(1);
-          typeEl.className = 'badge badge-type badge-type-'+t;
+          typeEl.textContent = cap(t);
+          applyTypeBadgeStyle(typeEl, t);
           autoSave('type',t);
         };
         menu.appendChild(item);
@@ -11154,6 +11662,7 @@ function bindDrawerEdits(issue) {
 
   var _drawerDescOriginal = $('drawerDesc') ? $('drawerDesc').innerHTML : (issue.description || '');
   window._drawerDescOriginalHtml = _drawerDescOriginal;
+  attachScopedUndo($('drawerDesc'));
   // Deliberately NOT re-snapshotting _drawerDescOriginal here — it's already
   // the correct pre-edit baseline (set once above, then again only after a
   // successful save). Re-capturing "current == current" on every focus meant
@@ -11233,6 +11742,7 @@ function bindDrawerEdits(issue) {
   };
   var _drawerFixDescOriginal = $('drawerFixDesc') ? $('drawerFixDesc').innerHTML : (issue.fix_description || '');
   window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
+  attachScopedUndo($('drawerFixDesc'));
   // Same fix as drawerDesc above — don't rebaseline the "original" snapshot
   // on every focus, only on drawer-open and after a successful save.
   $('drawerFixDesc').onfocus = function() {
@@ -11272,6 +11782,7 @@ function bindDrawerEdits(issue) {
   window._drawerPending = pending;
 
   bindMentionAutocomplete($('drawerCommentInput'));
+  attachScopedUndo($('drawerCommentInput'));
 
   // Paste image support for comment box — bind ONCE per drawer element, not per click.
   // (Previously this was registered inside the onclick handler below, so every
@@ -11303,20 +11814,26 @@ function bindDrawerEdits(issue) {
   $('drawerCommentSubmit').onclick = async function () {
     var _ci = $('drawerCommentInput');
     var body;
+    // Whether this comment's body is rich HTML (real <b>/<ul> from the
+    // toolbar) or plain text -- decides which shape file-attachment refs get
+    // appended in below, since bodyHtml()'s render function only expands
+    // [img:...]/[file:...] bracket markup in its PLAIN-TEXT branch; appending
+    // that bracket syntax onto an HTML body would show as literal text.
+    var bodyIsRich = !!(_ci && _ci.value === undefined);
     if (!_ci) { body = ''; }
-    else if (_ci.value !== undefined) {
+    else if (!bodyIsRich) {
       body = _ci.value.trim();
     } else {
-      // contenteditable: convert mention chips to plain @Name text, preserve line breaks
+      // contenteditable: convert mention chips to plain @Name text, keep the
+      // rest of the markup as-is -- this used to flatten to .textContent,
+      // which is what silently discarded every bold/bullet-list the toolbar
+      // had just produced.
       var _clone = _ci.cloneNode(true);
       _clone.querySelectorAll('.mention-chip').forEach(function(chip) {
         chip.replaceWith('@' + chip.textContent.replace(/^@/, ''));
       });
-      _clone.querySelectorAll('br').forEach(function(br) { br.replaceWith('\n'); });
-      _clone.querySelectorAll('div,p').forEach(function(block) {
-        if (block.previousSibling) block.insertBefore(document.createTextNode('\n'), block.firstChild);
-      });
-      body = (_clone.textContent || '').trim();
+      body = _clone.innerHTML.trim();
+      if (body === '<br>') body = '';
     }
     var commentBody = body;
     if (!body && !_commentFiles.length) return;
@@ -11351,11 +11868,28 @@ function bindDrawerEdits(issue) {
           toast(uploadData.error || 'Attachment upload failed', 'error');
           uploadFailed = true;
         } else if (uploadData.files && uploadData.files.length) {
-          var fileRefs = uploadData.files.map(function(f) {
-            var isImg = f.type && f.type.startsWith('image/');
-            return (isImg ? '[img:' : '[file:') + f.name + '|' + f.url + ']';
-          }).join('\n');
-          commentBody = commentBody ? commentBody + '\n' + fileRefs : fileRefs;
+          if (bodyIsRich) {
+            // Real tags, not [img:...]/[file:...] bracket markup -- bodyHtml()'s
+            // render function only expands that bracket syntax in its plain-text
+            // branch, so appending it onto an HTML body would show as literal
+            // text. fileApiUrl()'s token gets stripped before saving below (same
+            // as the rest of this body), then re-added fresh on every render by
+            // augmentFileUrlsInHtml -- same convention _saveComment already uses.
+            var fileRefsHtml = uploadData.files.map(function(f) {
+              var isImg = f.type && f.type.startsWith('image/');
+              var url = fileApiUrl(f.url);
+              return isImg
+                ? '<div style="margin-top:8px"><img class="desc-inline-img" src="' + esc(url) + '" alt="' + esc(f.name) + '"></div>'
+                : '<div style="margin-top:6px"><a href="' + esc(url) + '" target="_blank">' + esc(f.name) + '</a></div>';
+            }).join('');
+            commentBody = commentBody + fileRefsHtml;
+          } else {
+            var fileRefs = uploadData.files.map(function(f) {
+              var isImg = f.type && f.type.startsWith('image/');
+              return (isImg ? '[img:' : '[file:') + f.name + '|' + f.url + ']';
+            }).join('\n');
+            commentBody = commentBody ? commentBody + '\n' + fileRefs : fileRefs;
+          }
         }
       } catch(e) {
         toast(friendlyFetchErrorMessage(e, 'Attachment upload failed'), 'error');
@@ -11370,6 +11904,10 @@ function bindDrawerEdits(issue) {
       _commentFiles = [];
       _renderCommentFileList();
     }
+    // Strip the live session token the image ref above just embedded -- it's
+    // only good for today; augmentFileUrlsInHtml adds a fresh one on every
+    // future render instead. Same rule as description/fix-description saves.
+    if (bodyIsRich) commentBody = stripFileAuthTokensFromHtml(commentBody);
 
     if (commentBody) {
       var mentionedUserIds = collectMentionUserIds(_ci, commentBody);
@@ -12006,6 +12544,7 @@ function _renderActivityTab(tab, issue) {
     // leaves nothing after it for typed text to inherit.
     var cm = ((_drawerIssueData && _drawerIssueData.comments) || []).find(function(c) { return c.id === id; });
     richEl.innerHTML = cm ? commentBodyToEditableHtml(cm.body) : (bodyDiv ? bodyDiv.innerHTML : '');
+    attachScopedUndo(richEl);
     editArea.style.display = '';
     // The edit box is a fresh element each time the activity list re-renders,
     // but re-opening Edit on the SAME comment without a re-render in between
@@ -12729,25 +13268,58 @@ function parsePtComboSelection(productType, combinationValue) {
     if (sel.combinations.length === 1 && typeof normalizeCombinationLabel === 'function') {
       sel.combinations[0] = normalizeCombinationLabel(sel.combinations[0]);
     }
-    if (!sel.productTypes.length && sel.combinations.length && typeof classifyCombination === 'function') {
-      var inferred = classifyCombination(sel.combinations[0]);
-      if (inferred) sel.productTypes = [inferred];
-    }
   }
   return sel;
+}
+
+// Plain-text render of a Combination field's raw stored value, for contexts
+// (the All Work table) that just print a custom field's value as text rather
+// than driving the combo-box picker UI. Existing rows saved before the
+// serializePtComboSelection fix above can still carry the old
+// {"v":2,"productTypes":[...],"combinations":[]} JSON form, so this has to
+// handle that regardless of what gets newly saved going forward.
+//
+// Deliberately does NOT fall back to showing productTypes when there are no
+// real combinations: that would put the same values in both the Combination
+// and Product Type columns, which is exactly the "one field showing as
+// another" mixing this whole fix exists to undo. No combination selected
+// means the cell is genuinely empty -- the table already renders '' as the
+// dash, so returning '' here is correct, not a missing case.
+function formatCombinationFieldDisplayValue(rawValue) {
+  if (!rawValue) return '';
+  var trimmed = String(rawValue).trim();
+  if (trimmed.charAt(0) !== '{') return rawValue; // already a plain combination string
+  var sel = parsePtComboSelection('', rawValue);
+  if (sel.combinations.length) {
+    return sel.combinations.map(function (c) {
+      return typeof normalizeCombinationLabel === 'function' ? normalizeCombinationLabel(c) : c;
+    }).join(', ');
+  }
+  return '';
 }
 
 function serializePtComboSelection(sel) {
   sel = sel || emptyPtComboSelection();
   var types = (sel.productTypes || []).filter(Boolean);
   var combos = (sel.combinations || []).filter(Boolean);
+  // Product Type and Combination are two different fields (issues.product_type
+  // vs. the "Combination" custom field's own value) and should stay that way.
+  // This used to JSON-encode {productTypes, combinations:[]} into the
+  // COMBINATION field even when zero combinations were selected -- e.g. two
+  // product types picked with no specific combination -- so the All Work
+  // table's Combination column showed a raw {"v":2,"productTypes":[...]}
+  // blob for rows that had no combination at all. That encoding was also
+  // never necessary: product_type below already fully captures a multi-type
+  // selection on its own, and parsePtComboSelection's non-JSON fallback path
+  // reconstructs it from that plain string when combinationValue is empty.
+  // The JSON form is only actually needed when there's more than one REAL
+  // combination to store, or exactly one combination that needs to say which
+  // of several product types it belongs to.
   var combinationValue = null;
-  if (types.length > 1 || combos.length > 1) {
+  if (combos.length > 1 || (combos.length === 1 && types.length > 1)) {
     combinationValue = JSON.stringify({ v: 2, productTypes: types, combinations: combos });
   } else if (combos.length === 1) {
     combinationValue = combos[0];
-  } else if (types.length > 1) {
-    combinationValue = JSON.stringify({ v: 2, productTypes: types, combinations: [] });
   }
   return {
     product_type: types.length ? types.join(',') : null,
@@ -12755,14 +13327,13 @@ function serializePtComboSelection(sel) {
   };
 }
 
+// Every selected product type now participates in combinations -- there's no
+// more fixed subset of "types that get grouped combinations" vs "types that
+// see everything" vs "types that get nothing" (that used to be exactly
+// Message/Email/Content, plus Manage/Infra hardcoded by literal name here).
+// A type with no combinations configured for it yet just has an empty list.
 function getComboTypesFromSelection(types) {
-  return (types || []).filter(function (t) {
-    return productTypeHasCombinations(t) || t === 'Manage' || t === 'Infra';
-  });
-}
-
-function productTypeUsesAllCombinations(productType) {
-  return productType === 'Manage' || productType === 'Infra';
+  return (types || []).slice();
 }
 
 function pruneCombinationsForTypes(sel, meta) {
@@ -12794,6 +13365,24 @@ function getProductTypeOptionsForSpace(spaceId) {
   });
 }
 
+// Type/priority equivalent of getProductTypeOptionsForSpace — order is the
+// order configured in Settings, which for priority IS the severity order
+// (index 0 = most severe) per the admin-facing convention documented on the
+// Combination-group editor's sibling: what's typed in Options is what shows,
+// in that order, everywhere the field is picked.
+function getIssueTypeOptionsForSpace(spaceId) {
+  var field = spaceId ? findSpaceFieldByKey(spaceId, 'type') : null;
+  var vals = field ? normalizeCFOptions(field.options) : [];
+  if (!vals.length) vals = BUILTIN_SELECT_FALLBACKS.type;
+  return vals.map(function (v) { return { v: v, l: cap(v) }; });
+}
+function getIssuePriorityOptionsForSpace(spaceId) {
+  var field = spaceId ? findSpaceFieldByKey(spaceId, 'priority') : null;
+  var vals = field ? normalizeCFOptions(field.options) : [];
+  if (!vals.length) vals = BUILTIN_SELECT_FALLBACKS.priority;
+  return vals.map(function (v) { return { v: v, l: cap(v) }; });
+}
+
 function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, filter) {
   filter = (filter || '').trim();
   var comboTypes = getComboTypesFromSelection(selectedTypes);
@@ -12807,7 +13396,7 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
     });
     if (!combos.length) return;
     html += '<div class="pt-combo-group" data-type="' + esc(type) + '">' +
-      '<div class="pt-combo-group-title">' + esc(productTypeUsesAllCombinations(type) ? getProductTypeLabel(type) + ' — all combinations' : getProductTypeLabel(type)) + '</div>';
+      '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
       // title carries the full value — labels are single-line with an ellipsis.
@@ -13002,24 +13591,63 @@ function normalizeCFOptions(opts) {
   });
 }
 
+// Builds <option> HTML for the builtin Team / Product Type <select>s from
+// whatever the space's own custom_fields.options actually says right now --
+// index.html used to hardcode a fixed 5-option list for each, so editing a
+// space's Team/Product Type options in Custom Field settings never showed up
+// in Create Issue or the drawer at all. currentValue is kept as a visible
+// option even if it's since been removed from the configured list (labeled
+// "(removed)"), so a ticket that already has that value doesn't look like it
+// silently lost it -- but it isn't offered as a fresh choice for anything
+// else, since it no longer appears in the space's real option list.
+var BUILTIN_SELECT_FALLBACKS = {
+  type: ['epic', 'story', 'task', 'bug', 'subtask'],
+  priority: ['highest', 'high', 'medium', 'low', 'lowest']
+};
+
+function buildBuiltinSelectOptionsHtml(fieldKey, spaceId, currentValue, placeholderLabel) {
+  var field = (S.data.custom_fields || []).find(function (f) {
+    return f.space_id == spaceId && f.field_key === fieldKey;
+  });
+  var opts = field ? getCustomFieldOptions(field) : [];
+  // Every space is seeded with a real type/priority custom_fields row (see
+  // seedBuiltinIssueFields), so this only fires before that data has loaded —
+  // still needed so the dropdown isn't empty during that window.
+  if (!opts.length && BUILTIN_SELECT_FALLBACKS[fieldKey]) opts = BUILTIN_SELECT_FALLBACKS[fieldKey];
+  var label = function (v) {
+    if (fieldKey === 'product_type') return getProductTypeLabel(v);
+    if (fieldKey === 'type' || fieldKey === 'priority') return cap(v);
+    return v;
+  };
+  var html = placeholderLabel ? ('<option value="">' + esc(placeholderLabel) + '</option>') : '';
+  var found = false;
+  opts.forEach(function (o) {
+    if (String(o) === String(currentValue)) found = true;
+    html += '<option value="' + escAttr(o) + '">' + esc(label(o)) + '</option>';
+  });
+  if (currentValue && !found) {
+    html += '<option value="' + escAttr(currentValue) + '">' + esc(label(currentValue)) + ' (removed)</option>';
+  }
+  return html;
+}
+
+// Just the configured value itself -- used to map PRODUCT_TYPE_LABELS
+// (combination-options.js), a fixed {Message: 'Message Type', ...} override
+// that didn't cover every value (Manage/Infra passed through unchanged) and
+// disagreed with the plain value shown everywhere else a Product Type is
+// displayed (dropdowns, badges, filters). Removed for consistency.
 function getProductTypeLabel(value) {
-  if (!value) return '';
-  var labels = (typeof PRODUCT_TYPE_LABELS !== 'undefined' ? PRODUCT_TYPE_LABELS : window.PRODUCT_TYPE_LABELS) || {};
-  return labels[value] || value;
+  return value || '';
 }
 
-function productTypeHasCombinations(productType) {
-  var withCombo = (typeof PRODUCT_TYPES_WITH_COMBINATIONS !== 'undefined'
-    ? PRODUCT_TYPES_WITH_COMBINATIONS
-    : window.PRODUCT_TYPES_WITH_COMBINATIONS) || ['Message', 'Email', 'Content'];
-  return withCombo.indexOf(productType) >= 0;
-}
-
+// Any group key, not just the original fixed Message/Email/Content trio --
+// groups now has one entry per Product Type option the space actually has
+// configured (see renderCombinationGroupEditors), which can be any name.
 function flattenCombinationGroups(groups) {
   var out = [];
   var seen = {};
   if (!groups) return out;
-  ['Message', 'Email', 'Content'].forEach(function (k) {
+  Object.keys(groups).forEach(function (k) {
     (groups[k] || []).forEach(function (o) {
       var key = String(o).toLowerCase();
       if (!seen[key]) { seen[key] = true; out.push(o); }
@@ -13039,35 +13667,23 @@ function parseCombinationFieldOptions(field) {
       flat: raw.flat || flattenCombinationGroups(raw.groups)
     };
   }
+  // No groups info at all (a bare flat array, or nothing usable) -- there is
+  // no per-type breakdown to recover here, so this is just the flat list with
+  // an empty groups map, rather than guessing a category for each entry.
   var flat = Array.isArray(raw) ? raw.slice() : getCombinationOptionsList();
-  var groups = { Message: [], Email: [], Content: [] };
-  var classify = typeof classifyCombination === 'function' ? classifyCombination : null;
-  flat.forEach(function (o) {
-    var cat = classify ? classify(o) : 'Content';
-    if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(o);
-  });
-  return { groups: groups, flat: flat };
+  return { groups: {}, flat: flat };
 }
 
+// Every Product Type gets its own group, keyed by whatever that type's real
+// value is -- no more special-casing specific type names to see "all"
+// combinations or none. A type with nothing configured for it yet correctly
+// returns [], which the picker already renders as "No combinations available".
 function getCombinationsForProductType(productType, fieldMeta) {
   var parsed = fieldMeta ? parseCombinationFieldOptions(fieldMeta) : null;
-  var allFlat = parsed && parsed.flat && parsed.flat.length
-    ? parsed.flat.slice()
-    : getCombinationOptionsList(fieldMeta);
-
-  if (productTypeUsesAllCombinations(productType)) {
-    return allFlat.slice();
-  }
-  if (!productTypeHasCombinations(productType)) return [];
   if (parsed && parsed.groups && parsed.groups[productType]) {
     return parsed.groups[productType].slice();
   }
-  var groups = (typeof COMBINATION_GROUPS !== 'undefined' ? COMBINATION_GROUPS : window.COMBINATION_GROUPS);
-  if (groups && groups[productType]) return groups[productType].slice();
-  return allFlat.filter(function (o) {
-    return typeof classifyCombination === 'function' && classifyCombination(o) === productType;
-  });
+  return [];
 }
 
 function getCombinationOptionsList(fieldMeta) {
@@ -14242,6 +14858,34 @@ document.addEventListener('DOMContentLoaded', function () {
       populateSprintSelect(sprintSel, sprints, includeSprintId || null);
       if (!includeSprintId) applySprintDatesToIssueForm('');
     }
+    // Team / Product Type options come from the newly-selected space's own
+    // custom_fields.options, rebuilt every time the space changes.
+    var issueTeamSel = $('issueTeam');
+    if (issueTeamSel) {
+      issueTeamSel.innerHTML = buildBuiltinSelectOptionsHtml('team', spaceId, issueTeamSel.value, '— None —');
+    }
+    var issueProductTypeSel = $('issueProductType');
+    if (issueProductTypeSel) {
+      issueProductTypeSel.innerHTML = buildBuiltinSelectOptionsHtml('product_type', spaceId, issueProductTypeSel.value, '— Select type —');
+    }
+    // Type / Priority are required — no blank placeholder option. A real prior
+    // selection (editing an in-progress form across a space switch) is kept if
+    // still valid; a fresh modal (no prior selection) defaults to task/medium
+    // when offered, else the space's first configured option.
+    function rebuildRequiredBuiltinSelect(sel, fieldKey, fallbackDefault) {
+      if (!sel) return;
+      var prior = sel.value;
+      sel.innerHTML = buildBuiltinSelectOptionsHtml(fieldKey, spaceId, prior || null, null);
+      if (prior && sel.querySelector('option[value="' + prior + '"]')) {
+        sel.value = prior;
+      } else if (sel.querySelector('option[value="' + fallbackDefault + '"]')) {
+        sel.value = fallbackDefault;
+      } else if (sel.options.length) {
+        sel.selectedIndex = 0;
+      }
+    }
+    rebuildRequiredBuiltinSelect($('issueType'), 'type', 'task');
+    rebuildRequiredBuiltinSelect($('issuePriority'), 'priority', 'medium');
     // Render custom fields — always show ALL unique custom fields across all spaces
     var cfContainer = $('issueCustomFieldsContainer');
     if (!cfContainer) return;
@@ -14730,6 +15374,7 @@ document.addEventListener('click', function(e) {
   var item = e.target.closest('.admin-nav-item');
   if (!item || !item.dataset.section) return;
   renderAdminSettings(item.dataset.section);
+  syncAppUrl();
 });
 
 // ── Org General ──────────────────────────────────────────
@@ -15479,6 +16124,57 @@ function isPlainTextPasteTarget(el) {
   return !!(el.classList &&
     (el.classList.contains('jira-editor-body') || el.classList.contains('rte-content')));
 }
+// Whitelist-based cleanup for pasted text/html -- keeps real formatting
+// (bold/italic/headings/lists/links) but throws away everything that made the
+// old plain-text-only paste necessary in the first place: Word/Google Docs'
+// own inline styles/margins/font tags/classes, and any <script>/<style>/etc.
+// Unknown or disallowed tags are unwrapped (their content kept, the tag
+// dropped) rather than deleted outright, so nothing the user pasted vanishes.
+var PASTE_ALLOWED_TAGS = {
+  B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, STRIKE: 1,
+  H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+  UL: 1, OL: 1, LI: 1, BR: 1, P: 1, A: 1, CODE: 1, PRE: 1, BLOCKQUOTE: 1
+};
+function sanitizeRichPasteHtml(rawHtml) {
+  var source = document.createElement('div');
+  source.innerHTML = rawHtml;
+  source.querySelectorAll('script,style,meta,link,head,title,object,embed,iframe,img,svg').forEach(function (n) { n.remove(); });
+
+  function clean(node) {
+    var out = document.createDocumentFragment();
+    Array.prototype.forEach.call(node.childNodes, function (child) {
+      if (child.nodeType === 3) { out.appendChild(child.cloneNode()); return; }
+      if (child.nodeType !== 1) return; // drop comments (incl. Word's <!--[if]-->) and the rest
+      var tag = child.tagName;
+      // DIV/SPAN/FONT and anything else not on the whitelist: unwrap, keeping
+      // its text/children but dropping the wrapper and whatever inline
+      // style/class/font it carried -- this is what used to cause the giant
+      // gaps between pasted lines that the old plain-text-only paste was
+      // written to avoid.
+      if (!PASTE_ALLOWED_TAGS[tag]) { out.appendChild(clean(child)); return; }
+      var el = document.createElement(tag.toLowerCase());
+      if (tag === 'A') {
+        var href = child.getAttribute('href') || '';
+        if (/^(https?:|mailto:)/i.test(href)) el.setAttribute('href', href);
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
+      }
+      el.appendChild(clean(child));
+      out.appendChild(el);
+    });
+    return out;
+  }
+
+  var wrap = document.createElement('div');
+  wrap.appendChild(clean(source));
+  // Collapse the empty-paragraph runs Word/Docs use for spacing (an empty <p>
+  // that survived cleaning contributes nothing but a blank line).
+  wrap.querySelectorAll('p').forEach(function (p) {
+    if (!p.textContent.trim() && !p.querySelector('br')) p.remove();
+  });
+  return wrap.innerHTML;
+}
+
 document.addEventListener('paste', function(e) {
   var active = document.activeElement;
   if (!isPlainTextPasteTarget(active)) return;
@@ -15486,6 +16182,18 @@ document.addEventListener('paste', function(e) {
   if (!cd) return;
   var items = cd.items || [];
   for (var i = 0; i < items.length; i++) { if (items[i].type.indexOf('image') !== -1) return; } // image handler above
+
+  var htmlSource = cd.getData('text/html');
+  if (htmlSource) {
+    e.preventDefault();
+    document.execCommand('insertHTML', false, sanitizeRichPasteHtml(htmlSource));
+    return;
+  }
+
+  // No text/html on the clipboard (plain-text copy, or a source that only
+  // offers text/plain) -- keep line breaks as before, but no longer flatten
+  // real formatting that WAS on the clipboard, since that case is now handled
+  // above.
   var text = cd.getData('text/plain');
   if (text === '' || text == null) return;
   e.preventDefault();
@@ -15732,7 +16440,10 @@ function awInlineStatus(e, issueId, current) {
 
 function awInlinePriority(e, issueId, current) {
   e.stopPropagation();
-  var priorities = ['highest','high','medium','low','lowest'];
+  // This issue's own space's configured Priority list, not the fixed 5 --
+  // an admin-added priority value was previously unreachable from this menu.
+  var _iss = (S.data.issues || []).find(function (x) { return x.id == issueId; });
+  var priorities = getIssuePriorityOptionsForSpace(_iss ? _iss.space_id : S.currentSpace).map(function (o) { return o.v; });
   var items = priorities.map(function(p) {
     var check = p === current ? '<span style="color:#0052cc;font-weight:700;margin-left:auto">&#10003;</span>' : '';
     return { value: p, html: '<span style="font-size:14px;color:#172b4d;flex:1;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' + cap(p) + '</span>' + check };
@@ -15877,36 +16588,60 @@ function copyDrawerLink() {
   copyIssueLinkByKey(issueKey);
 }
 
+// history.back() only QUEUES a navigation -- it doesn't wait for the
+// resulting popstate. Two back-trigger clicks fired before that popstate
+// lands (a real, easy-to-hit case: click the drawer's "Back" button, see no
+// instant visual change while the event settles, click it again) both
+// call history.back(), and browsers do not coalesce them -- the second one
+// consumes a SECOND history entry, skipping past the intended destination
+// entirely. This guard makes a second back-trigger click a no-op until the
+// first one's popstate has actually been handled.
+function _goBackOnce() {
+  if (window._backPending) return;
+  window._backPending = true;
+  window.history.back();
+}
+
 // ── Browser back button support ─────────────────────────
+// _navigatingBack used to be set true only around the last one or two
+// statements, with the reset scheduled via a trailing setTimeout(fn, 0) --
+// if ANYTHING earlier in this handler threw (closing the drawer, resolving
+// the target space/tab, etc.), that setTimeout line was never reached and
+// the flag stayed stuck true forever. Every popstate after that (including
+// the browser's own native Back button, which doesn't go through
+// _goBackOnce at all) hit the early-return at the top and did nothing --
+// exactly a "first click does nothing" symptom, until something else
+// happened to flip the flag back. try/finally guarantees the reset runs no
+// matter which line throws.
 window.addEventListener('popstate', function () {
+  window._backPending = false;
   if (window._navigatingBack) return;
-
-  var issueKey = new URLSearchParams(window.location.search).get('issue');
-
-  if (!issueKey && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
-    stopDrawerLiveSync();
-    window._drawerPending = {};
-    _closeIssueDrawer();
-  }
-
-  if (issueKey) {
-    window._navigatingBack = true;
-    var issueByKey = (S.data && S.data.issues || []).find(function (i) { return i.key === issueKey || i.id === issueKey; });
-    openIssuePage(issueByKey ? issueByKey.id : issueKey, { skipHistory: true });
-    setTimeout(function () { window._navigatingBack = false; }, 0);
-    return;
-  }
-
   window._navigatingBack = true;
-  applyRouteFromUrl({ replaceUrl: true });
-  setTimeout(function () { window._navigatingBack = false; }, 0);
+  try {
+    var issueKey = new URLSearchParams(window.location.search).get('issue');
+
+    if (!issueKey && (S.drawerIssueId || document.body.classList.contains('issue-page'))) {
+      stopDrawerLiveSync();
+      window._drawerPending = {};
+      _closeIssueDrawer();
+    }
+
+    if (issueKey) {
+      var issueByKey = (S.data && S.data.issues || []).find(function (i) { return i.key === issueKey || i.id === issueKey; });
+      openIssuePage(issueByKey ? issueByKey.id : issueKey, { skipHistory: true });
+    } else {
+      applyRouteFromUrl({ replaceUrl: true });
+    }
+  } finally {
+    setTimeout(function () { window._navigatingBack = false; }, 0);
+  }
 });
 
 function goBackFromIssue() {
   stopDrawerLiveSync();
   window._drawerPending = {};
   if (window.history.length > 1) {
-    window.history.back();
+    _goBackOnce();
     return;
   }
   _closeIssueDrawer();
@@ -15927,6 +16662,24 @@ function goBackFromIssue() {
     navigateTo('home', { replaceUrl: true });
   }
 }
+
+// Same destination-resolving logic as goBackFromIssue's fallback branch, but
+// never calls window.history.back() / relies on popstate at all -- see the
+// comment on this button's onclick wiring in openIssuePage.
+function closeIssueFromAllWork() {
+  stopDrawerLiveSync();
+  window._drawerPending = {};
+  _closeIssueDrawer();
+  var returnSpace = S._prevSpace || window._issueReturnSpace || S.currentSpace;
+  window._issueReturnTab = null;
+  window._issueReturnSpace = null;
+  if (returnSpace) {
+    navigateToSpace(returnSpace, 'allwork', { replaceUrl: true });
+  } else {
+    navigateTo('home', { replaceUrl: true });
+  }
+}
+window.closeIssueFromAllWork = closeIssueFromAllWork;
 
 // Copy issue URL and number to clipboard
 window._copyIssueUrl = function() {
@@ -16149,7 +16902,7 @@ window._copyIssueUrl = function() {
         var issue = (S.data && S.data.issues || []).find(function(i){ return String(i.id) === String(id); });
         gsClose();
         $('globalSearchInput').value = '';
-        if (issue) openIssuePage(issue.id, issue.key);
+        if (issue) openIssuePage(issue.id);
       });
       el.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') el.dispatchEvent(new MouseEvent('mousedown'));
