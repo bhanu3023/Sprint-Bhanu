@@ -118,8 +118,53 @@
      "to": 5105
     },
     {
-     "file": "app.js",
+     "file": "src/client/pages/space/summary.js",
      "from": 5106,
+     "to": 5201
+    },
+    {
+     "file": "src/client/pages/space/timeline.js",
+     "from": 5202,
+     "to": 5291
+    },
+    {
+     "file": "src/client/pages/space/backlog.js",
+     "from": 5292,
+     "to": 5812
+    },
+    {
+     "file": "src/client/pages/space/board.js",
+     "from": 5813,
+     "to": 5907
+    },
+    {
+     "file": "src/client/pages/space/calendar.js",
+     "from": 5908,
+     "to": 5974
+    },
+    {
+     "file": "src/client/pages/space/reports.js",
+     "from": 5975,
+     "to": 7489
+    },
+    {
+     "file": "src/client/pages/space/mbr.js",
+     "from": 7490,
+     "to": 8356
+    },
+    {
+     "file": "src/client/pages/space/all-work.js",
+     "from": 8357,
+     "to": 9182
+    },
+    {
+     "file": "src/client/pages/space/settings.js",
+     "from": 9183,
+     "to": 9972
+    },
+    {
+     "file": "app.js",
+     "from": 9973,
      "to": 17295
     }
    ]
