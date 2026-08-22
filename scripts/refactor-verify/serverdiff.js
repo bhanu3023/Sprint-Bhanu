@@ -156,8 +156,12 @@ for (const t of targets) {
       console.log('        actual  : ' + JSON.stringify(body.slice(Math.max(0, i - 50), i + 50)));
     }
   }
-  console.log('   [SA] glue exact     : ' + (saOk ? 'PASS — every declared glue string matches byte-for-byte' : 'FAIL'));
-  console.log('   [SB] body RAW       : ' + (sbOk ? 'PASS — every body RAW-matches its original ranges' : 'FAIL'));
+  const modifiedParts = parts.filter(p => p.modified);
+  const verifiedCount = parts.length - modifiedParts.length;
+  console.log('   [SA] glue exact     : ' + (saOk ? 'PASS — every declared glue string matches byte-for-byte' : 'FAIL') +
+              '   (' + verifiedCount + ' of ' + parts.length + ' parts byte-verified)');
+  console.log('   [SB] body RAW       : ' + (sbOk ? 'PASS — every body RAW-matches its original ranges' : 'FAIL') +
+              '   (' + verifiedCount + ' of ' + parts.length + ' parts byte-verified)');
 
   // ── [SC] tiling over the union of all ranges ─────────────────────────
   const all = [];
@@ -207,8 +211,30 @@ for (const t of targets) {
 
   console.log('   arithmetic          : original ' + bodyLinesTotal + ' lines + ' + glueLinesTotal +
               ' glue lines  (server.js original = ' + totalLines + ')');
+
+  // ── What this PASS does NOT cover ────────────────────────────────────
+  // Printed every run, unconditionally. `modified: true` switches [SA] and
+  // [SB] off for a part, so as files accumulate that flag, "serverdiff PASS"
+  // quietly means less than it used to. A check whose meaning changes without
+  // saying so is the same failure mode as a gate checking a deleted file, so
+  // the weakening is stated in the output rather than left in a commit message.
+  if (modifiedParts.length) {
+    console.log('');
+    console.log('   *** NOT BYTE-VERIFIED: ' + modifiedParts.length + ' of ' + parts.length +
+                ' part(s) carry modified:true, so [SA] glue and [SB] body');
+    console.log('       byte-identity were SKIPPED for them. They are covered only by');
+    console.log('       [SC] tiling (nothing lost) and by the behavioural checks.');
+    modifiedParts.forEach(p => {
+      console.log('         - ' + p.file);
+      console.log('             ' + (p.modifiedReason || 'no reason declared'));
+    });
+    console.log('       A PASS below therefore means: the ' + verifiedCount + ' unflagged part(s) are');
+    console.log('       byte-identical to the original, and all ' + parts.length + ' tile the file exactly once.');
+  } else {
+    console.log('   coverage            : all ' + parts.length + ' parts byte-verified; no modified:true flags');
+  }
   console.log('');
 }
 
-console.log('=== RESULT: ' + (failed ? 'FAIL — server move purity NOT proven' : 'PASS — all server checks empty') + ' ===');
+console.log('=== RESULT: ' + (failed ? 'FAIL — server move purity NOT proven' : 'PASS — all server checks empty (see NOT BYTE-VERIFIED above for what this excludes)') + ' ===');
 process.exit(failed ? 1 : 0);
