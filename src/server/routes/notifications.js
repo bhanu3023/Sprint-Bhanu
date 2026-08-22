@@ -2,7 +2,6 @@ const { requireAuth } = require('../auth');
 const { uid, wrap } = require('../core');
 const { q } = require('../db');
 const { requireOrgAdmin } = require('../deps');
-const { sendEmail } = require('../email');
 const { app } = require('../express-app');
 app.get('/api/notifications', requireAuth, wrap(async (req, res) => {
   const r = await q('SELECT * FROM notifications WHERE user_id=$1 ORDER BY is_read ASC, created_at DESC LIMIT 100',

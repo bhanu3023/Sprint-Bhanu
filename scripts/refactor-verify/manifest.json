@@ -563,7 +563,9 @@
             ]
           ],
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "D2 - removed the unused sendEmail require (whole line; email.js still loaded by notify.js far earlier)"
         },
         {
           "file": "src/server/routes/oauth.js",
