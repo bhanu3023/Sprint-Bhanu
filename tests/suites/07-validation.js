@@ -54,7 +54,6 @@ module.exports = {
     }},
 
     { name: 'SQL metacharacters in a query string do not reach the driver',
-      knownBug: "src/server/errors.js:5 the global handler maps EVERY error to 500, ignoring err.status. The express.json parse failure carries status 400 / type entity.parse.failed and still becomes a 500, and postgres input errors (invalid integer syntax, NUL byte in a text value) surface as 500 not 400. Honouring err.status would fix all three symptoms.",
       fn: async (c, x) => {
       // Every one of these would break a string-interpolated query. All queries
       // are parameterized, so each must come back as a normal answer or a 4xx.
@@ -94,7 +93,6 @@ module.exports = {
     }},
 
     { name: 'malformed JSON -> 400, not a crash',
-      knownBug: "src/server/errors.js:5 the global handler maps EVERY error to 500, ignoring err.status. The express.json parse failure carries status 400 / type entity.parse.failed and still becomes a 500, and postgres input errors (invalid integer syntax, NUL byte in a text value) surface as 500 not 400. Honouring err.status would fix all three symptoms.",
       fn: async (c, x) => {
       const r = await c.post('/api/issues', { token: x.users.manager.token,
         raw: '{"space_id": "' + x.spaceId + '", "title": ', headers: { 'Content-Type': 'application/json' } });
@@ -103,7 +101,6 @@ module.exports = {
     }},
 
     { name: 'wrong types in numeric fields -> 4xx, not 500',
-      knownBug: "src/server/errors.js:5 the global handler maps EVERY error to 500, ignoring err.status. The express.json parse failure carries status 400 / type entity.parse.failed and still becomes a 500, and postgres input errors (invalid integer syntax, NUL byte in a text value) surface as 500 not 400. Honouring err.status would fix all three symptoms.",
       fn: async (c, x, own) => {
       const r = await c.post('/api/issues', { token: x.users.manager.token,
         body: { space_id: x.spaceId, title: 'bad number ' + x.tag, type: 'task', story_points: 'not-a-number' } });

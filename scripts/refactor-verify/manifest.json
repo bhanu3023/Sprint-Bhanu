@@ -615,7 +615,9 @@
             ]
           ],
           "gluePrefix": "const { app } = require('./express-app');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "honour err.status in the global handler: express.json parse failures carry status 400 and postgres SQLSTATE class 22 (data exception) are client-input errors; both were being reported as 500. Class 23 deliberately unmapped."
         },
         {
           "file": "src/server/routes/spa.js",
