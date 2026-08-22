@@ -24,6 +24,12 @@ app.post('/api/issues/:id/attachments', requireAuth, (req, res, next) => {
       const spaceId = await getIssueSpaceId(q, req.params.id);
       if (!spaceId) return res.status(404).json({ error: 'Issue not found' });
       if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'attachment.upload'))) return;
+        // multer only populates req.files for a multipart body, so a JSON POST
+        // left it undefined and the loop below threw a TypeError -- surfacing as a
+        // 500 on what is plainly a bad request. Same guard, same wording as the
+        // sibling route at comments.js:71. The err.status work in errors.js cannot
+        // cover this one: a TypeError carries neither a status nor a SQLSTATE.
+        if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files' });
       const saved = [];
       for (const f of req.files) {
         const fileId = uid();

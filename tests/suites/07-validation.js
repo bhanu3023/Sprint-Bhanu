@@ -136,19 +136,17 @@ module.exports = {
     }},
 
     {
-      // KNOWN BUG, already reported and deliberately NOT fixed: this route does
-      // `for (const f of req.files)` with no guard, so a non-multipart POST
-      // dereferences undefined and returns 500. Its sibling comments.js:71 has
-      // the guard. Recorded here so the suite documents it rather than hides it.
+      // multer only fills req.files for a multipart body, so a JSON POST left it
+      // undefined and `for (const f of req.files)` threw a TypeError -- a 500 on
+      // a plainly bad request. Guarded to match the sibling at comments.js:71.
       name: 'attachments route survives a non-multipart POST',
-      knownBug: 'src/server/routes/attachments.js:28 -- `for (const f of req.files)` has no guard, so a non-multipart body 500s. comments.js:71 guards the same case.',
       fn: async (c, x, own) => {
         const iss = await c.post('/api/issues', { token: x.users.manager.token,
           body: { space_id: x.spaceId, title: 'nonmultipart ' + x.tag, type: 'task' } });
         own.issue(iss.body.id);
         const r = await c.post('/api/issues/' + iss.body.id + '/attachments',
           { token: x.users.manager.token, body: { not: 'a file' } });
-        A.ok(r.status < 500, 'non-multipart POST to attachments returned ' + r.status + ', expected a 400');
+          A.status(r, 400, 'a non-multipart POST to the attachments route');
       }
     }
   ]
