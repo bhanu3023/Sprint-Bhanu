@@ -18,6 +18,23 @@
  *   [SD] REQUIRE ORDER— the require() sequence parsed out of the REAL entry file
  *                       equals the declared registration order, so the 117
  *                       routes still register in their original order.
+ *   [SE] PINNED DIGESTS— every one of the 32 server parts' CURRENT on-disk sha256
+ *                       matches its manifest pin.
+ *
+ * WHY [SE] EXISTS: [SA]/[SB] prove byte-identity against the ORIGINAL 171,150-byte
+ * server.js monolith from before the split. Six rounds of bug fixes since then
+ * flagged 15 of 32 parts modified:true, which permanently disables [SA]/[SB] for
+ * that part -- coverage against the original only ever decreases, the same
+ * problem lib/ had before it got a pin. The original-monolith proof is not
+ * wrong, it is just answering a question ("did the split move code correctly?")
+ * that was settled once, historically, and does not need to keep being asked.
+ *
+ * [SE] re-pins server.js as of THIS commit: every current file's digest,
+ * verbatim. Unlike [SA]/[SB], a pin is RESTORED to fully-verified on the next
+ * intentional change, so this is the number that should be quoted for ongoing
+ * coverage. [SA]-[SD] are kept and still run -- they are the permanent record
+ * that the original 2026-08 split lost nothing -- but they are historical from
+ * here on, not the live coverage figure.
  *
  * This is exact-match removal of a declared constant, not normalization: the
  * glue text is fixed in the manifest, compared byte-for-byte, and then removed
@@ -26,6 +43,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..', '..');
 const MANIFEST = path.join(__dirname, 'manifest.json');
@@ -211,6 +229,31 @@ for (const t of targets) {
 
   console.log('   arithmetic          : original ' + bodyLinesTotal + ' lines + ' + glueLinesTotal +
               ' glue lines  (server.js original = ' + totalLines + ')');
+
+  // ── [SE] pinned digests -- the live coverage figure ───────────────────
+  const pins = manifest.serverPins || {};
+  const ctrlBytes = b => { for (let i = 0; i < b.length; i++) { const x = b[i]; if (x === 0 || x < 9 || (x > 13 && x < 32) || x === 127) return i; } return -1; };
+  let seOk = true, sePinned = 0;
+  const pinnedFiles = Object.keys(pins);
+  for (const p of parts) {
+    if (!pins[p.file]) { seOk = false; failed = true; console.log('   [SE] ' + p.file + ' has NO pin -- unpinned part'); continue; }
+    const abs = path.join(ROOT, p.file);
+    if (!fs.existsSync(abs)) { seOk = false; failed = true; console.log('   [SE] ' + p.file + ' MISSING from disk'); continue; }
+    const buf = fs.readFileSync(abs);
+    const actual = crypto.createHash('sha256').update(buf).digest('hex');
+    if (actual !== pins[p.file]) {
+      seOk = false; failed = true;
+      console.log('   [SE] ' + p.file + ' DIGEST MISMATCH -- pinned=' + pins[p.file].slice(0, 16) + ' actual=' + actual.slice(0, 16));
+      continue;
+    }
+    const bad = ctrlBytes(buf);
+    if (bad >= 0) { seOk = false; failed = true; console.log('   [SE] ' + p.file + ' contains a control byte at offset ' + bad); continue; }
+    sePinned++;
+  }
+  const extra = pinnedFiles.filter(f => !parts.some(p => p.file === f));
+  if (extra.length) { seOk = false; failed = true; extra.forEach(f => console.log('   [SE] pinned file not in parts list: ' + f)); }
+  console.log('   [SE] pinned digests : ' + (seOk ? 'PASS — all ' + sePinned + ' of ' + parts.length + ' server parts byte-verified by pinned digest'
+                                                  : 'FAIL'));
 
   // ── What this PASS does NOT cover ────────────────────────────────────
   // Printed every run, unconditionally. `modified: true` switches [SA] and
