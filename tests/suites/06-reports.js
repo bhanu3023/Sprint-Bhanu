@@ -38,9 +38,14 @@ async function reportWorld(c, x, own) {
   A.statusIn(sp, [200, 201], 'create report space');
   own.space(sp.body.id);
   // every fixture user joins so team/workload reports have people to group by
+  // The route is POST /api/space-members with space_id in the body. This
+  // previously posted to a URL that does not exist and swallowed the failure
+  // with .catch(), so the team/workload reports were being exercised against a
+  // space with only one member.
   for (const u of ['manager', 'member', 'viewer']) {
-    await c.post('/api/spaces/' + sp.body.id + '/members', { token: x.users.admin.token,
-      body: { user_id: x.users[u].id, role: u === 'manager' ? 'manager' : u } }).catch(() => {});
+    const add = await c.post('/api/space-members', { token: x.users.admin.token,
+      body: { space_id: sp.body.id, user_id: x.users[u].id, role: 'member' } });
+    A.statusIn(add, [200, 201], 'add ' + u + ' to the report space');
   }
 
   const spr = await c.post('/api/sprints', { token: x.users.admin.token,
