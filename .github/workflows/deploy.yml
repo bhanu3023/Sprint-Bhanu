@@ -104,7 +104,7 @@ jobs:
         # count is tracked-files + directories, not files alone. Adding a file in a
         # NEW directory therefore raises this by 2, not 1.
         run: |
-          MIN_ARCHIVE_ENTRIES=194
+          MIN_ARCHIVE_ENTRIES=195
 
           git archive --format=tar HEAD > /tmp/release.tar
           ENTRIES=$(tar -tf /tmp/release.tar | grep -c .)

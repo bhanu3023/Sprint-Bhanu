@@ -19,7 +19,7 @@ started.
 one line inside a client file makes `[A]` and `[C]` fail outright, so the only way
 to delete client code is to add a `modified` concept, exactly as `serverdiff` has.
 The server tree shows what that costs: it began at 32/32 byte-verified and is now
-**21/32**, and the erosion is permanent — once a file is flagged, byte-identity for
+**20/32**, and the erosion is permanent — once a file is flagged, byte-identity for
 it can never be re-established.
 
 The decision: **~300 lines of code that nothing calls, and that costs nothing at
@@ -138,8 +138,10 @@ one space:
 
 So it bypasses the space scoping every other read path enforces. No secrets and no
 issue data, but space ids are the handle other endpoints take as `space_id` (those
-endpoints do their own permission checks). Options: gate it to org admin, or remove
-it. Either is a behaviour change and needs its own decision.
+endpoints do their own permission checks). **FIXED in `48e8e08`** -- gated to org admin rather than removed, because removal
+is unprovable dead by the same logic as the other seven caller-less routes. After
+the gate: unauthenticated 401, single-space viewer **403**, org admin 200 with all
+5 spaces, and the viewer legitimate paths (/api/data, /api/spaces) unaffected.
 
 ---
 
@@ -169,6 +171,18 @@ likely write the same tools.
 
 **Always include known-live controls in a deadness probe.** If a control reads zero,
 the probe is broken, not the code.
+
+3. **An archive-integrity floor was set one below the real count** (193 against 194),
+   because  emits directory entries and a file in a *new* directory
+   raises the count by two. At 193 the check would have passed an archive that had
+   silently lost a file -- the exact failure it exists to catch.
+
+   This one is different in kind from the other nine blind spots in this project:
+   **it was INTRODUCED while hardening, not inherited.** The guard was added to
+   defend against a truncated tree, and it shipped defective against that very
+   hazard. Fixed in . Hardening needs the same falsification discipline as
+   the code it guards -- prove the new check goes red before trusting that it is
+   green.
 
 ## Inline handler census
 
