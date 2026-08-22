@@ -101,7 +101,7 @@ jobs:
         #
         # Update MIN_ARCHIVE_ENTRIES deliberately when files are added/removed.
         run: |
-          MIN_ARCHIVE_ENTRIES=190
+          MIN_ARCHIVE_ENTRIES=191
 
           git archive --format=tar HEAD > /tmp/release.tar
           ENTRIES=$(tar -tf /tmp/release.tar | grep -c .)

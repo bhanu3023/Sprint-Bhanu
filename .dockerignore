@@ -1,0 +1,29 @@
+# The Dockerfile does `COPY package*.json ./` then `RUN npm install` then
+# `COPY . .`. Without this file that final COPY overwrites the freshly
+# installed /app/node_modules with whatever node_modules happens to sit in the
+# build context on the server -- the deploy extracts the release over
+# /opt/Sprint-Board without wiping, so a stale directory there persists
+# indefinitely. Excluding it keeps the image's dependencies the ones npm just
+# installed for the image's own platform and Node version.
+node_modules/
+
+# Never needed at runtime, and .git carries the full history of the repo into
+# a publicly-served image directory.
+.git/
+.gitignore
+.github/
+
+# Verification harness output: large, and the snapshots contain rendered
+# application data including real user names and email addresses.
+.refactor-verify/
+
+# Local-only dev page. Untracked and excluded from `git archive`, so it should
+# never be in the context anyway -- belt and braces, because the context is a
+# directory on the server, not the archive.
+dev-login.html
+
+# Local tooling and editor noise.
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
