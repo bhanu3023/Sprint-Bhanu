@@ -278,7 +278,9 @@
             ]
           ],
           "gluePrefix": "require('dotenv').config();\r\nconst { Pool } = require('pg');\r\n",
-          "glueSuffix": "\r\nmodule.exports = { pool, q };\r\n"
+          "glueSuffix": "\r\nmodule.exports = { pool, q };\r\n",
+          "modified": true,
+          "modifiedReason": "connectionTimeoutMillis: pg defaults to 0 (wait forever) so a request could queue for a pooled client with no deadline. Set to 10000ms, chosen from measured acquisition latency (worst observed 181ms cold, local, no TLS)."
         },
         {
           "file": "src/server/auth.js",
