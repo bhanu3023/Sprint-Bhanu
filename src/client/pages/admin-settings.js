@@ -1326,32 +1326,6 @@ window.addEventListener('popstate', function () {
   }
 });
 
-function goBackFromIssue() {
-  stopDrawerLiveSync();
-  window._drawerPending = {};
-  if (window.history.length > 1) {
-    _goBackOnce();
-    return;
-  }
-  _closeIssueDrawer();
-  var pView = S._prevView;
-  var pYourWorkTab = S._prevYourWorkTab;
-  var returnTab = S._prevTab || window._issueReturnTab || 'backlog';
-  var returnSpace = S._prevSpace || window._issueReturnSpace || S.currentSpace;
-  window._issueReturnTab = null;
-  window._issueReturnSpace = null;
-  if (returnSpace) {
-    navigateToSpace(returnSpace, returnTab, { replaceUrl: true });
-  } else if (pView === 'yourwork') {
-    if (pYourWorkTab) S.yourWorkTab = pYourWorkTab;
-    if (S._prevYwOpen) applyYourWorkOpenFilter();
-    else clearYourWorkFilters();
-    navigateTo('yourwork', { replaceUrl: true });
-  } else {
-    navigateTo('home', { replaceUrl: true });
-  }
-}
-
 // Same destination-resolving logic as goBackFromIssue's fallback branch, but
 // never calls window.history.back() / relies on popstate at all -- see the
 // comment on this button's onclick wiring in openIssuePage.

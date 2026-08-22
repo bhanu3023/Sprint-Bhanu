@@ -217,6 +217,18 @@
           "from": 16819,
           "to": 17295
         }
+      ],
+      "moves": [
+        {
+          "block": [
+            16664,
+            16689
+          ],
+          "from": "src/client/pages/admin-settings.js",
+          "to": "src/client/components/modal-drawer.js",
+          "afterOriginalLine": 1189,
+          "why": "placement: goBackFromIssue belongs with closeDrawer and goBackToSavedPage in components/modal-drawer.js, not in pages/admin-settings.js"
+        }
       ]
     },
     {

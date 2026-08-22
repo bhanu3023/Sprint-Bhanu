@@ -36,6 +36,32 @@ const rd = p => fs.readFileSync(p);
 const toLF = s => s.replace(/\r\n/g, '\n');
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
 
+// ── DECLARED MOVES ────────────────────────────────────────────────────────
+// A placement fix relocates a block of code from one split file to another.
+// That BREAKS the original model outright: the old [A] compared each file
+// against its declared app.js line range, and [C] concatenated files in load
+// order expecting the pristine bytes back. After a move, the source file is
+// missing a block and the destination has one that belongs to a range it does
+// not own, so [A] fails for both files and [C] fails on ordering.
+//
+// Contiguity is therefore GONE for the files involved, and the proof changes
+// shape. It does not weaken:
+//
+//   [A] expected content is computed from pristine app.js MINUS the blocks
+//       declared as moved out, PLUS the blocks declared as moved in at their
+//       declared position. Still RAW byte-comparison against pristine bytes --
+//       the relocation is declared, not assumed.
+//
+//   [C] replaced by REVERSIBILITY. Every file's ACTUAL bytes are split into
+//       lines, each declared move is UN-APPLIED (the block is lifted out of the
+//       destination and put back where it came from in the source), and the
+//       result is concatenated in load order. That must equal pristine app.js
+//       line-for-line. A move is pure exactly when it is byte-reversible, so
+//       this is a stronger statement than the old ordered concatenation: it
+//       proves no byte was added, lost or altered anywhere, AND that the moved
+//       block is byte-identical to the original.
+//
+// If moves is empty the behaviour is identical to before.
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 // Client targets only. Server targets use a different part shape (ranges +
 // declared glue, because CommonJS extraction cannot avoid a require preamble)
@@ -86,14 +112,45 @@ for (const t of targets) {
   console.log('   reference : ' + path.relative(ROOT, refPath) + '  (untransformed disk snapshot)');
   console.log('   bytes     : ' + pristine.length + '   lines: ' + totalLines);
 
-  // ── A. range fidelity (RAW) ─────────────────────────────────────────
+  const moves = t.moves || [];
+  if (moves.length) {
+    console.log('   moves     : ' + moves.length + ' declared relocation(s) — contiguity intentionally broken');
+    moves.forEach(mv => {
+      console.log('               app.js lines ' + mv.block[0] + '-' + mv.block[1] +
+                  ' (' + (mv.block[1] - mv.block[0] + 1) + ' lines)');
+      console.log('               from ' + mv.from);
+      console.log('               to   ' + mv.to + ', after original line ' + mv.afterOriginalLine);
+      if (mv.why) console.log('               why: ' + mv.why);
+    });
+  }
+
+  // element helpers: a file's content split into lines, trailing-newline aware
+  const toElems = (content, isLast) => isLast ? content.split('\n') : content.slice(0, -1).split('\n');
+  const fromElems = (elems, isLast) => isLast ? elems.join('\n') : elems.join('\n') + '\n';
+  const blockElems = mv => pLines.slice(mv.block[0] - 1, mv.block[1]);
+
+  // Expected element array for a part, with declared moves applied.
+  function expectedElems(p) {
+    let els = pLines.slice(p.from - 1, p.to);
+    // remove blocks that moved OUT of this file (descending, so indices hold)
+    moves.filter(mv => mv.from === p.file)
+         .sort((a, b) => b.block[0] - a.block[0])
+         .forEach(mv => { els.splice(mv.block[0] - p.from, mv.block[1] - mv.block[0] + 1); });
+    // insert blocks that moved INTO this file
+    moves.filter(mv => mv.to === p.file)
+         .sort((a, b) => a.afterOriginalLine - b.afterOriginalLine)
+         .forEach(mv => { els.splice(mv.afterOriginalLine - p.from + 1, 0, ...blockElems(mv)); });
+    return els;
+  }
+
+  // ── A. range fidelity (RAW, move-aware) ─────────────────────────────
   let aOk = true;
   for (const p of parts) {
     const abs = path.join(ROOT, p.file);
     if (!fs.existsSync(abs)) { aOk = false; failed = true; console.log('   [A] MISSING FILE: ' + p.file); continue; }
     const actual = rd(abs).toString('latin1');
     const isLast = p.to >= totalLines;
-    const expected = pLines.slice(p.from - 1, p.to).join('\n') + (isLast ? '' : '\n');
+    const expected = fromElems(expectedElems(p), isLast);
     if (actual === expected) continue;
 
     aOk = false; failed = true;
@@ -131,26 +188,74 @@ for (const t of targets) {
   if (!bOk) failed = true;
   console.log('   [B] exact tiling    : ' + (bOk ? 'PASS — lines 1-' + totalLines + ' covered exactly once' : 'FAIL'));
 
-  // ── C. concatenation (RAW) ──────────────────────────────────────────
+  // ── C. concatenation / move-reversibility (RAW) ─────────────────────
   let cOk = false;
   if (parts.every(p => fs.existsSync(path.join(ROOT, p.file)))) {
     const order = t.loadOrder && t.loadOrder.length ? t.loadOrder : sorted.map(p => p.file);
-    const joined = Buffer.concat(order.map(f => rd(path.join(ROOT, f))));
-    cOk = Buffer.compare(pristine, joined) === 0;
-    if (!cOk) {
-      failed = true;
-      console.log('   [C] concatenated ' + joined.length + ' bytes vs pristine ' + pristine.length);
-      if (toLF(joined.toString('latin1')) === toLF(pStr)) {
-        console.log('   [C] DIAGNOSTIC: content complete and in order; only LINE ENDINGS differ.');
-      } else {
-        const min = Math.min(pristine.length, joined.length);
-        let i = 0; while (i < min && pristine[i] === joined[i]) i++;
-        console.log('   [C] DIAGNOSTIC: CONTENT differs at byte ' + i +
-                    ' (original line ~' + pStr.slice(0, i).split('\n').length + ')');
+
+    if (!moves.length) {
+      // No moves: the original check, byte-for-byte over concatenated files.
+      const joined = Buffer.concat(order.map(f => rd(path.join(ROOT, f))));
+      cOk = Buffer.compare(pristine, joined) === 0;
+      if (!cOk) {
+        failed = true;
+        console.log('   [C] concatenated ' + joined.length + ' bytes vs pristine ' + pristine.length);
+        if (toLF(joined.toString('latin1')) === toLF(pStr)) {
+          console.log('   [C] DIAGNOSTIC: content complete and in order; only LINE ENDINGS differ.');
+        } else {
+          const min = Math.min(pristine.length, joined.length);
+          let i = 0; while (i < min && pristine[i] === joined[i]) i++;
+          console.log('   [C] DIAGNOSTIC: CONTENT differs at byte ' + i +
+                      ' (original line ~' + pStr.slice(0, i).split('\n').length + ')');
+        }
       }
+      console.log('   [C] concatenation   : ' + (cOk ? 'PASS — cat-diff EMPTY (RAW byte-identical)' : 'FAIL'));
+    } else {
+      // Moves declared: UN-APPLY them against the files' ACTUAL bytes, then
+      // require the reconstruction to equal pristine line-for-line.
+      const elemsByFile = {};
+      for (const p of parts) {
+        elemsByFile[p.file] = toElems(rd(path.join(ROOT, p.file)).toString('latin1'), p.to >= totalLines);
+      }
+      let liftOk = true;
+      for (const mv of moves) {
+        const destPart = parts.find(x => x.file === mv.to);
+        const srcPart = parts.find(x => x.file === mv.from);
+        const want = blockElems(mv);
+        const at = mv.afterOriginalLine - destPart.from + 1;
+        const got = elemsByFile[mv.to].slice(at, at + want.length);
+        if (got.join('\n') !== want.join('\n')) {
+          liftOk = false; failed = true;
+          console.log('   [C] moved block is NOT byte-identical in its destination ' + mv.to);
+          let i = 0; while (i < Math.min(got.length, want.length) && got[i] === want[i]) i++;
+          console.log('        first differing line ' + i + ' of the block');
+          console.log('        expected: ' + JSON.stringify((want[i] || '').slice(0, 100)));
+          console.log('        actual  : ' + JSON.stringify((got[i] || '').slice(0, 100)));
+          break;
+        }
+        elemsByFile[mv.to].splice(at, want.length);                       // lift out of destination
+        elemsByFile[mv.from].splice(mv.block[0] - srcPart.from, 0, ...want); // put back in source
+      }
+      if (liftOk) {
+        const rebuilt = [];
+        order.forEach(f => { rebuilt.push(...elemsByFile[f]); });
+        cOk = rebuilt.length === pLines.length && rebuilt.every((l, i) => l === pLines[i]);
+        if (!cOk) {
+          failed = true;
+          console.log('   [C] rebuilt ' + rebuilt.length + ' lines vs pristine ' + pLines.length);
+          const n = Math.min(rebuilt.length, pLines.length);
+          let i = 0; while (i < n && rebuilt[i] === pLines[i]) i++;
+          console.log('        first differing line ' + (i + 1));
+          console.log('        pristine: ' + JSON.stringify((pLines[i] || '').slice(0, 100)));
+          console.log('        rebuilt : ' + JSON.stringify((rebuilt[i] || '').slice(0, 100)));
+        }
+      }
+      console.log('   [C] reversibility   : ' + (cOk
+        ? 'PASS — un-applying ' + moves.length + ' declared move(s) reproduces pristine app.js line-for-line ('
+          + pLines.length + ' lines); the moved block is byte-identical in its new home'
+        : 'FAIL'));
     }
-  } else failed = true;
-  console.log('   [C] concatenation   : ' + (cOk ? 'PASS — cat-diff EMPTY (RAW byte-identical)' : 'FAIL'));
+  } else { failed = true; console.log('   [C] ' + (moves.length ? 'reversibility' : 'concatenation') + '   : FAIL — missing file'); }
 
   // ── D. declared order vs the real HTML ──────────────────────────────
   if (t.orderFrom) {
