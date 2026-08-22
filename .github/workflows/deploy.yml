@@ -100,8 +100,11 @@ jobs:
         # export-ignore changes that quietly stop shipping something.
         #
         # Update MIN_ARCHIVE_ENTRIES deliberately when files are added/removed.
+        # NOTE: git archive emits DIRECTORY entries too (34 of them today), so the
+        # count is tracked-files + directories, not files alone. Adding a file in a
+        # NEW directory therefore raises this by 2, not 1.
         run: |
-          MIN_ARCHIVE_ENTRIES=193
+          MIN_ARCHIVE_ENTRIES=194
 
           git archive --format=tar HEAD > /tmp/release.tar
           ENTRIES=$(tar -tf /tmp/release.tar | grep -c .)
