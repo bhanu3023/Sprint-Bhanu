@@ -401,7 +401,9 @@
             ]
           ],
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { retentionDays } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { sanitizeOrgRow } = require('../files');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "FIX 6 - scope users/space_members in SQL for non-admins instead of loading every row and filtering in JS"
         },
         {
           "file": "src/server/routes/my-issues.js",
