@@ -1,6 +1,6 @@
 # Workflow: Bug Fix — Sprint Board
 
-Blueprint for diagnosing and fixing bugs in server.js / app.js.
+Blueprint for diagnosing and fixing bugs in src/server/ / src/client/.
 
 ## Steps
 
@@ -8,7 +8,7 @@ Blueprint for diagnosing and fixing bugs in server.js / app.js.
 - Identify exact steps: which endpoint? request body? response received?
 - Server error → check Node console for `console.error` output (raw pg error or JS exception)
 - Wrong data → check the `pool.query` SQL and params array order
-- Frontend bug → check the relevant view function in app.js
+- Frontend bug → check the relevant view function under src/client/ (pages/, components/, crud/)
 
 ### 2. Locate
 - Search server.js by route string: `app.get('/api/issues'` or `app.put('/api/sprints'`

@@ -15,6 +15,10 @@
  *
  * Loaded as a classic script by both index.html and login.html, so the login
  * screen is covered too.
+ *
+ * LOADED BY BOTH THE BROWSER AND NODE -- index.html and login.html load it as a
+ * <script>, and scripts/test-hotjar.js require()s it for its 138 assertions.
+ * That dual use is why it sits at the repository root; see ADR-009.
  */
 (function () {
   'use strict';

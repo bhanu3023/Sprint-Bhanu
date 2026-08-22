@@ -2,7 +2,7 @@
 
 ## What This Is
 A Jira-like sprint management tool: Express.js + PostgreSQL + Vanilla JS SPA.
-Single server file (`server.js`), single frontend (`app.js`), served from `index.html`.
+Modular server under `src/server/` (37 files) with `server.js` as a 31-line ordered require list; modular frontend under `src/client/` (42 files) loaded by `<script>` tags in `index.html`. No build step.
 
 GitHub: https://github.com/bhanu3023/Sprint-Bhanu.git
 

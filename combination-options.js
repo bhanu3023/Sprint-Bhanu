@@ -1,6 +1,16 @@
 /**
  * Combination options for Product_Team — grouped by Product Type.
  * Message Type | Mail Type | Content Type
+ *
+ * LOADED BY BOTH THE BROWSER AND NODE -- this is why it lives at the repository
+ * root rather than under src/client or src/server:
+ *   browser  index.html loads it as a <script>, and the bottom of this file
+ *            assigns to window.*
+ *   node     lib/builtin-issue-fields.js and
+ *            scripts/migrations/003-product-team-combination.js require() it,
+ *            and the bottom of this file assigns to module.exports
+ * Moving it into either tree breaks the other consumer. There is no bundler to
+ * resolve a shared path, so root IS the shared location. See ADR-009.
  */
 function normalizeCombinationLabel(s) {
   return String(s)

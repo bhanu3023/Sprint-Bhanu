@@ -16,6 +16,39 @@ GitHub: https://github.com/bhanu3023/Sprint-Bhanu.git
 | File Uploads | Multer (max 20 files per issue, stored in `uploads/`) |
 | Email | Nodemailer — SMTP config from DB `organizations.email_settings` jsonb OR env vars |
 
+## Repository Layout
+No build step. The browser loads plain `<script>` tags; Node requires CommonJS modules.
+
+```
+server.js                 31-line ORDERED require list — the order IS the route
+                          registration order. Entry point (package.json, Dockerfile).
+src/server/               37 files: core, db, auth, deps, express-app, files, notify,
+                          startup, oauth-helpers, errors, lib/ shims, routes/ (21 files)
+src/client/               42 files: pages/, components/, crud/, services/, state/, utils/
+                          loaded by <script> tags in index.html, in app.js line order
+lib/                      shared server logic reachable via src/server/lib/ shims
+index.html  login.html    the two served pages
+styles.css                stylesheet for index.html (login.html has inline <style>)
+combination-options.js    SHARED: browser <script> AND Node require()
+hotjar.js                 SHARED: browser <script> AND Node require()
+assets/                   images. uploads/ is auth-gated and recreated at boot.
+```
+
+**Do not move the four root files.** `server.js` is the entry point named by
+`package.json`, `Dockerfile`, and both `.bat` launchers. `combination-options.js`
+and `hotjar.js` are dual-environment — loaded by the browser *and* `require()`d by
+Node, with `typeof module` / `typeof window` guards — so they belong to neither
+`src/client` nor `src/server`. `styles.css` is browser-only and moving it is churn.
+See ADR-008 and ADR-009 in `.claude/memory/decisions.md`.
+
+Adding a server route: create the file under `src/server/routes/`, then add its
+`require` to `server.js` **at the position where its routes must register**
+(e.g. `/api/issues/deleted` must be required before `/api/issues/:id`).
+
+Adding a client file: create it under `src/client/`, then add a `<script>` tag to
+`index.html` in the right order. `scripts/refactor-verify/scriptblock.js` enforces
+that every managed file has exactly one tag and that the order matches.
+
 ## Database Tables & Key Fields
 ```
 users             id (usr-{uuid}), org_id, name, email, avatar_url, color,
@@ -73,7 +106,7 @@ saved_filters     id, space_id, user_id, name, conditions (jsonb), is_shared
 - Sessions: `ses-{uuid}` prefix
 - All other entities: plain UUID string
 
-## Express Route Pattern (server.js)
+## Express Route Pattern (`src/server/routes/`)
 ```js
 app.METHOD('/api/resource', authenticate, async (req, res) => {
   try {
@@ -114,7 +147,7 @@ When `PUT /api/issues/:id` is called:
 2. Move all non-Done issues → `sprint_id = NULL` (back to backlog)
 3. Notify every space member: `sprint_completed`
 
-## Frontend SPA (app.js)
+## Frontend SPA (`src/client/`, 42 files)
 - Global state object `S`: `currentUser`, `currentSpace`, `currentView`, `currentTab`, `drawerIssueId`, `awFilters`
 - `api(url, method, body)` — fetch wrapper with `Bearer token` from localStorage
 - `toast(msg, type)` — ephemeral notification toast
