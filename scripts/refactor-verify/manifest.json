@@ -352,7 +352,9 @@
             ]
           ],
           "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\nconst { express } = require('./core');\r\n",
-          "glueSuffix": "\r\nmodule.exports = { app };\r\n"
+          "glueSuffix": "\r\nmodule.exports = { app };\r\n",
+          "modified": true,
+          "modifiedReason": "FIX C - express.static allowlist replaces whole-repo static root"
         },
         {
           "file": "src/server/files.js",
