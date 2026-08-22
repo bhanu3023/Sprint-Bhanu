@@ -36,6 +36,19 @@ app.delete('/api/sprints/:id', requireAuth, wrap(async (req, res) => {
   const spaceId = await getSprintSpaceId(q, req.params.id);
   if (!spaceId) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'sprint.manage'))) return;
+  // sprint-lifecycle.md: deleting a sprint is only allowed while it is in
+  // planning. There was no status gate, so an ACTIVE sprint could be binned
+  // mid-sprint and every issue in it detached to the backlog -- the same
+  // data-integrity hole as the unguarded /start, reached from the other side.
+  // A completed sprint is refused too: its issues and velocity are the
+  // historical record the reports read.
+  const target = (await q('SELECT status FROM sprints WHERE id=$1 AND deleted_at IS NULL', [req.params.id])).rows[0];
+  if (!target) return res.status(404).json({ error: 'Sprint not found' });
+  if (target.status !== 'planning') {
+    return res.status(400).json({ error: target.status === 'active'
+      ? 'An active sprint cannot be deleted. Complete it first.'
+      : 'A completed sprint cannot be deleted; it is the historical record.' });
+  }
   // Soft delete so the sprint lands in Deleted Items and an org admin can restore
   // it. Its issues are still detached to the backlog (unchanged behaviour) — a
   // binned sprint must not keep tickets out of the backlog — but former_sprint_id

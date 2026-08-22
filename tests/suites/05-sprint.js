@@ -155,18 +155,34 @@ module.exports = {
       A.eq(Number(mixed.body.velocity), 0, 'velocity must be ignored, not applied');
     }},
 
-    { name: 'a sprint can only be deleted while in planning',
-      knownBug: "src/server/routes/sprints.js:35 DELETE /api/sprints/:id has no status gate, so an ACTIVE sprint can be binned and its issues detached to the backlog mid-sprint. sprint-lifecycle.md says it is only allowed while status=planning.",
-      fn: async (c, x, own) => {
+    { name: 'a sprint can only be deleted while in planning', fn: async (c, x, own) => {
       const w = await world(c, x, own, 'SG', []);
-      A.statusIn(await c.post('/api/sprints/' + w.sprintId + '/start', { token: x.users.admin.token }), [200, 201], 'start');
-      A.denied(await c.del('/api/sprints/' + w.sprintId, { token: x.users.admin.token }), 'deleting an ACTIVE sprint');
 
+      // PLANNING: allowed
       const planning = await c.post('/api/sprints', { token: x.users.admin.token,
         body: { space_id: w.spaceId, name: 'Deletable ' + x.tag, start_date: x.soon, end_date: x.future } });
       A.statusIn(planning, [200, 201], 'create a planning sprint');
-      const del = await c.del('/api/sprints/' + planning.body.id, { token: x.users.admin.token });
-      A.statusIn(del, [200, 204], 'deleting a PLANNING sprint must be allowed');
+      A.statusIn(await c.del('/api/sprints/' + planning.body.id, { token: x.users.admin.token }),
+        [200, 204], 'deleting a PLANNING sprint must be allowed');
+
+      // ACTIVE: refused, and its issues must stay put
+      A.statusIn(await c.post('/api/sprints/' + w.sprintId + '/start', { token: x.users.admin.token }),
+        [200, 201], 'start');
+      const activeDel = await c.del('/api/sprints/' + w.sprintId, { token: x.users.admin.token });
+      A.status(activeDel, 400, 'deleting an ACTIVE sprint must be refused');
+      A.includes(activeDel.raw, 'active sprint cannot be deleted', 'the 400 must say why');
+
+      // COMPLETED: refused -- it is the historical record the reports read
+      A.statusIn(await c.post('/api/sprints/' + w.sprintId + '/complete', { token: x.users.admin.token }),
+        [200, 201], 'complete');
+      const doneDel = await c.del('/api/sprints/' + w.sprintId, { token: x.users.admin.token });
+      A.status(doneDel, 400, 'deleting a COMPLETED sprint must be refused');
+
+      // and it is still there, still completed
+      const list = await c.get('/api/sprints?space_id=' + w.spaceId, { token: x.users.admin.token });
+      const still = (list.body || []).find(s => s.id === w.sprintId);
+      A.ok(still, 'the refused sprint must still exist');
+      A.eq(still.status, 'completed', 'and still be completed');
     }},
 
     { name: 'deleting a planning sprint returns its issues to the backlog', fn: async (c, x, own) => {
