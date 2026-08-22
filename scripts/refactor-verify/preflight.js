@@ -170,11 +170,84 @@ function assertFreshServer(base, maxAgeSeconds) {
   console.log('  -> pre-flight OK\n');
 }
 
-module.exports = { checkFreshServer, assertFreshServer, portFromBase };
+// ── [P4] repo integrity ───────────────────────────────────────────────────
+// This checkout lives in a OneDrive folder with Files On-Demand. Mid-session,
+// 16 harness files plus src/client/bootstrap.js and test-email-escaping.js were
+// dehydrated out of the working tree; catdiff and [5] caught it only because
+// they happen to read every part file by name. A check that reads fewer files
+// would have passed against a truncated tree.
+//
+// FAILS on a tracked file missing from disk, or a deletion staged/unstaged in
+// git -- that is the actual hazard, and it makes every file-reading check
+// unsound. Modifications and untracked files are REPORTED, not failed: the
+// harness has to stay usable while there is work in progress, and a pre-flight
+// that blocks on any dirty tree is a pre-flight people start bypassing.
+function checkRepoIntact() {
+  const problems = [];
+  const lines = [];
+  let tracked = [];
+  try {
+    tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8', timeout: 60000 })
+      .split('\0').filter(Boolean);
+  } catch (e) {
+    problems.push('could not list tracked files (' + e.message.split('\n')[0] + ')');
+    lines.push('  [P4] FAIL: git ls-files errored');
+    return { ok: false, lines, problems };
+  }
+
+  const fs = require('fs');
+  const missing = tracked.filter(f => !fs.existsSync(f));
+  if (missing.length) {
+    problems.push(missing.length + ' tracked file(s) are missing from disk -- the working tree is ' +
+      'truncated, so any check that reads files is measuring an incomplete tree. First few: ' +
+      missing.slice(0, 5).join(', '));
+    lines.push('  [P4] FAIL: ' + missing.length + ' tracked file(s) missing from disk');
+    missing.slice(0, 8).forEach(f => lines.push('         missing: ' + f));
+  } else {
+    lines.push('  [P4] all ' + tracked.length + ' tracked files present on disk');
+  }
+
+  try {
+    const st = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8', timeout: 60000 })
+      .split(/\r?\n/).filter(Boolean);
+    const deletions = st.filter(l => /^( D|D |AD|MD)/.test(l));
+    const mods = st.filter(l => /^( M|M |MM|A |AM|R )/.test(l));
+    const untracked = st.filter(l => /^\?\?/.test(l));
+    if (deletions.length) {
+      problems.push(deletions.length + ' deletion(s) present in git status: ' +
+        deletions.slice(0, 5).map(l => l.slice(3)).join(', '));
+      lines.push('  [P5] FAIL: ' + deletions.length + ' tracked deletion(s) in git status');
+    } else {
+      lines.push('  [P5] no tracked deletions in git status' +
+        (mods.length || untracked.length
+          ? ' (' + mods.length + ' modified, ' + untracked.length + ' untracked -- reported, not fatal)'
+          : ' (tree clean)'));
+    }
+  } catch (e) {
+    lines.push('  [P5] could not read git status: ' + e.message.split('\n')[0]);
+  }
+
+  return { ok: problems.length === 0, lines, problems };
+}
+
+function assertRepoIntact() {
+  const r = checkRepoIntact();
+  r.lines.forEach(l => console.log(l));
+  if (!r.ok) {
+    console.log('');
+    console.log('PRE-FLIGHT FAILED — the working tree is not intact:');
+    r.problems.forEach(p => console.log('  - ' + p));
+    console.log('  Recover with: git checkout -- .   (everything here is committed)');
+    process.exit(2);
+  }
+}
+
+module.exports = { checkFreshServer, assertFreshServer, checkRepoIntact, assertRepoIntact, portFromBase };
 
 if (require.main === module) {
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--max-age-seconds');
   const maxAge = i >= 0 ? Number(argv[i + 1]) : undefined;
+  assertRepoIntact();
   assertFreshServer(process.env.SB_BASE || 'http://localhost:3000', maxAge);
 }

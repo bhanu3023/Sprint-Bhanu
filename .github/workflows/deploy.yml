@@ -51,33 +51,81 @@ jobs:
         # hotjar.js and combination-options.js, which neither the original gate
         # nor its first replacement checked -- a syntax error in either shipped
         # clean. Globbing means a new root script is covered the day it lands.
+        #
+        # MINIMUM COUNTS, not just non-zero. A non-zero guard fires at 0 files;
+        # it does nothing at 79 of 89. That gap is reachable: this repo lives in
+        # a OneDrive folder with Files On-Demand, and mid-session 16 harness
+        # files plus src/client/bootstrap.js were dehydrated out of the working
+        # tree. A missing file passes `node --check` by never being checked, so
+        # a truncated tree would sail through and ship.
+        #
+        # Update these numbers DELIBERATELY when files are added or removed.
+        # A mismatch is meant to make you look, not to be silenced.
         run: |
+          MIN_ROOT_JS=3      # server.js, hotjar.js, combination-options.js
+          MIN_SRC_JS=79      # src/client 42 + src/server 37
+          MIN_LIB_JS=6       # lib/*.js, excluding lib/migrations/index.js
+
           ROOT_JS=$(find . -maxdepth 1 -type f -name '*.js' | sort)
-          echo "checking $(printf '%s\n' "$ROOT_JS" | grep -c .) root file(s)"
-          if [ -z "$ROOT_JS" ]; then
-            echo "::error::Syntax gate matched no .js at the repo root -- the gate is stale, fix it." >&2
+          ROOT_N=$(printf '%s\n' "$ROOT_JS" | grep -c .)
+          SRC_N=$(find src/client src/server -type f -name '*.js' | wc -l)
+          LIB_N=$(find lib -maxdepth 1 -type f -name '*.js' | wc -l)
+          echo "root=$ROOT_N (min $MIN_ROOT_JS)  src=$SRC_N (min $MIN_SRC_JS)  lib=$LIB_N (min $MIN_LIB_JS)"
+
+          if [ "$ROOT_N" -lt "$MIN_ROOT_JS" ] || [ "$SRC_N" -lt "$MIN_SRC_JS" ] || [ "$LIB_N" -lt "$MIN_LIB_JS" ]; then
+            echo "::error::Syntax gate found FEWER files than expected (root $ROOT_N/$MIN_ROOT_JS, src $SRC_N/$MIN_SRC_JS, lib $LIB_N/$MIN_LIB_JS). The tree is truncated or the expected counts are stale -- do not ship until you know which." >&2
             exit 1
           fi
+
           printf '%s\n' "$ROOT_JS" | xargs -r -n1 node --check
-          COUNT=$(find src/client src/server -type f -name '*.js' | wc -l)
-          echo "checking $COUNT file(s) under src/"
-          # A gate that silently matches nothing is how the app.js check rotted
-          # unnoticed. Refuse to pass on an empty match.
-          if [ "$COUNT" -lt 1 ]; then
-            echo "::error::Syntax gate matched no files under src/ -- the gate is stale, fix it." >&2
-            exit 1
-          fi
           find src/client src/server -type f -name '*.js' -print0 | xargs -0 -r -n1 node --check
           for f in lib/*.js lib/migrations/index.js; do node --check "$f"; done
           echo "syntax OK"
 
       # Tracked files only. Extracting this over the deploy directory leaves
       # untracked files alone, which is how the server's .env and uploads/
-      # survive a deploy -- the Dockerfile has no .dockerignore, so `COPY . .`
-      # bakes .env into the image, and it must be there to bake in.
+      # survive a deploy. `COPY . .` then bakes .env into the image, and it must
+      # be there to bake in -- so .env is deliberately NOT in .dockerignore.
+      # (.dockerignore does exclude node_modules/, .git/, .github/ and
+      # .refactor-verify/; see that file for why each one.)
       - name: Build the release archive
+        # The archive is what actually ships, so its contents are asserted here
+        # rather than trusted. Same reason as the minimum counts in the syntax
+        # gate: a tree truncated by OneDrive dehydration would otherwise produce
+        # a smaller archive and deploy silently.
+        #
+        # git archive reads from the commit, not the working tree, so it is
+        # already immune to a dehydrated file -- this catches the other
+        # direction: files accidentally dropped from a commit, or .gitignore /
+        # export-ignore changes that quietly stop shipping something.
+        #
+        # Update MIN_ARCHIVE_ENTRIES deliberately when files are added/removed.
         run: |
-          git archive --format=tar HEAD | gzip -9 > /tmp/release.tar.gz
+          MIN_ARCHIVE_ENTRIES=190
+
+          git archive --format=tar HEAD > /tmp/release.tar
+          ENTRIES=$(tar -tf /tmp/release.tar | grep -c .)
+          echo "archive entries: $ENTRIES (min $MIN_ARCHIVE_ENTRIES)"
+          if [ "$ENTRIES" -lt "$MIN_ARCHIVE_ENTRIES" ]; then
+            echo "::error::Release archive has $ENTRIES entries, expected at least $MIN_ARCHIVE_ENTRIES. Refusing to ship a possibly-truncated tree." >&2
+            exit 1
+          fi
+
+          # Entry point and the two trees must be in the archive by name, not
+          # just present in the count.
+          for required in server.js index.html login.html styles.css package.json; do
+            tar -tf /tmp/release.tar | grep -qx "$required" || {
+              echo "::error::Release archive is missing $required." >&2; exit 1; }
+          done
+          ARC_SRC=$(tar -tf /tmp/release.tar | grep -cE '^src/(client|server)/.*\.js$')
+          echo "archive src/ js entries: $ARC_SRC"
+          if [ "$ARC_SRC" -lt 79 ]; then
+            echo "::error::Release archive has only $ARC_SRC src/ js files, expected at least 79." >&2
+            exit 1
+          fi
+
+          gzip -9 -c /tmp/release.tar > /tmp/release.tar.gz
+          rm -f /tmp/release.tar
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
           ls -lh /tmp/release.tar.gz
 

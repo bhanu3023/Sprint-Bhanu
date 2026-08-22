@@ -23,6 +23,7 @@ const { collect } = require('./lib/globals');
 
 const BASE = process.env.SB_BASE || 'http://localhost:3000';
 // Refuse to snapshot a server that is not this run's code -- see preflight.js.
+require('./preflight').assertRepoIntact();
 require('./preflight').assertFreshServer(BASE);
 const OUTDIR = path.join(__dirname, '..', '..', '.refactor-verify');
 const SETTLE_MS = Number(process.env.SB_SETTLE_MS || 1800);
