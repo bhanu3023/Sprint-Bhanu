@@ -436,7 +436,9 @@
             ]
           ],
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { UPDATE_WHITELIST, buildDynamicUpdate, canRemoveSpaceMember, denyUnlessCanAct, getSpaceMemberRecord, isOrgAdmin, pickAllowed, requireOrgAdmin, seedBuiltinIssueFields, validateSpaceRoleAssignment } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "SECURITY - gate /api/debug/spaces to org admin (it returned every space to any authenticated user)"
         },
         {
           "file": "src/server/routes/sprints.js",

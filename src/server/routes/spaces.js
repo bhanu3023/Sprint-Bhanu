@@ -60,6 +60,11 @@ app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
 
 // Debug: raw spaces count
 app.get('/api/debug/spaces', requireAuth, wrap(async (req, res) => {
+  // Org admin only. This returns EVERY space in the org, which bypasses the
+  // space scoping every other read path enforces: before this, a viewer who
+  // belonged to one space received all of them, while GET /api/data correctly
+  // gave that same user one. Same class of leak as the /api/data over-fetch.
+  if (!requireOrgAdmin(req.user, res)) return;
   const all = await q(`SELECT id, name, key, is_archived FROM spaces ORDER BY name`);
   res.json({ count: all.rows.length, spaces: all.rows });
 }));
