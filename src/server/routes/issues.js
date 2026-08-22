@@ -346,11 +346,6 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
   const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [b.space_id])).rows[0];
   if (!spaceKeyRow) return res.status(400).json({ error: 'Invalid space_id' });
   const spaceKey = spaceKeyRow.key;
-  const maxRow = (await q(
-    "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1 AND key ~ ($2 || '-[0-9]+$')",
-    [b.space_id, spaceKey]
-  )).rows[0];
-  const key = `${spaceKey}-${maxRow.mx + 1}`;
   const finalType = b.type || 'task';
   const finalPriority = b.priority || 'medium';
   if (!(await isBuiltinSelectValueAllowed(b.space_id, 'type', finalType))) {
@@ -360,13 +355,56 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
     return res.status(400).json({ error: 'Not a configured priority for this space: ' + finalPriority });
   }
   const id = uid();
-  const r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
-      assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
-    [id, key, b.space_id, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
-     finalType, finalPriority, b.assignee_id || null, b.reporter_id || null,
-     b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
-     b.original_estimate || null, b.team || null, b.product_type || null]);
+  //    Issue key allocation: read-then-insert, retried on conflict       
+  // The key is MAX(existing number) + 1, computed with a plain SELECT and no
+  // lock, so two creates in the same space that overlap read the same MAX and
+  // build the same key. issues_key_key UNIQUE means the database never actually
+  // stores a duplicate -- integrity was never at risk -- but the loser INSERT
+  // raised a unique violation that fell through wrap() as a bare 500
+  // {"error":"Internal server error"}, with nothing retried. Measured on the
+  // unfixed code: 12 concurrent creates in one space gave 5 x 201 and 7 x 500.
+  //
+  // Retry rather than a transaction, deliberately:
+  //   - No route handler here checks out a client or runs BEGIN/COMMIT; every
+  //     one uses the bare q helper. Adding transaction plumbing to exactly one
+  //     handler, with its own release-on-error path, is more surface than the
+  //     bug it fixes.
+  //   - SELECT ... FOR UPDATE on the space row would serialize correctly, but
+  //     holds a row lock across the whole create -- including both
+  //     isBuiltinSelectValueAllowed round trips -- so every create in a space
+  //     queues behind every other. A retry only costs anything when a
+  //     collision actually happened.
+  //   - issues_key_key stays the real guarantee. This loop only decides what
+  //     the caller sees when it fires.
+  // Only 23505 on issues_key_key is retried; any other error propagates
+  // untouched. The jitter stops a burst re-colliding in lockstep.
+  const KEY_RETRIES = 25;
+  let r = null, key = null, lastConflict = null;
+  for (let attempt = 0; attempt < KEY_RETRIES; attempt++) {
+    const maxRow = (await q(
+      "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1 AND key ~ ($2 || '-[0-9]+$')",
+      [b.space_id, spaceKey]
+    )).rows[0];
+    key = spaceKey + '-' + (maxRow.mx + 1);
+    try {
+      r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
+        assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+        [id, key, b.space_id, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
+         finalType, finalPriority, b.assignee_id || null, b.reporter_id || null,
+         b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
+         b.original_estimate || null, b.team || null, b.product_type || null]);
+      break;
+    } catch (e) {
+      if (!(e && e.code === '23505' && e.constraint === 'issues_key_key')) throw e;
+      lastConflict = e;
+      await new Promise(function (resolve) { setTimeout(resolve, Math.floor(Math.random() * 15)); });
+    }
+  }
+  if (!r) {
+    console.error('[issues/create] key still conflicting after ' + KEY_RETRIES + ' attempts', lastConflict && lastConflict.detail);
+    return res.status(503).json({ error: 'Could not allocate an issue key, please retry' });
+  }
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
     VALUES($1,$2,$3,'created',NULL,$4)`, [uid(), id, req.user.id, key]).catch(function () {});
   res.status(201).json(r.rows[0]);

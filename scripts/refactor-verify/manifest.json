@@ -456,7 +456,9 @@
             ]
           ],
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { createNotif } = require('../notify');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "FIX 5 - retry-on-conflict for issue key allocation (concurrent creates returned a bare 500)"
         },
         {
           "file": "src/server/routes/comments.js",
