@@ -49,6 +49,18 @@ app.put('/api/comments/:id', requireAuth, wrap(async (req, res) => {
   const spaceId = await getCommentIssueSpaceId(q, req.params.id);
   if (!spaceId) return res.status(404).json({ error: 'Not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'comment.update'))) return;
+  // ACTION_MIN_ROLE only answers "may this tier touch comments at all". The
+  // action's own denial message (lib/permissions.js:64) reads "You can only
+  // edit your own comments." -- it promised an ownership check that was never
+  // implemented, so any space member could rewrite anyone's comment.
+  // Ownership is row-level, so it belongs here where the row is, following the
+  // live precedent for author-owned content at worklogs.js:47: the author, or
+  // an org admin.
+  const existing = (await q('SELECT user_id FROM comments WHERE id=$1', [req.params.id])).rows[0];
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (existing.user_id !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'owner') {
+    return res.status(403).json({ error: 'You can only edit your own comments.' });
+  }
   const r = await q('UPDATE comments SET body=$1,updated_at=NOW() WHERE id=$2 RETURNING *', [req.body.body, req.params.id]);
   res.json(r.rows[0]);
 }));

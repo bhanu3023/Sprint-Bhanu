@@ -95,22 +95,52 @@ module.exports = {
       A.statusIn(del, [200, 204], 'a space admin can delete the comment');
     }},
 
-    { name: 'a member cannot edit or delete someone else\'s comment',
-      knownBug: "lib/permissions.js:30 comment.update requires only space role member and NO ownership check exists anywhere, so any space member can rewrite another user's comment. The message at permissions.js:64 reads: You can only edit your own comments -- promising a check that is not implemented.",
-      fn: async (c, x, own) => {
+    { name: 'comment edit ownership: author yes, another member no, org admin yes', fn: async (c, x, own) => {
+      // The rule follows worklogs.js:47 -- the author, or an org admin. A space
+      // site_admin who is neither is deliberately refused: elevation for editing
+      // someone else's comment is org-level here, not space-level.
       const iss = await c.post('/api/issues', { token: x.users.manager.token,
-        body: { space_id: x.spaceId, title: 'comment perms ' + x.tag, type: 'task' } });
+        body: { space_id: x.spaceId, title: 'comment ownership ' + x.tag, type: 'task' } });
+      A.statusIn(iss, [200, 201], 'issue for ownership test');
+      own.issue(iss.body.id);
+
+      const add = await c.post('/api/comments', { token: x.users.member.token,
+        body: { issue_id: iss.body.id, body: 'authored by member ' + x.tag } });
+      A.statusIn(add, [200, 201], 'member creates a comment');
+      const cid = add.body.id;
+
+      const byAuthor = await c.put('/api/comments/' + cid, { token: x.users.member.token,
+        body: { body: 'edited by author ' + x.tag } });
+      A.statusIn(byAuthor, [200, 201], 'the author may edit their own comment');
+
+      const byOther = await c.put('/api/comments/' + cid, { token: x.users.manager.token,
+        body: { body: 'hijacked ' + x.tag } });
+      A.status(byOther, 403, 'a non-author who is not an org admin must be refused');
+      A.includes(byOther.raw, 'your own comments', 'the 403 must carry the ownership message');
+
+      const byAdmin = await c.put('/api/comments/' + cid, { token: x.users.admin.token,
+        body: { body: 'edited by org admin ' + x.tag } });
+      A.statusIn(byAdmin, [200, 201], 'an org admin may edit any comment');
+
+      const got = await c.get('/api/issues/' + iss.body.id, { token: x.users.member.token });
+      const mine = (got.body.comments || []).find(cm => cm.id === cid);
+      A.ok(mine, 'the comment must still exist');
+      A.eq(mine.body, 'edited by org admin ' + x.tag, 'the refused hijack never applied');
+
+      await c.del('/api/comments/' + cid, { token: x.users.admin.token });
+    }},
+
+    { name: "a member cannot delete someone else's comment", fn: async (c, x, own) => {
+      const iss = await c.post('/api/issues', { token: x.users.manager.token,
+        body: { space_id: x.spaceId, title: 'comment delete perms ' + x.tag, type: 'task' } });
       own.issue(iss.body.id);
       const add = await c.post('/api/comments', { token: x.users.manager.token,
         body: { issue_id: iss.body.id, body: 'managers comment ' + x.tag } });
       A.statusIn(add, [200, 201], 'manager creates a comment');
       const cid = add.body.id;
-      A.denied(await c.put('/api/comments/' + cid, { token: x.users.member.token, body: { body: 'hijack' } }),
-        'member editing another user\'s comment');
       A.denied(await c.del('/api/comments/' + cid, { token: x.users.member.token }),
-        'member deleting another user\'s comment');
-      // cleaned up by its author so teardown has nothing to chase
-      await c.del('/api/comments/' + cid, { token: x.users.manager.token });
+        "member deleting another user's comment");
+      await c.del('/api/comments/' + cid, { token: x.users.admin.token });
     }},
 
     { name: 'worklog: create -> read -> update -> delete', fn: async (c, x, own) => {
