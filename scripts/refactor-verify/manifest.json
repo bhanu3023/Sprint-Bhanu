@@ -689,5 +689,9 @@
     {
       "note": "app.js is fully consumed as of C7 and has been deleted. All 17,295 original lines live in the 42 src/client/* files listed in targets[0].parts."
     }
-  ]
+  ],
+  "conventions": {
+    "lineCounting": "part.from/part.to are SPLIT-ELEMENT indices into pristine content split on newline, NOT newline counts. A file with N newlines yields N+1 split elements, the last being the empty string after the final newline. global-search.js: 476 newlines (wc -l), elements 16819-17295 = 477. Pristine app.js: 17294 newlines / 17295 elements. Sum of wc -l over all 42 client files = 17294. Neither number is wrong -- see AUDIT-FINDINGS.md.",
+    "moves": "targets[].moves declares intentional relocations of a block between split files. Contiguity is deliberately broken for the files involved: catdiff [A] becomes move-aware (pristine MINUS blocks moved out, PLUS blocks moved in at the declared position) and [C] becomes REVERSIBILITY -- un-apply every declared move against the files actual bytes and require pristine back line-for-line."
+  }
 }
