@@ -700,6 +700,19 @@
   ],
   "conventions": {
     "lineCounting": "part.from/part.to are SPLIT-ELEMENT indices into pristine content split on newline, NOT newline counts. A file with N newlines yields N+1 split elements, the last being the empty string after the final newline. global-search.js: 476 newlines (wc -l), elements 16819-17295 = 477. Pristine app.js: 17294 newlines / 17295 elements. Sum of wc -l over all 42 client files = 17294. Neither number is wrong -- see AUDIT-FINDINGS.md.",
-    "moves": "targets[].moves declares intentional relocations of a block between split files. Contiguity is deliberately broken for the files involved: catdiff [A] becomes move-aware (pristine MINUS blocks moved out, PLUS blocks moved in at the declared position) and [C] becomes REVERSIBILITY -- un-apply every declared move against the files actual bytes and require pristine back line-for-line."
+    "moves": "targets[].moves declares intentional relocations of a block between split files. Contiguity is deliberately broken for the files involved: catdiff [A] becomes move-aware (pristine MINUS blocks moved out, PLUS blocks moved in at the declared position) and [C] becomes REVERSIBILITY -- un-apply every declared move against the files actual bytes and require pristine back line-for-line.",
+    "libPins": "lib/ has no pristine original to tile against -- it is hand-written code predating the refactor -- so libdiff.js pins a sha256 per file instead. Any byte change fails [L1] until the pin is updated in the SAME commit with a reason. Unlike serverdiff modified:true, a pin is RESTORED on re-pinning, so lib/ coverage does not decay."
+  },
+  "libPins": {
+    "lib/builtin-issue-fields.js": {
+      "sha256": "91035d0a3fe8b4bc2fc696b3250e9905da90c952c92adf93dbfcd4cc908d84dd",
+      "note": "re-pinned after the ALTER memoisation (a989344) and the ANY() batch (4904889)"
+    },
+    "lib/migrate.js": "8abe6a77178301b873c69db7cb1c561a59fafa7fc83289592bf451fe7a42b729",
+    "lib/migrations/index.js": "4d5a8c3677e1d46d082ce08e41bfc4f43bd6e06c28d8bf7ee095982637ef445e",
+    "lib/permissions.js": "21dc6a98ae8150604917357e136bbc520caabcc0bcd9f5795323ded520edce98",
+    "lib/retention.js": "f9703f5166962be9d7c8e0a10f88af66fad2c965425e4369eb69f86afe114971",
+    "lib/schema-check.js": "2d6a14742abcac66c7160b6cb27a63d26d7490986234177a71b894e10028cd12",
+    "lib/sprint-complete.js": "1be984ec30819c165222927b8851097ff8cae6cc3e79666088d1de7944bd005c"
   }
 }

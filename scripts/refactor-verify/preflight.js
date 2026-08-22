@@ -28,6 +28,7 @@
  * so they are always printed.
  */
 const { execFileSync } = require('child_process');
+const fs = require('fs');
 
 const DEFAULT_MAX_AGE_SECONDS = 900;
 
@@ -230,9 +231,55 @@ function checkRepoIntact() {
   return { ok: problems.length === 0, lines, problems };
 }
 
+// [P6] control bytes in tracked source.
+// Blind spot 14: 8 NUL bytes reached src/server/routes/issues.js from a patch
+// script that wrote box-drawing characters while encoding latin1. Nothing
+// caught it -- the file still parsed, every test passed, and git silently
+// reclassified it as BINARY, so grep reported a binary match instead of the
+// line. serverdiff could not help: that file carries modified:true, which
+// disables its byte check. Binary assets are skipped by extension.
+const BINARY_EXT = /\.(png|jpe?g|gif|ico|webp|woff2?|ttf|eot|pdf|zip|gz|tar)$/i;
+function checkNoControlBytes() {
+  const problems = [], lines = [];
+  let files = [];
+  try {
+    files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8", maxBuffer: 100000000 })
+      .split("\u0000").filter(Boolean).filter(function (f) { return !BINARY_EXT.test(f); });
+  } catch (e) {
+    lines.push("  [P6] FAIL: could not list tracked files");
+    problems.push("git ls-files failed, so control-byte state is unknown");
+    return { ok: false, lines: lines, problems: problems };
+  }
+  let scanned = 0;
+  const dirty = [];
+  for (const f of files) {
+    if (!fs.existsSync(f)) continue;
+    scanned++;
+    const b = fs.readFileSync(f);
+    for (let i = 0; i < b.length; i++) {
+      const x = b[i];
+      if (x === 0 || x < 9 || (x > 13 && x < 32) || x === 127) { dirty.push({ f: f, at: i, byte: x }); break; }
+    }
+  }
+  if (dirty.length) {
+    problems.push(dirty.length + " tracked text file(s) contain NUL or stray control bytes: " +
+      dirty.slice(0, 4).map(function (d) { return d.f + "@" + d.at; }).join(", "));
+    lines.push("  [P6] FAIL: " + dirty.length + " of " + scanned + " text file(s) contain control bytes");
+    dirty.slice(0, 8).forEach(function (d) {
+      lines.push("         " + d.f + "  0x" + d.byte.toString(16) + " at offset " + d.at);
+    });
+  } else {
+    lines.push("  [P6] no control bytes in any of " + scanned + " tracked text files");
+  }
+  return { ok: problems.length === 0, lines: lines, problems: problems };
+}
+
 function assertRepoIntact() {
   const r = checkRepoIntact();
-  r.lines.forEach(l => console.log(l));
+  const c = checkNoControlBytes();
+  r.lines.concat(c.lines).forEach(l => console.log(l));
+  r.problems = r.problems.concat(c.problems);
+  r.ok = r.ok && c.ok;
   if (!r.ok) {
     console.log('');
     console.log('PRE-FLIGHT FAILED — the working tree is not intact:');
@@ -242,7 +289,7 @@ function assertRepoIntact() {
   }
 }
 
-module.exports = { checkFreshServer, assertFreshServer, checkRepoIntact, assertRepoIntact, portFromBase };
+module.exports = { checkFreshServer, assertFreshServer, checkRepoIntact, assertRepoIntact, checkNoControlBytes, portFromBase };
 
 if (require.main === module) {
   const argv = process.argv.slice(2);
