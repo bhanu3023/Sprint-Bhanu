@@ -1,10 +1,12 @@
 {
   "name": "sprintboard",
   "version": "1.0.0",
-  "description": "Sprint & Kanban Board with SLA Tracking — PostgreSQL backend",
+  "description": "Sprint & Kanban Board with SLA Tracking \u2014 PostgreSQL backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "test": "node tests/run.js",
+    "test:shuffle": "node tests/run.js --shuffle",
     "dev": "nodemon server.js",
     "migrate": "node scripts/migrate.js",
     "migrate:status": "node scripts/migrate.js --status",
