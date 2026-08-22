@@ -50,7 +50,17 @@ const PUBLIC_ROOT_PATHS = new Set([
   '/hotjar.js',
   '/combination-options.js'
 ]);
-const PUBLIC_PREFIXES = ['/src/client/', '/assets/'];
+// Prefix + expected file type, not prefix alone. A bare prefix re-exposes
+// whatever happens to sit in that directory, including files deleted from git
+// that survive on the server: the deploy extracts over the directory without
+// wiping, so a deleted file stays on disk. Caught in a deploy dry run, where
+// the old tree was extracted first and the new archive overlaid on top --
+// assets/placeholder.txt was deleted from the repo, remained on disk, and came
+// straight back as a 200 under the '/assets/' prefix.
+const PUBLIC_PREFIXES = [
+  { prefix: '/src/client/', exts: ['.js'] },
+  { prefix: '/assets/', exts: ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.woff', '.woff2', '.ttf'] }
+];
 
 function isPublicAsset(p) {
   // Reject traversal outright rather than relying on send to normalize it.
@@ -62,8 +72,10 @@ function isPublicAsset(p) {
   // a host that has not asked for it. It is also untracked and excluded from
   // `git archive`, so it never reaches production in the first place.
   if (p === '/dev-login.html' && process.env.ALLOW_DEV_LOGIN === '1') return true;
-  for (const prefix of PUBLIC_PREFIXES) {
-    if (p.startsWith(prefix)) return true;
+  const lower = p.toLowerCase();
+  for (const entry of PUBLIC_PREFIXES) {
+    if (!p.startsWith(entry.prefix)) continue;
+    return entry.exts.some(function(ext) { return lower.endsWith(ext); });
   }
   return false;
 }

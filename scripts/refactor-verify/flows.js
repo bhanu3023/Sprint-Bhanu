@@ -20,6 +20,9 @@ const { chromium } = require('playwright');
 const { getSession, rankedSpaceKeys, pool } = require('./lib/session');
 
 const BASE = process.env.SB_BASE || 'http://localhost:3000';
+// Refuse to run against a server that is not this run's code. See preflight.js:
+// stale processes once made several 'restart, then verify' steps measure old code.
+require('./preflight').assertFreshServer(BASE);
 const results = [];
 const record = (name, ok, detail) => {
   results.push({ name, ok, detail });
