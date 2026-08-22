@@ -451,7 +451,9 @@
             ]
           ],
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { buildDynamicUpdate, completeSprint, denyUnlessCanAct, getSprintSpaceId } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { createNotif, sprintDeps } = require('../notify');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "A4 sprint lifecycle: /start gained the one-active-per-space guard (transactional, space row locked) and sets start_date when absent; completed is now terminal."
         },
         {
           "file": "src/server/routes/issues.js",
@@ -714,7 +716,10 @@
     },
     "lib/migrate.js": "8abe6a77178301b873c69db7cb1c561a59fafa7fc83289592bf451fe7a42b729",
     "lib/migrations/index.js": "4d5a8c3677e1d46d082ce08e41bfc4f43bd6e06c28d8bf7ee095982637ef445e",
-    "lib/permissions.js": "21dc6a98ae8150604917357e136bbc520caabcc0bcd9f5795323ded520edce98",
+    "lib/permissions.js": {
+      "sha256": "2e1a6737071d6502a75b382b450a83b1a46d4fbfa61ec4c2f0c32ffa5f2af9af",
+      "note": "re-pinned after A4: status and velocity removed from the sprints UPDATE_WHITELIST so the lifecycle endpoints own them"
+    },
     "lib/retention.js": "f9703f5166962be9d7c8e0a10f88af66fad2c965425e4369eb69f86afe114971",
     "lib/schema-check.js": "2d6a14742abcac66c7160b6cb27a63d26d7490986234177a71b894e10028cd12",
     "lib/sprint-complete.js": "1be984ec30819c165222927b8851097ff8cae6cc3e79666088d1de7944bd005c"

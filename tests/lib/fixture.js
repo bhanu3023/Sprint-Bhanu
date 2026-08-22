@@ -178,4 +178,30 @@ async function down(ctx, owned = {}) {
   return { deleted: n, errors };
 }
 
-module.exports = { up, down, pool, q, PASSWORD };
+
+/**
+ * Sweep fixture worlds left behind by a run that never reached its teardown.
+ *
+ * The finally-block teardown covers every ordinary exit, including test
+ * failures -- but not SIGKILL. One killed `npm test` left an org with 3 spaces
+ * and 6 users in the database, which then shifted the sidebar space list and
+ * failed the next DOM comparison with a diff that had nothing to do with the
+ * code under test. Run this BEFORE the baseline fingerprint so a previous
+ * casualty cannot be mistaken for this run's drift.
+ *
+ * Matches only the fixture naming this file creates, so it can never touch
+ * real data.
+ */
+async function sweepOrphans() {
+  const orgs = (await q("SELECT id, name FROM organizations WHERE name LIKE 'Test Org %'")).rows;
+  let swept = 0, rows = 0;
+  for (const org of orgs) {
+    const t = org.name.split(' ').pop();
+    const spaces = (await q("SELECT id FROM spaces WHERE name LIKE '%' || $1 || '%'", [t])).rows.map(r => r.id);
+    const r = await down({ orgId: org.id, tag: t }, { spaces });
+    swept++; rows += r.deleted;
+  }
+  return { orgs: swept, rows };
+}
+
+module.exports = { up, down, sweepOrphans, pool, q, PASSWORD };

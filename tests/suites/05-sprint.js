@@ -61,7 +61,6 @@ module.exports = {
     }},
 
     { name: 'a second sprint cannot start while one is active',
-      knownBug: "src/server/routes/sprints.js:49 POST /api/sprints/:id/start has NO guard: it runs UPDATE sprints SET status=active unconditionally. There is no one-active-sprint-per-space check and no source-status check, so a second sprint can go active alongside the first, and a COMPLETED sprint can be moved back to active. .claude/rules/sprint-lifecycle.md specifies a SELECT-then-400 check which is absent.",
       fn: async (c, x, own) => {
       const w = await world(c, x, own, 'SB', []);
       A.statusIn(await c.post('/api/sprints/' + w.sprintId + '/start', { token: x.users.admin.token }), [200, 201], 'start first sprint');
@@ -111,7 +110,6 @@ module.exports = {
     }},
 
     { name: 'a completed sprint cannot be restarted',
-      knownBug: "src/server/routes/sprints.js:49 POST /api/sprints/:id/start has NO guard: it runs UPDATE sprints SET status=active unconditionally. There is no one-active-sprint-per-space check and no source-status check, so a second sprint can go active alongside the first, and a COMPLETED sprint can be moved back to active. .claude/rules/sprint-lifecycle.md specifies a SELECT-then-400 check which is absent.",
       fn: async (c, x, own) => {
       const w = await world(c, x, own, 'SE', []);
       A.statusIn(await c.post('/api/sprints/' + w.sprintId + '/start', { token: x.users.admin.token }), [200, 201], 'start');
@@ -132,6 +130,29 @@ module.exports = {
       const list = await c.get('/api/sprints?space_id=' + w.spaceId, { token: x.users.admin.token });
       const after = (list.body || []).find(s => s.id === w.sprintId);
       A.eq(Number(after.velocity), 5, 'velocity must stay at its completion-time value');
+    }},
+
+    { name: 'sprint status and velocity cannot be set through the generic PUT', fn: async (c, x, own) => {
+      // The second door. Guarding /start alone closed nothing while status was
+      // writable here, with none of the completion side effects running.
+      const w = await world(c, x, own, 'SP', [{ title: 'p', points: 3, status: 'Done' }]);
+
+      const setActive = await c.put('/api/sprints/' + w.sprintId,
+        { token: x.users.admin.token, body: { status: 'active' } });
+      A.status(setActive, 400, 'PUT {status} alone must be rejected as nothing-to-update');
+
+      const setVelocity = await c.put('/api/sprints/' + w.sprintId,
+        { token: x.users.admin.token, body: { velocity: 999 } });
+      A.status(setVelocity, 400, 'PUT {velocity} alone must be rejected');
+
+      // A legitimate PUT alongside them must still work, and must NOT smuggle
+      // status through.
+      const mixed = await c.put('/api/sprints/' + w.sprintId,
+        { token: x.users.admin.token, body: { name: 'Renamed ' + x.tag, status: 'completed', velocity: 42 } });
+      A.statusIn(mixed, [200, 201], 'a PUT with a legitimate field must still succeed');
+      A.eq(mixed.body.name, 'Renamed ' + x.tag, 'the legitimate field was applied');
+      A.eq(mixed.body.status, 'planning', 'status must be ignored, not applied');
+      A.eq(Number(mixed.body.velocity), 0, 'velocity must be ignored, not applied');
     }},
 
     { name: 'a sprint can only be deleted while in planning',

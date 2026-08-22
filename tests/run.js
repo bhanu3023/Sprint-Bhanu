@@ -146,6 +146,13 @@ function fingerprintDiff(a, b) {
 
   try {
     log();
+    // Before the baseline: clear any fixture world a KILLED run left behind.
+    // The finally-block teardown covers failures but not SIGKILL, and a leftover
+    // org shifts the sidebar space list, which then fails an unrelated DOM diff.
+    const { sweepOrphans } = require('./lib/fixture');
+    const swept = await sweepOrphans();
+    if (swept.orgs) log(C.y + '  [sweep] removed ' + swept.orgs + ' orphaned fixture org(s), ' +
+                        swept.rows + ' rows -- a previous run was killed before teardown' + C.x);
     log(C.d + '  [fingerprint] recording the database state before setup' + C.x);
     fingerprint(fpBefore);
 

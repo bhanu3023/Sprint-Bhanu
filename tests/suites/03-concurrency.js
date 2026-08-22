@@ -52,7 +52,6 @@ module.exports = {
     }},
 
     { name: 'only one sprint can become active despite parallel starts',
-      knownBug: "src/server/routes/sprints.js:49 POST /api/sprints/:id/start has NO guard: it runs UPDATE sprints SET status=active unconditionally. There is no one-active-sprint-per-space check and no source-status check, so a second sprint can go active alongside the first, and a COMPLETED sprint can be moved back to active. .claude/rules/sprint-lifecycle.md specifies a SELECT-then-400 check which is absent.",
       fn: async (c, x, own) => {
       // Create three planning sprints in a fresh space, then start all three at
       // once. The lifecycle rule allows exactly one active sprint per space.

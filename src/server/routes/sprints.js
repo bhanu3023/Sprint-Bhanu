@@ -1,6 +1,6 @@
 const { requireAuth } = require('../auth');
 const { uid, wrap } = require('../core');
-const { q } = require('../db');
+const { pool, q } = require('../db');
 const { buildDynamicUpdate, completeSprint, denyUnlessCanAct, getSprintSpaceId } = require('../deps');
 const { app } = require('../express-app');
 const { createNotif, sprintDeps } = require('../notify');
@@ -50,7 +50,55 @@ app.post('/api/sprints/:id/start', requireAuth, wrap(async (req, res) => {
   const sprint = (await q('SELECT * FROM sprints WHERE id=$1 AND deleted_at IS NULL', [req.params.id])).rows[0];
   if (!sprint) return res.status(404).json({ error: 'Sprint not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, sprint.space_id, 'sprint.manage'))) return;
-  const r = await q("UPDATE sprints SET status='active' WHERE id=$1 RETURNING *", [req.params.id]);
+  // sprint-lifecycle.md: only ONE sprint per space may be active, and
+  // `completed` is terminal. Neither was enforced -- this route ran an
+  // unconditional UPDATE, so a second sprint could go active alongside the
+  // first and a completed sprint could be dragged back to active, discarding
+  // the meaning of its recorded velocity.
+  //
+  // The source-status check comes first: re-activating a completed sprint is a
+  // different mistake from starting a second one, and the caller deserves to
+  // know which.
+  if (sprint.status !== 'planning') {
+    return res.status(400).json({ error: sprint.status === 'active'
+      ? 'This sprint is already active.'
+      : 'A completed sprint cannot be restarted.' });
+  }
+  // A single UPDATE ... WHERE NOT EXISTS is NOT sufficient here, and the
+  // concurrency test proves it: under READ COMMITTED two parallel starts each
+  // fail to see the other's uncommitted row, both pass the check, and both go
+  // active (measured: 3 of 3 succeeded). So the starts are serialised per space
+  // by locking the space row inside a transaction. `q` uses the pool and would
+  // release the lock at statement end, hence an explicit client.
+  let r;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM spaces WHERE id=$1 FOR UPDATE', [sprint.space_id]);
+    const active = await client.query(
+      "SELECT id FROM sprints WHERE space_id=$1 AND status='active' AND deleted_at IS NULL",
+      [sprint.space_id]);
+    if (active.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'A sprint is already active in this space.' });
+    }
+    // start_date is set only when absent, per the spec.
+    const upd = await client.query(
+      `UPDATE sprints SET status='active', start_date=COALESCE(start_date, NOW())
+       WHERE id=$1 AND status='planning' AND deleted_at IS NULL RETURNING *`,
+      [req.params.id]);
+    if (!upd.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This sprint is no longer in planning.' });
+    }
+    await client.query('COMMIT');
+    r = upd;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
   const spaceRow = (await q('SELECT key FROM spaces WHERE id=$1', [sprint.space_id])).rows[0];
   const sprintLink = spaceRow ? '/space/' + encodeURIComponent(spaceRow.key) + '/board' : null;
   const members = await q('SELECT user_id FROM space_members WHERE space_id=$1', [sprint.space_id]);
