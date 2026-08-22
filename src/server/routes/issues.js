@@ -355,7 +355,7 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
     return res.status(400).json({ error: 'Not a configured priority for this space: ' + finalPriority });
   }
   const id = uid();
-  //    Issue key allocation: read-then-insert, retried on conflict       
+  // -- Issue key allocation: read-then-insert, retried on conflict ------
   // The key is MAX(existing number) + 1, computed with a plain SELECT and no
   // lock, so two creates in the same space that overlap read the same MAX and
   // build the same key. issues_key_key UNIQUE means the database never actually
