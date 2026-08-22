@@ -49,6 +49,11 @@ behaviour.
 
 ---
 
+> The full dead-code investigation — 18 client symbols, server routes, unused
+> requires and the tooling failures found along the way — is recorded in
+> [docs/DEAD-CODE-INVENTORY.md](docs/DEAD-CODE-INVENTORY.md). That pass deleted
+> almost nothing on purpose; read it before removing anything.
+
 ## Proven-dead deletion candidate — for a separate, deliberate pass
 
 ### The `dateInputMap` block — `src/client/event-bindings.js:401-422`
@@ -90,4 +95,6 @@ and 17,295 split elements, and the sum of `wc -l` across all 42 client files is
 | Stale files on the production server | The deploy extracts over `/opt/Sprint-Board` without wiping, so files deleted from git persist on disk and get baked into each image. Needs a one-time `rm` or `--delete` handling. Unreachable over HTTP thanks to the static allowlist. |
 | No auth audit logging | Failed logins are recorded nowhere and there is no request logging at all, so an attack on the login endpoint leaves no trace. Prevention exists; detection does not. |
 | Login rate limiter is per-process | In-memory counters, so the effective limit multiplies by instance count behind more than one container. Single container today. |
+| `/api/debug/spaces` | Has `requireAuth` but no role or membership check, and returns every space in the org. A `viewer` in one space gets all 5 spaces (id, name, key, is_archived) while `/api/data` correctly gives that user 1. Bypasses the space scoping every other read path enforces. No secrets, no issue data. Gate to org admin or remove -- either is a behaviour change. See [docs/DEAD-CODE-INVENTORY.md](docs/DEAD-CODE-INVENTORY.md). |
+| `[3]` is sensitive to the unread-notification badge | `#notifBadge` sits in the shared header, so its count appears on **all 47 pages**. Any notification-creating action changes every page at once -- including the harness own `flows.js`, which creates an issue and moves it and so bumps the badge. Seen in this pass: badge 2 -> 3 made all 47 pages report DIFFERS after a documentation-only change. Protocol: capture BEFORE running flows, and isolate a suspected code effect with two back-to-back captures. |
 | `[3]` DOM check is data-thin on PTM | PTM has no sprints, so its board/reports/MBR pages render "No sprints found." identically before and after any change and contribute almost no discriminating power. Real coverage rests on ENG. Known, accepted. |
