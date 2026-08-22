@@ -291,7 +291,9 @@
             ]
           ],
           "gluePrefix": "const crypto = require('crypto');\r\nconst { q } = require('./db');\r\n",
-          "glueSuffix": "\r\nmodule.exports = { hashPassword, verifyPassword, generateToken, resolveSessionFromToken, requireAuth, requireAuthFile };\r\n"
+          "glueSuffix": "\r\nmodule.exports = { hashPassword, verifyPassword, generateToken, resolveSessionFromToken, requireAuth, requireAuthFile };\r\n",
+          "modified": true,
+          "modifiedReason": "resolveSessionFromToken now selects u.org_id so callers can attribute writes to the CALLERs own organization instead of guessing with organizations LIMIT 1."
         },
         {
           "file": "src/server/email.js",
@@ -715,7 +717,10 @@
       "note": "re-pinned after the ALTER memoisation (a989344) and the ANY() batch (4904889)"
     },
     "lib/migrate.js": "8abe6a77178301b873c69db7cb1c561a59fafa7fc83289592bf451fe7a42b729",
-    "lib/migrations/index.js": "4d5a8c3677e1d46d082ce08e41bfc4f43bd6e06c28d8bf7ee095982637ef445e",
+    "lib/migrations/index.js": {
+      "sha256": "75f6c4f086e6519744a96a414ab11046bb42540aa67ab133b1f63fc9163cc532",
+      "note": "re-pinned: added migration 017-spaces-org-id-backfill"
+    },
     "lib/permissions.js": {
       "sha256": "2e1a6737071d6502a75b382b450a83b1a46d4fbfa61ec4c2f0c32ffa5f2af9af",
       "note": "re-pinned after A4: status and velocity removed from the sprints UPDATE_WHITELIST so the lifecycle endpoints own them"

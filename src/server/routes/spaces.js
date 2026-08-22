@@ -46,9 +46,20 @@ app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
   const clash = await findSpaceKeyConflict(key, null);
   if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
   const id = uid();
-  const r = await q(`INSERT INTO spaces(id,name,key,description,icon,color,space_type,visibility,owner_id)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [id, name, key, description, icon, color, space_type, visibility, owner_id]);
+  // org_id came from nowhere before -- the column was simply absent from
+  // this INSERT, so every space created here got NULL. It now comes from
+  // the CALLER's own org (req.user.org_id), never a SELECT ... LIMIT 1
+  // guess: that guess is correct only by accident if more than one
+  // organization exists, and would attribute the new space to an arbitrary
+  // one. An org admin with no org_id on their own user row is a data fault
+  // on that row, not something to paper over here -- fail loudly rather
+  // than repeat the NULL this is fixing.
+  if (!req.user.org_id) {
+    throw new Error('Org admin ' + req.user.id + ' has no org_id on their user row; cannot create a space without one.');
+  }
+  const r = await q(`INSERT INTO spaces(id,org_id,name,key,description,icon,color,space_type,visibility,owner_id)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [id, req.user.org_id, name, key, description, icon, color, space_type, visibility, owner_id]);
   await q(`INSERT INTO space_members(id,space_id,user_id,role) VALUES($1,$2,$3,'site_admin')`, [uid(), id, owner_id]);
   try {
     await seedBuiltinIssueFields(q, uid, id, r.rows[0]);
@@ -80,9 +91,12 @@ app.post('/api/spaces/recover', requireAuth, wrap(async (req, res) => {
   // space and re-create the collision the unique index exists to prevent.
   const clash = await findSpaceKeyConflict(key, id);
   if (clash) return res.status(409).json({ error: spaceKeyTakenMessage(clash) });
-  // Get org_id to satisfy FK if needed
-  const orgR = await q(`SELECT id FROM organizations LIMIT 1`);
-  const orgId = orgR.rows[0] ? orgR.rows[0].id : null;
+  // Same fix as POST /api/spaces: the caller's own org, never a LIMIT 1
+  // guess at "the" organization.
+  if (!req.user.org_id) {
+    throw new Error('Org admin ' + req.user.id + ' has no org_id on their user row; cannot recover a space without one.');
+  }
+  const orgId = req.user.org_id;
   // Insert with original ID — also force is_archived=false on conflict
   const r = await q(`INSERT INTO spaces(id,org_id,name,key,description,icon,color,space_type,visibility,owner_id,is_archived)
     VALUES($1,$2,$3,$4,'Recovered space',$5,$6,'scrum','team',$7,false)

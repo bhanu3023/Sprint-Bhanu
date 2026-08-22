@@ -17,7 +17,12 @@ function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 
 // ── Auth Middleware ────────────────────────────────────────
 async function resolveSessionFromToken(token) {
-  const r = await q(`SELECT s.user_id, u.name, u.email, u.role, u.is_active
+  // org_id is included so callers can attribute writes to the CALLER's own
+  // organization instead of guessing at "the" organization with LIMIT 1 --
+  // correct even if more than one organization exists, because it depends only
+  // on the fact that a user belongs to exactly one org (users.org_id is a
+  // single column), never on there being exactly one org system-wide.
+  const r = await q(`SELECT s.user_id, u.org_id, u.name, u.email, u.role, u.is_active
     FROM sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token=$1 AND s.expires_at>NOW()`, [token]);
   if (!r.rows[0] || !r.rows[0].is_active) return null;
