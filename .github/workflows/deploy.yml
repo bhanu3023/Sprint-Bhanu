@@ -37,9 +37,25 @@ jobs:
       - name: Syntax gate
         # The project rule: never ship without these passing (see CLAUDE.md).
         # Fails before anything touches the server -- nothing to roll back here.
+        #
+        # This used to be `node --check server.js` + `node --check app.js`. The
+        # structural refactor split app.js into src/client/ (42 files) and moved
+        # server.js's body into src/server/ (36 files), leaving root server.js as
+        # require-only glue. app.js stopped existing, so `node --check app.js`
+        # failed on every push -- the gate was checking a deleted file instead of
+        # the code that replaced it. Both trees are walked here so the coverage
+        # matches what the two original checks actually covered.
         run: |
           node --check server.js
-          node --check app.js
+          COUNT=$(find src/client src/server -type f -name '*.js' | wc -l)
+          echo "checking $COUNT file(s) under src/"
+          # A gate that silently matches nothing is how the app.js check rotted
+          # unnoticed. Refuse to pass on an empty match.
+          if [ "$COUNT" -lt 1 ]; then
+            echo "::error::Syntax gate matched no files under src/ -- the gate is stale, fix it." >&2
+            exit 1
+          fi
+          find src/client src/server -type f -name '*.js' -print0 | xargs -0 -r -n1 node --check
           for f in lib/*.js lib/migrations/index.js; do node --check "$f"; done
           echo "syntax OK"
 
