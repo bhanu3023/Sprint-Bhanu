@@ -45,8 +45,20 @@ jobs:
         # failed on every push -- the gate was checking a deleted file instead of
         # the code that replaced it. Both trees are walked here so the coverage
         # matches what the two original checks actually covered.
+        #
+        # Root .js is globbed rather than naming server.js alone. That covers the
+        # entry point AND the two root client scripts index.html loads directly,
+        # hotjar.js and combination-options.js, which neither the original gate
+        # nor its first replacement checked -- a syntax error in either shipped
+        # clean. Globbing means a new root script is covered the day it lands.
         run: |
-          node --check server.js
+          ROOT_JS=$(find . -maxdepth 1 -type f -name '*.js' | sort)
+          echo "checking $(printf '%s\n' "$ROOT_JS" | grep -c .) root file(s)"
+          if [ -z "$ROOT_JS" ]; then
+            echo "::error::Syntax gate matched no .js at the repo root -- the gate is stale, fix it." >&2
+            exit 1
+          fi
+          printf '%s\n' "$ROOT_JS" | xargs -r -n1 node --check
           COUNT=$(find src/client src/server -type f -name '*.js' | wc -l)
           echo "checking $COUNT file(s) under src/"
           # A gate that silently matches nothing is how the app.js check rotted
