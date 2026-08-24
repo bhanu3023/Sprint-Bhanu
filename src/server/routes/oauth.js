@@ -1,7 +1,7 @@
-const { generateToken, hashPassword, requireAuth, verifyPassword } = require('../auth');
+const { generateToken } = require('../auth');
 const { crypto, uid, wrap } = require('../core');
 const { q } = require('../db');
-const { oauthStates, requireOrgAdmin } = require('../deps');
+const { oauthStates } = require('../deps');
 const { app } = require('../express-app');
 const { APP_BASE_URL, MS_CLIENT_ID, MS_REDIRECT_URI, MS_TENANT_ID, msGraphMe, msTokenExchange } = require('../oauth-helpers');
 // ── Microsoft OAuth2 routes ───────────────────────────────

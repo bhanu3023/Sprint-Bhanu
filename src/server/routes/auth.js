@@ -1,5 +1,5 @@
 const { generateToken, hashPassword, requireAuth, verifyPassword } = require('../auth');
-const { crypto, uid, wrap } = require('../core');
+const { uid, wrap } = require('../core');
 const { q } = require('../db');
 const { requireOrgAdmin } = require('../deps');
 const { app } = require('../express-app');

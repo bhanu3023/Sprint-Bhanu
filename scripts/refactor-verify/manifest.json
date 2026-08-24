@@ -586,7 +586,9 @@
             ]
           ],
           "gluePrefix": "const { generateToken, hashPassword, requireAuth, verifyPassword } = require('../auth');\r\nconst { crypto, uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { oauthStates, requireOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { APP_BASE_URL, MS_CLIENT_ID, MS_REDIRECT_URI, MS_TENANT_ID, msGraphMe, msTokenExchange } = require('../oauth-helpers');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "P3: removed unused destructured imports hashPassword/requireAuth/verifyPassword from ../auth and requireOrgAdmin from ../deps (dead code, zero response change)"
         },
         {
           "file": "src/server/routes/users.js",
@@ -667,7 +669,7 @@
             ]
           ],
           "modified": true,
-          "modifiedReason": "P2: accept-invite has no authenticated user yet -- uses the invitation own org_id, not LIMIT 1"
+          "modifiedReason": "P3: removed unused destructured import `crypto` from ../core (dead code, zero response change) -- also carries P2s org_id fix"
         }
       ]
     }
@@ -761,13 +763,13 @@
     "src/server/routes/filters.js": "6e2304ce1be931edd46c89cfbcddf86f86ecc9a669419e2c8d94427f6e086598",
     "src/server/routes/reports.js": "cf1fa331eeb8b3774171a77b8e6930f22319eb9ea542ae71b614c16f08839544",
     "src/server/routes/notifications.js": "ce488a24d1094c63ce62e452563334214f149243c4fbb0423f39fc142839ab33",
-    "src/server/routes/oauth.js": "3dc3391bf3ed06c1797a1e00b0d662c7251fd55d2bfbb01b920d43ddf2e33334",
+    "src/server/routes/oauth.js": "5734ab387c5e045321dd925deeaa016a72be1de56ed853e45cd5927ea3c3ddea",
     "src/server/routes/users.js": "6511060ee73683cab801e6b6535987e491cd4ee89a1d7c97f7bfff50aff56535",
     "src/server/routes/admin.js": "157e508b023c9d2c90dcdea26491c61b063106c95aa3ebc04acede249be38073",
     "src/server/errors.js": "2ae32d5fa2232508580e13c0464299f5009ef26d1285b7fffa6901bdbb0cbd3f",
     "src/server/routes/spa.js": "6c753958aefd3f8c22ebd70ae43864e1dd7e228603dcdf974870d2c2c2271f3c",
     "src/server/startup.js": "49c1c98f2082c03f3f85b9168b7322b4db12eccae47f50f55761b0a487323195",
     "server.js": "8d3edd6b7ab697839506ce9039b1b2675c0458adb06ddc5d54fab9eb9e94f27f",
-    "src/server/routes/auth.js": "09feab5eeafa9ab0231925a96303ff75dc3c2de5f4f81c0599da5408aa8ef1fa"
+    "src/server/routes/auth.js": "1b412dae9da512dacaa788165e24130a7800c2621a675e342d8f6652a646fb96"
   }
 }
