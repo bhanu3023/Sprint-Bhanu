@@ -1,10 +1,10 @@
 # Refactor and hardening, August 2026 — handoff
 
-64 commits on `manmadha`. **`main` has been deployed through `7551307`** — one
-commit, `078f447` (response compression), is on `manmadha` only and has not been
-merged or pushed. This document exists so the work is legible to whoever touches
-it next, and so the running total of blind spots lives here instead of in
-conversation history no one can re-read.
+65 commits on `manmadha`. **`main` has been deployed through `7551307`** — two
+commits, `078f447` (response compression) and `c959f98` (this document), are on
+`manmadha` only and have not been merged or pushed. This document exists so the
+work is legible to whoever touches it next, and so the running total of blind
+spots lives here instead of in conversation history no one can re-read.
 
 **Read this first, then [`AUDIT-FINDINGS.md`](../AUDIT-FINDINGS.md) and
 [`DEAD-CODE-INVENTORY.md`](DEAD-CODE-INVENTORY.md).** Those two record decisions
@@ -15,13 +15,14 @@ that should not be re-litigated.
 `app.js` (17,295 lines) and `server.js` (3,204 lines) were split into `src/client/`
 (42 files) and `src/server/` (37 files) by a **move-only** refactor, proven
 byte-identical. That was followed by two rounds of deliberate behaviour changes
-(11 fixes total), a full multi-org correctness pass, a production incident and its
-fix, five measured indexes, a memory-safety cap on the largest endpoint, a
-credential leak closed, and response compression — each verified individually,
-each against real measurement rather than assumption. A verification harness was
-built alongside and extended twice more, and is the reason any of this is
-trustworthy. **Production has been deployed** through the duplicate-key fix
-(`7551307`); compression has not.
+(11 fixes total), a full multi-org correctness pass, a production incident and
+its fix (§2 — read that one, it's the case study), five measured indexes, a
+memory-safety cap on the largest endpoint, a credential leak closed, and
+response compression — each verified individually, each against real
+measurement rather than assumption. A verification harness was built alongside
+and extended twice more, and is the reason any of this is trustworthy.
+**Production is deployed and current**, through `7551307`; compression is the
+only functional change on `manmadha` not yet pushed.
 
 ---
 
@@ -127,7 +128,7 @@ Then the systemic version of the same bug, worked in four measured passes:
   auto-provisioning, which IS the account-creation moment for someone the app
   has never seen, so there is no user and no invitation to fall back on — a
   correct fix needs a new mechanism (e.g. email-domain-to-org mapping) that
-  doesn't exist in the schema. Both remain open decisions — see §7.
+  doesn't exist in the schema. Both remain open decisions — see §9.
 - **`4f09b25` (P3)** — N+1 audit at 150k-issue scale: none found that scale with
   table size (every loop is bounded by user-selected count or space count, never
   issue volume). **The `/api/data` finding that mattered**: unscoped, 94.6MB at
@@ -236,7 +237,7 @@ median latency ~36% (620ms vs 456ms) — most likely Node's default 4-thread
 libuv pool serializing concurrent brotli/gzip work. **Recorded as a known
 characteristic, not acted on**: absolute costs stay in the tens-of-milliseconds
 range under a deliberately adversarial single-endpoint hammer, not a realistic
-mixed-traffic pattern. If `/api/data` is ever paginated (see §7), the endpoint
+mixed-traffic pattern. If `/api/data` is ever paginated (see §9), the endpoint
 this cost is measured against shrinks by an order of magnitude and the concern
 mostly disappears on its own.
 
@@ -245,7 +246,105 @@ header.
 
 ---
 
-## 2. The frontend performance investigation
+## 2. The AI-key incident — a case study
+
+This is the best evidence in this project that the verification discipline
+worked, not decoration around it. Recorded properly rather than as a log
+line, because the lesson at the end applies to any future feature, not just
+to migration 018.
+
+### What happened
+
+A production deploy failed. The GitHub Actions log read:
+
+```
+DEPLOY ABORTED — a database migration failed.
+Migration 018-issues-key-unique-constraint failed: 20 duplicate issue key(s)
+exist -- cannot add the UNIQUE constraint. Resolve manually (rename or merge
+the duplicates), then re-run. Affected: AI-1 x2 (...), AI-2 x2 (...), ...
+AI-27 x2 (...)
+```
+
+**Root cause:** archiving a space in this app is a soft-delete — `is_archived`
+flips to `true`, but the row and every one of its issues stay exactly where
+they were, with their keys intact. At some point a space with key `AI` was
+archived. Later, a *new* space was created and also given the key `AI` —
+allowed at the time, because nothing checked archived spaces for a key
+conflict, only active ones. The new space's `issue_counter` started fresh at
+1, so its first 27 issues became `AI-1` through `AI-27` — and collided
+directly with the archived space's own `AI-1` through `AI-27`, which had
+been sitting there, live, the whole time.
+
+### Why migration 018 caught it instead of corrupting anything
+
+Migration 018 exists to add `UNIQUE(key)` to `issues`. It was written, from
+the start, to check for existing duplicates first and **abort loudly rather
+than guess** how to resolve them — the same principle behind migration 017's
+multi-org abort (§1.6): a migration that silently "fixes" ambiguous data by
+picking a side is worse than one that refuses to run. Here, that design paid
+for itself exactly as intended: the migration found 20 duplicate keys,
+refused to add the constraint, and rolled back cleanly. No partial schema
+change. No row was renamed, merged, or dropped without a human decision. The
+old, working container image kept serving traffic while the deploy pipeline
+reported the failure and stopped.
+
+This is not a story about a bug slipping through. It is a story about a
+migration doing exactly what it was designed to do the one time it mattered
+in production, and the app staying up because of it.
+
+### The fix
+
+Three migrations, all idempotent, all run automatically at the next boot —
+no manual SQL, no one-off script run by hand against production:
+
+- **`017b-dedupe-issue-keys-active-space-priority`** — for each duplicate
+  key, the row belonging to the **currently active** space keeps it; the row
+  belonging to the **archived** space is renamed to the next free key in its
+  own space's counter (ties, or a group with no active-space row at all, fall
+  back to earliest `created_at`). Verified against a simulation matching the
+  real shape — archived space's issues created weeks before the active
+  space's — confirming the active space's keys survive untouched. Runs
+  immediately before 018 in the migration order, so 018 then finds zero
+  duplicates and succeeds.
+- **`020-soft-delete-spaceless-issues`** — while investigating, checked for
+  the adjacent failure mode too: an issue with `space_id` NULL, or pointing
+  at a space that no longer exists at all. Bins any it finds (`deleted_at`
+  set, restorable from the Deleted Items bin — never a hard `DELETE`).
+- **`021-dedupe-and-enforce-space-key-uniqueness`** — closes the deeper gap
+  that let the `AI`/`AI` collision happen in the first place. See blind spot
+  16 in §5: migration 014 (which is supposed to make `spaces.key` globally
+  unique) silently skips creating its own index if a duplicate already
+  exists at boot, and marks itself permanently applied regardless — so the
+  constraint can stay missing forever even after the duplicate is fixed by
+  hand. 021 resolves any existing `spaces.key` duplicate the same way 017b
+  resolves issue keys, then creates the index itself if 014 never could.
+  Reproduced independently on the local dev database first (space key
+  `DEM`, same shape: one archived, one active, both claiming it) — this
+  was not a one-off, it is a systemic gap that will recur for any key-reuse
+  path unless the DB-level constraint actually exists. The app-layer check
+  (`findSpaceKeyConflict` in `spaces.js`) already blocked *new* duplicates,
+  but it is a SELECT-then-INSERT check, not atomic — the DB constraint is
+  what makes a repeat structurally impossible under a race, not just
+  unlikely.
+
+### The lesson
+
+**Soft-delete means a key is not free to reuse.** Archiving, not deleting,
+is why this project's data survives — deliberately, everywhere (spaces,
+sprints, issues all soft-delete). But it has a consequence that is easy to
+miss: a soft-deleted row's identifying fields (a space's `key`, and anything
+like it added later) are still live data, not freed-up namespace, for as
+long as that row and its children exist — which with soft-delete is
+forever, unless something purges it. Any future feature that reuses a key,
+a slug, a short code, or any other human-assigned identifier **must** check
+against archived/soft-deleted rows too, not just active ones, and ideally
+enforce that at the database level, not only in application code. This
+incident is what happens when that rule is missed once. Read this section
+before adding one.
+
+---
+
+## 3. The frontend performance investigation
 
 Measured, twice, before any change was proposed — and the answer both times was
 **decline**.
@@ -288,7 +387,7 @@ investigation touched zero files.
 
 ---
 
-## 3. The harness
+## 4. The harness
 
 Everything lives in `scripts/refactor-verify/`. Snapshots go to `.refactor-verify/`
 (gitignored, ~30 MB, contains real user names and emails).
@@ -333,10 +432,10 @@ blind spot 9.
 
 ---
 
-## 4. All fifteen blind spots
+## 5. All sixteen blind spots
 
 Checks that passed while verifying nothing, or measurements that would have
-supported the wrong conclusion. **Thirteen were found in existing work or
+supported the wrong conclusion. **Fourteen were found in existing work or
 existing methodology. Two were introduced by hardening itself** — the
 distinction matters, because hardening that introduces its own defects is a
 different failure mode from inheriting one.
@@ -358,6 +457,7 @@ different failure mode from inheriting one.
 | 13 | **`lib/` sat entirely outside `catdiff` and `serverdiff`.** Changes to `lib/builtin-issue-fields.js` had no manifest part at all, so no byte-level check covered them — the reported server coverage number never moved to reflect the gap, which meant it *understated* how much was actually unverified. Fixed: `libdiff.js` plus pinned digests, and `[P6]` extended to scan for control bytes across every tracked tree, not just `lib/`. | **found** |
 | 14 | **The test harness leaks fixture data when killed.** A `npm test` run SIGKILL'd mid-execution left an org with 3 spaces and 6 users behind; that stray data shifted the sidebar space list and failed a later DOM compare that had nothing to do with the actual code change under test. The `finally` teardown covered clean failures but not signals. Fixed: `sweepOrphans()` now runs *before* the baseline capture, not only after the test — so a poisoned prior run can't contaminate the next one. | **found** |
 | 15 | **Unthrottled localhost cannot measure a transfer-size change.** Response compression's raw before/after load time on localhost was neutral-to-slightly-worse — a defensible "not worth it, revert" verdict, reached from real numbers, not carelessness. The *same code*, measured under CDP-simulated realistic network conditions, was 63.8% faster on simulated 4G and 32.5% faster on 25Mbps broadband. Same code, opposite conclusions, and the wrong one was the default measurement environment because localhost has no real transfer time to save and disproportionately exposes the CPU cost of compressing instead. **Lesson, stated plainly: transfer-size changes cannot be measured on localhost — network conditions must be simulated before concluding anything.** | **found** |
+| 16 | **A migration that silently skips its precondition, and never retries.** Migration 014 adds a unique index on `spaces.key` — but if a duplicate already exists at boot, it just logs a warning, skips creating the index, and still records itself as applied. `schema_migrations` never forgets that, so the index can stay missing *forever*, even after the duplicate is fixed by hand, because 014 has no path back to running again. This is the exact same class of defect as every other row in this table: a check that returns green (a clean boot, no thrown error) while verifying nothing durable. Found while investigating the AI-key incident (§2), not by inspection — reproduced independently on the local dev database first (space key `DEM`, same shape: one archived space, one active, both claiming it), proving the gap was systemic rather than a one-off. Fixed as migration 021, which resolves the duplicate and creates the index itself if 014 never could. | **found** |
 
 A related one, also introduced: the runtime probe used for dead-code analysis
 reported two known-live controls (`barChart`, `renderAllWork`) as never invoked,
@@ -373,7 +473,7 @@ near miss.
 
 ---
 
-## 5. Audit claims that were wrong
+## 6. Audit claims that were wrong
 
 The original audit was right more often than not, but not always. Verify before
 acting.
@@ -393,7 +493,7 @@ acting.
 
 ---
 
-## 6. What is NOT verified
+## 7. What is NOT verified
 
 Be honest about these when planning further work.
 
@@ -420,7 +520,7 @@ Be honest about these when planning further work.
 
 ---
 
-## 7. Deploying
+## 8. Deploying
 
 The workflow triggers on **push to `main`** and on manual dispatch. Merging
 `manmadha` into `main` locally does nothing; production changes only on push.
@@ -434,11 +534,15 @@ only acts if the container was actually swapped. DB restore from
 `/opt/backups/<newest>.sql`.
 
 **Current state, and this is the part that changed since the doc was first
-written: production HAS been deployed**, through `7551307` — the duplicate-key
-incident and its fix are live. `main` and `origin/main` both sit at `7551307`.
-**`manmadha` is one commit ahead, at `078f447` (response compression), which has
-not been merged to `main` and has not been deployed.** That is the only thing
-between this branch and full parity with `manmadha`.
+written: production IS deployed and current.** `main` and `origin/main` both
+sit at `7551307` — the AI-key incident and its fix (§2) are live, along with
+every security and data-integrity fix in this document up to that point.
+**`manmadha` is two commits ahead**: `078f447` (response compression) and
+`c959f98` (this document). Neither has been merged to `main` or pushed.
+Compression is the only *functional* change not live; the dry-run proof
+below (clean archive, old-tree overlay, and rollback, all booted and probed)
+is the standing evidence for whether it's ready to push, independent of when
+someone decides to.
 
 Migrations: **22 total**, run automatically at server boot, all idempotent,
 verified to apply cleanly on a brand-new database and to no-op on re-run. The six
@@ -464,7 +568,7 @@ covered in §1.6 — all have already run successfully in production as part of 
 
 ---
 
-## 8. Open decisions and follow-ups
+## 9. Open decisions and follow-ups
 
 Decisions that need a person, not a measurement, plus the smaller open items.
 Full detail on the client-side items in `AUDIT-FINDINGS.md`.
@@ -492,7 +596,7 @@ changes):**
 - `lib/schema-check.js:50,106` name two SQL files that have never existed.
 - **No auth audit logging.** Failed logins are recorded nowhere and there is no
   request logging at all. Prevention exists; detection does not.
-- Stale files on the server (§7).
+- Stale files on the server (§8).
 - `[3]` is data-thin on PTM (no sprints, so those pages render "No sprints found."
   identically before and after any change) and sensitive to the notification
   badge (blind spot 9) and the delete-bin countdown (blind spot 12).
@@ -501,12 +605,12 @@ changes):**
   only local password login.
 - Everything in `DEAD-CODE-INVENTORY.md`: 18 proven-dead client symbols kept
   deliberately, 7 unprovable routes, 3 partial-destructure requires.
-- No frontend/browser component test suite (§6) — the frontend investigation
-  in §2 found nothing worth fixing, but the *coverage gap itself* (nothing
+- No frontend/browser component test suite (§7) — the frontend investigation
+  in §3 found nothing worth fixing, but the *coverage gap itself* (nothing
   beyond `flows.js` and DOM-diff) is still open if frontend logic changes are
   ever made.
 
-## 9. The rule that made this work
+## 10. The rule that made this work
 
 `catdiff` proves the frontend is byte-identical to what it was before any of this
 started — **42 of 42 files**, and `catdiff` has **zero** occurrences of `modified`.
