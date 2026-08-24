@@ -721,8 +721,8 @@
       "note": "re-pinned: up() now also receives pool, so a migration needing a non-transactional connection uses the SAME pool the run was invoked with"
     },
     "lib/migrations/index.js": {
-      "sha256": "b286426f285c5e19af2d44f8e1c67ac792f1a78924c5d73bb7f1f1df5ab22e66",
-      "note": "re-pinned: added migration 018-issues-key-unique-constraint"
+      "sha256": "9c7fa71d4273357448629f5f7d3c3c1ee4dcb66d075c5b0ad5240da429c5ce95",
+      "note": "re-pinned: added migration 019-hot-column-indexes-at-scale"
     },
     "lib/permissions.js": {
       "sha256": "2e1a6737071d6502a75b382b450a83b1a46d4fbfa61ec4c2f0c32ffa5f2af9af",
