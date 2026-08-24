@@ -1,7 +1,7 @@
 {
   "name": "sprintboard",
   "version": "1.0.0",
-  "description": "Sprint & Kanban Board with SLA Tracking \u2014 PostgreSQL backend",
+  "description": "Sprint & Kanban Board with SLA Tracking — PostgreSQL backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -16,6 +16,7 @@
     "test-hotjar": "node scripts/test-hotjar.js"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "multer": "^2.1.1",

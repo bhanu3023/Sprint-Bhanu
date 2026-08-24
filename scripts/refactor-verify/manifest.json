@@ -325,7 +325,9 @@
             ]
           ],
           "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\n",
-          "glueSuffix": "\r\nmodule.exports = { express, Pool, path, crypto, execSync, uid, wrap, multer, RESERVED_FIELD_NAMES, normalizeFieldName, isReservedFieldName, LINK_TYPE_INVERSE, reservedNameBlockedForUpdate };\r\n"
+          "glueSuffix": "\r\nmodule.exports = { express, Pool, path, crypto, execSync, uid, wrap, multer, compression, RESERVED_FIELD_NAMES, normalizeFieldName, isReservedFieldName, LINK_TYPE_INVERSE, reservedNameBlockedForUpdate };\r\n",
+          "modified": true,
+          "modifiedReason": "response compression: require('compression') added with the same self-install-if-missing fallback pattern already used for multer, and exported alongside it"
         },
         {
           "file": "src/server/deps.js",
@@ -744,10 +746,10 @@
     "src/server/db.js": "0e2d575a27795a539882c8f6155b0e0ce925099699a319a9f68dff941f331fe4",
     "src/server/auth.js": "179df9b5c4c91f1b53a2e13840c9857bea754ddb531ca47e99c51514dfd2a475",
     "src/server/email.js": "839386239a6da7eb0a61a963ffeb41d34ab037af4ab3ce17fc7acc9aa5c6b8b0",
-    "src/server/core.js": "77aa304e69eca2f6bfe9cbef9fd8fcc2d3b389b815f6908c56e279577b42baf0",
+    "src/server/core.js": "1b6d980f8a53b1af094a6efade945baa03d3389447a1704c7cc7200c49b564d0",
     "src/server/deps.js": "29d579449151676c969bf5c94f7054cfd89b0d6fbdd521740fad174aa6f398b6",
     "src/server/notify.js": "f177e6f4ca496a41da99cea919988c7bbc9f50486120a35beeeb0e904981632b",
-    "src/server/express-app.js": "32b9f4408805117d94428d1b5f13f163a7498e0682bd8e6576b1f88fe4f8a1ef",
+    "src/server/express-app.js": "e2a67b3a04f9a76cf921a2c4390187dbba480cb0eb99bb339a6423640a5bea2f",
     "src/server/files.js": "fc97fa7f83ed02d3f98770d8aed2d11c9086f5d9f3fb4ff1c37b1d71ac18c458",
     "src/server/oauth-helpers.js": "bc13361d710c9cf5f37e763b832d7be08bb62fd962c3795ce0d1c9d1327f1f42",
     "src/server/routes/data.js": "1c72806ecc1f1c08bd1147671c1646b71255c19d896795a92634ca83717bcbf3",

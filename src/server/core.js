@@ -63,5 +63,18 @@ try {
   } catch(err) { console.error('Could not install multer:', err.message); }
 }
 
+// Install compression if not present
+let compression;
+try {
+  compression = require('compression');
+} catch(e) {
+  try {
+    console.log('Installing compression...');
+    execSync('npm install compression', { cwd: __dirname, stdio: 'inherit' });
+    compression = require('compression');
+    console.log('compression installed');
+  } catch(err) { console.error('Could not install compression:', err.message); }
+}
 
-module.exports = { express, Pool, path, crypto, execSync, uid, wrap, multer, RESERVED_FIELD_NAMES, normalizeFieldName, isReservedFieldName, LINK_TYPE_INVERSE, reservedNameBlockedForUpdate };
+
+module.exports = { express, Pool, path, crypto, execSync, uid, wrap, multer, compression, RESERVED_FIELD_NAMES, normalizeFieldName, isReservedFieldName, LINK_TYPE_INVERSE, reservedNameBlockedForUpdate };
