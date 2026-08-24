@@ -30,7 +30,7 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
   )).rows.map(function (m) { return m.space_id; });
 
   const [org, users, spacesR, smR, sf, issueFavs] = await Promise.all([
-    q('SELECT * FROM organizations LIMIT 1'),
+    q('SELECT * FROM organizations WHERE id=$1', [req.user.org_id]),
     isAdmin
       ? q('SELECT id,name,email,role,color,avatar_url,is_active,last_login,theme FROM users')
       : q('SELECT id,name,email,role,color,avatar_url,is_active,last_login,theme FROM users WHERE id = $1 OR id IN (SELECT user_id FROM space_members WHERE space_id = ANY($2::varchar[]))', [userId, mySpaceIds]),

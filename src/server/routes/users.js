@@ -70,8 +70,7 @@ app.post('/api/users', requireAuth, wrap(async (req, res) => {
   if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password required' });
   const ex = await q('SELECT id FROM users WHERE LOWER(email)=$1', [email.toLowerCase().trim()]);
   if (ex.rows.length) return res.status(409).json({ error: 'User with this email already exists' });
-  const orgR = await q('SELECT id FROM organizations LIMIT 1');
-  const orgId = orgR.rows[0]?.id;
+  const orgId = req.user.org_id;
   const colors = ['#6366f1','#ec4899','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#84cc16'];
   const color = colors[Math.floor(Math.random() * colors.length)];
   const userId = `usr-${uid()}`;

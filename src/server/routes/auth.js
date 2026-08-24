@@ -108,8 +108,10 @@ app.post('/api/auth/accept-invite', wrap(async (req, res) => {
   const r = await q(`SELECT * FROM invitations WHERE token=$1 AND status='pending' AND expires_at>NOW()`, [token]);
   const inv = r.rows[0];
   if (!inv) return res.status(400).json({ error: 'Invalid or expired invitation' });
-  const orgR = await q('SELECT id FROM organizations LIMIT 1');
-  const orgId = orgR.rows[0]?.id;
+  // accept-invite has no authenticated user yet -- the invitation's own
+  // org_id (set when it was created) is the correct, and only available,
+  // signal here, not a guess at "the" organization.
+  const orgId = inv.org_id;
   const colors = ['#6366f1','#ec4899','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#84cc16'];
   const color = colors[Math.floor(Math.random() * colors.length)];
   const userId = `usr-${uid()}`;

@@ -407,7 +407,7 @@
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { retentionDays } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { sanitizeOrgRow } = require('../files');\r\n",
           "glueSuffix": "",
           "modified": true,
-          "modifiedReason": "FIX 6 - scope users/space_members in SQL for non-admins instead of loading every row and filtering in JS"
+          "modifiedReason": "P2: GET /api/data org lookup uses req.user.org_id instead of organizations LIMIT 1"
         },
         {
           "file": "src/server/routes/my-issues.js",
@@ -429,7 +429,9 @@
             ]
           ],
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { isOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\nconst { sanitizeOrgRow } = require('../files');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "P2: GET/PUT /api/org use req.user.org_id instead of organizations LIMIT 1"
         },
         {
           "file": "src/server/routes/spaces.js",
@@ -595,7 +597,9 @@
             ]
           ],
           "gluePrefix": "const { hashPassword, requireAuth, verifyPassword } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendActivationEmail, sendPasswordResetEmail, sendRoleChangeEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "P2: admin-created user (POST /api/users) is placed in req.user.org_id instead of organizations LIMIT 1"
         },
         {
           "file": "src/server/routes/admin.js",
@@ -608,7 +612,7 @@
           "gluePrefix": "const { generateToken, requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendEmail, sendInviteEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
           "glueSuffix": "",
           "modified": true,
-          "modifiedReason": "FIX 3 - escape untrusted values interpolated into email HTML bodies"
+          "modifiedReason": "P2: organizations LIMIT 1 -> req.user.org_id / inv.org_id (5 sites) instead of guessing at \"the\" org"
         },
         {
           "file": "src/server/errors.js",
@@ -663,7 +667,7 @@
             ]
           ],
           "modified": true,
-          "modifiedReason": "FIX 1 - login rate limiting added; split out of routes/oauth.js (password login is not an OAuth route)"
+          "modifiedReason": "P2: accept-invite has no authenticated user yet -- uses the invitation own org_id, not LIMIT 1"
         }
       ]
     }
@@ -742,9 +746,9 @@
     "src/server/express-app.js": "32b9f4408805117d94428d1b5f13f163a7498e0682bd8e6576b1f88fe4f8a1ef",
     "src/server/files.js": "f226eb8fb56f5670481b94840049fa905e79725d04be1b76b62b04e3334880b3",
     "src/server/oauth-helpers.js": "27fc23da1ad56b48622ab7aba7ff3a4d8ffea4bfdb9240ebadf3af317176aa12",
-    "src/server/routes/data.js": "d62df32cc06c880df6ddf96776695ede1db6bb3ef24c9a65780b16e72c62ade9",
+    "src/server/routes/data.js": "8b11c96e206142fb365096652961529665370defce64d2cebf67b556fd825284",
     "src/server/routes/my-issues.js": "5faa02f3f093924a2a2b34e55500307b602201516490171f7c094af81e576e9e",
-    "src/server/routes/org.js": "2abc76d28cd96c0286e572c6dc3293ecf506f21936e01120e6f9e97ad2b1cdfd",
+    "src/server/routes/org.js": "a8ddd574457277dbdf5e27ad8c144b91e61dad409f24b338bbf1fbb1afcbd9c0",
     "src/server/routes/spaces.js": "b722347c2e31f9ef76e5a8e01b28961e981eb15419a06a69b9e503a156989c0a",
     "src/server/routes/sprints.js": "8da54e382be46d856f7e03af10fc9e08985754df47420136630a6ba5574cd754",
     "src/server/routes/issues.js": "6b20d3027212b226ef6d32735337350e3d16a8b7acffa8be4e64012c8eb39911",
@@ -758,12 +762,12 @@
     "src/server/routes/reports.js": "cf1fa331eeb8b3774171a77b8e6930f22319eb9ea542ae71b614c16f08839544",
     "src/server/routes/notifications.js": "ce488a24d1094c63ce62e452563334214f149243c4fbb0423f39fc142839ab33",
     "src/server/routes/oauth.js": "3dc3391bf3ed06c1797a1e00b0d662c7251fd55d2bfbb01b920d43ddf2e33334",
-    "src/server/routes/users.js": "09af45d3b9fa0fed8587b1db87cd7773db0b1ee3410c18cfcf6a9fe0cd9db992",
-    "src/server/routes/admin.js": "b2c3835931a555ad802d687a00ebe3fb9f05c1cb25fa02030789b83d9298a866",
+    "src/server/routes/users.js": "6511060ee73683cab801e6b6535987e491cd4ee89a1d7c97f7bfff50aff56535",
+    "src/server/routes/admin.js": "157e508b023c9d2c90dcdea26491c61b063106c95aa3ebc04acede249be38073",
     "src/server/errors.js": "2ae32d5fa2232508580e13c0464299f5009ef26d1285b7fffa6901bdbb0cbd3f",
     "src/server/routes/spa.js": "6c753958aefd3f8c22ebd70ae43864e1dd7e228603dcdf974870d2c2c2271f3c",
     "src/server/startup.js": "49c1c98f2082c03f3f85b9168b7322b4db12eccae47f50f55761b0a487323195",
     "server.js": "8d3edd6b7ab697839506ce9039b1b2675c0458adb06ddc5d54fab9eb9e94f27f",
-    "src/server/routes/auth.js": "6fd98ad68a79598eb0b16032248d2a8f71258ccbb19a1118586de8792a707f7d"
+    "src/server/routes/auth.js": "09feab5eeafa9ab0231925a96303ff75dc3c2de5f4f81c0599da5408aa8ef1fa"
   }
 }
