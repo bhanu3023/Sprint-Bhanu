@@ -53,9 +53,28 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
 
   const sf1 = sid ? ' WHERE space_id=$1' : '';
   const p = sid ? [sid] : [];
+  // Unscoped loads (no space_id) are real and load-bearing — the initial
+  // post-login bulk load (src/client/init.js) and the admin-settings
+  // assignee-picker fallback both call /api/data with no space_id, so
+  // requiring space_id would break existing callers. But an unscoped issues
+  // query has no natural bound: at 150k issues it measured ~94.6MB, which
+  // Node buffers entirely in memory per request. UNSCOPED_ISSUES_CAP bounds
+  // that to a size no realistic org's org-wide payload comes close to today
+  // (~5MB total at the cap, measured at 150k-issue scale) while every
+  // space-scoped request (the common case) is completely unaffected.
+  // Deliberately NO ORDER BY on the unscoped branch: adding one would resort
+  // the array on every unscoped call, not just the ones the cap actually
+  // truncates -- a response change for every org under the cap, which today
+  // is every real org. A plain LIMIT above the cap+1 changes nothing when
+  // the true row count is at or below it, matching the scoped query's
+  // existing (also order-less) behaviour exactly.
+  const UNSCOPED_ISSUES_CAP = 8000;
+  const issuesSql = sid
+    ? 'SELECT id,space_id,sprint_id,parent_id,key,title,type,status,priority,assignee_id,reporter_id,story_points,labels,position,start_date,due_date,original_estimate,time_spent,team,product_type,created_at,updated_at FROM issues WHERE space_id=$1 AND deleted_at IS NULL'
+    : 'SELECT id,space_id,sprint_id,parent_id,key,title,type,status,priority,assignee_id,reporter_id,story_points,labels,position,start_date,due_date,original_estimate,time_spent,team,product_type,created_at,updated_at FROM issues WHERE deleted_at IS NULL LIMIT ' + (UNSCOPED_ISSUES_CAP + 1);
   const queries = [
     q('SELECT * FROM sprints' + (sf1 ? sf1 + ' AND deleted_at IS NULL' : ' WHERE deleted_at IS NULL'), p),
-    q('SELECT id,space_id,sprint_id,parent_id,key,title,type,status,priority,assignee_id,reporter_id,story_points,labels,position,start_date,due_date,original_estimate,time_spent,team,product_type,created_at,updated_at FROM issues' + (sf1 ? sf1 + ' AND deleted_at IS NULL' : ' WHERE deleted_at IS NULL'), p),
+    q(issuesSql, p),
     q('SELECT * FROM custom_fields' + sf1, p),
     q('SELECT * FROM saved_filters' + sf1, p),
     q('SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50', [userId]),
@@ -65,8 +84,14 @@ app.get('/api/data', requireAuth, wrap(async (req, res) => {
 
   const [sprints, issues, cf, filters, notifs, ifv] = await Promise.all(queries);
 
+  let issueRows = issues.rows;
+  if (!sid && issueRows.length > UNSCOPED_ISSUES_CAP) {
+    console.warn('[api/data] unscoped issues capped at ' + UNSCOPED_ISSUES_CAP + ' rows (more exist) — user=' + userId + ' org=' + req.user.org_id);
+    issueRows = issueRows.slice(0, UNSCOPED_ISSUES_CAP);
+  }
+
   // Filter issues/sprints to only non-archived visible spaces (everyone, including admins)
-  let filteredIssues = issues.rows.filter(function(i) { return visibleSpaceIds.includes(i.space_id); });
+  let filteredIssues = issueRows.filter(function(i) { return visibleSpaceIds.includes(i.space_id); });
   const filteredSprints = sprints.rows.filter(function(s) { return visibleSpaceIds.includes(s.space_id); });
 
   // Always include the user's starred issues in the cache (even when scoped to one space)

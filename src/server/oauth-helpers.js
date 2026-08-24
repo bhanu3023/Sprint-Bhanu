@@ -7,6 +7,11 @@ const MS_TENANT_ID     = process.env.MICROSOFT_TENANT_ID     || '';
 const MS_REDIRECT_URI  = process.env.MICROSOFT_REDIRECT_URI  || 'https://sprintboard.cftools.live/api/auth/callback/microsoft';
 const APP_BASE_URL     = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 
+// Neither outbound call had a timeout — a hung response from Microsoft's
+// endpoints hung the login callback forever. 10s is generous for a
+// same-continent OAuth token/profile call and still bounds the worst case.
+const MS_OAUTH_TIMEOUT_MS = 10000;
+
 // ── Microsoft OAuth2 helpers ──────────────────────────────
 function msTokenExchange(code) {
   return new Promise((resolve, reject) => {
@@ -22,7 +27,8 @@ function msTokenExchange(code) {
       hostname: 'login.microsoftonline.com',
       path: `/${MS_TENANT_ID}/oauth2/v2.0/token`,
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) },
+      timeout: MS_OAUTH_TIMEOUT_MS
     };
     const req = https.request(opts, (r) => {
       let data = '';
@@ -30,6 +36,7 @@ function msTokenExchange(code) {
       r.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
     });
     req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error('Microsoft token exchange timed out')); });
     req.write(body);
     req.end();
   });
@@ -41,7 +48,8 @@ function msGraphMe(accessToken) {
       hostname: 'graph.microsoft.com',
       path: '/v1.0/me?$select=displayName,mail,userPrincipalName',
       method: 'GET',
-      headers: { Authorization: `Bearer ${accessToken}` }
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: MS_OAUTH_TIMEOUT_MS
     };
     const req = https.request(opts, (r) => {
       let data = '';
@@ -49,6 +57,7 @@ function msGraphMe(accessToken) {
       r.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
     });
     req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error('Microsoft Graph /me request timed out')); });
     req.end();
   });
 }

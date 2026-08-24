@@ -16,6 +16,6 @@ app.put('/api/org', requireAuth, wrap(async (req, res) => {
   const { name, slug } = req.body;
   const r = await q('UPDATE organizations SET name=COALESCE($1,name), slug=COALESCE($2,slug) WHERE id=$3 RETURNING *',
     [name || null, slug || null, req.user.org_id]);
-  res.json(r.rows[0]);
+  res.json(sanitizeOrgRow(r.rows[0] || null, isOrgAdmin(req.user.role)));
 }));
 

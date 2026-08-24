@@ -55,10 +55,21 @@ async function denyUnlessCanAccessFile(user, res, fileId) {
 
 function sanitizeOrgRow(orgRow, admin) {
   if (!orgRow) return null;
-  if (admin) return orgRow;
-  const safe = Object.assign({}, orgRow);
-  delete safe.email_settings;
-  return safe;
+  if (!admin) {
+    const safe = Object.assign({}, orgRow);
+    delete safe.email_settings;
+    return safe;
+  }
+  // Admins see email_settings, but smtp_pass is still a live credential and
+  // must be masked the same way GET /api/admin/email-settings already does —
+  // otherwise that endpoint's masking is bypassed by going through this one.
+  if (orgRow.email_settings && orgRow.email_settings.smtp_pass) {
+    const admin_safe = Object.assign({}, orgRow, {
+      email_settings: Object.assign({}, orgRow.email_settings, { smtp_pass: '••••••••' })
+    });
+    return admin_safe;
+  }
+  return orgRow;
 }
 
 app.use('/uploads', requireAuthFile, wrap(async (req, res, next) => {
