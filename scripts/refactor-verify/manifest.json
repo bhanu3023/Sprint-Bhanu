@@ -1,5 +1,5 @@
 {
-  "_doc": "Move-purity manifest. Each target declares the original file and its replacement PARTS, where every part records the ORIGINAL LINE RANGE it covers. catdiff.js asserts: (A) each part's bytes equal the pristine original's bytes for that range, (B) the ranges tile 1..N with no gap or overlap, (C) concatenating them reproduces the whole original byte-for-byte, and (D) for client targets, the <script src> order parsed out of the real 'orderFrom' file equals the parts' ascending line order. Order is derived from the real HTML, never trusted from this file -- a disagreement between the two is reported as the bug. Check [5] (scriptblock.js) additionally validates the script block itself.",
+  "_doc": "Move-purity manifest. Each target declares the original file and its replacement PARTS, where every part records the ORIGINAL LINE RANGE it covers. catdiff.js asserts: (A) each part's bytes equal the pristine original's bytes for that range, (B) the ranges tile 1..N with no gap or overlap, (C) concatenating them reproduces the whole original byte-for-byte, (D) for client targets, the <script src> order parsed out of the real 'orderFrom' file equals the parts' ascending line order, and (E) every part's current on-disk sha256 matches a pin in clientPins -- the recoverable guarantee for a part declared modified:true, mirroring serverdiff's [SE]. A part with modified:true is EXPECTED to fail (A)/(C) against pristine and is skipped there by design; (E) is what keeps it honest instead, re-pinned deliberately in the same commit as any intentional change. Order is derived from the real HTML, never trusted from this file -- a disagreement between the two is reported as the bug. Check [5] (scriptblock.js) additionally validates the script block itself.",
   "_lineEndings": "This repo has core.autocrlf=true: files are CRLF on disk, LF in git blobs (app.js is 891641 bytes on disk vs 874347 in the blob -- exactly one extra byte per line). RAW byte-identity is MANDATORY for client parts; CRLF->LF is used only as a failure diagnostic and can never produce a PASS.",
   "baselineRef": "c22c688",
   "targets": [
@@ -170,7 +170,9 @@
         {
           "file": "src/client/components/issue-drawer.js",
           "from": 10844,
-          "to": 12126
+          "to": 12126,
+          "modified": true,
+          "modifiedReason": "Switching from one open ticket straight to another (parent breadcrumb, a linked issue) left the PREVIOUS ticket's rendered content on screen, fully visible and interactive, for the whole fetch of the new one -- fixed by covering it with a loading overlay the moment a switch is detected, dropped once the new issue actually finishes rendering (every early-return path, including a slower-to-fail stale request, clears it correctly without clobbering a newer request's own overlay). First client-side use of `modified: true` in this project -- see [E] in catdiff.js, added specifically to keep this declaration honest via a pinned digest rather than a silent, unrecoverable exception."
         },
         {
           "file": "src/client/components/drawer-panels.js",
@@ -775,5 +777,49 @@
     "src/server/startup.js": "49c1c98f2082c03f3f85b9168b7322b4db12eccae47f50f55761b0a487323195",
     "server.js": "8d3edd6b7ab697839506ce9039b1b2675c0458adb06ddc5d54fab9eb9e94f27f",
     "src/server/routes/auth.js": "1b412dae9da512dacaa788165e24130a7800c2621a675e342d8f6652a646fb96"
+  },
+  "clientPins": {
+    "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
+    "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
+    "src/client/utils/index.js": "a2a84ddf20874d3515d0bdf64605e6ca8074a87fa765a86ff63e9d9ae182607c",
+    "src/client/services/api.js": "49e8bbe2ac1f56c7d1066d377b397c223e1b1a7333ffc485ae075b5ffa6bee7c",
+    "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
+    "src/client/components/toast.js": "a68b458575eef494d2efcf5106c5bed3e1d28cb01aea42f0619bec4380e19727",
+    "src/client/components/confirm.js": "74ca56323f0cd80a0addddb3b7f610bcb4743a775d53173655bfe7baca4f355d",
+    "src/client/components/modal-drawer.js": "61eb4f0bedc7a32ae862fadf1ce7308c926c9aecdffef39741c0a7e624e926e1",
+    "src/client/constants.js": "05cb1e906b9cd370173495c95dfe7555c677d865f3b6782cd98f507a134bba5d",
+    "src/client/components/badges.js": "73554650eb1a15885d0e23255c9d2c78af1c3b47bd467b56f5b5cbac75d49f55",
+    "src/client/services/data-helpers.js": "da52fb647c59fb007daf9b45ec1b9ab6ebda3284ed1cb606735e1cc1c6ad5282",
+    "src/client/services/theme.js": "2f28888928a9225b8787269f4a30ecf626e0beb76342739c61cabeef0665ecef",
+    "src/client/init.js": "3cbb54725304398a5e780c6d1dde69f3efae185b413a9a1588e683342631f34f",
+    "src/client/navigation.js": "2ad4c9eb92ef17dcaf8723194e81ff2b52c3a57111b6adf64e9602389e96fd43",
+    "src/client/components/sidebar.js": "811df61b1ffd758ccfa5974a895ce1a99eb448e727811e9ca0f3f33a13a278fb",
+    "src/client/components/space-header.js": "50b87b157ae881fe9f6ddef2b4b6fad224efa70e11c9a176a3bf7452a462ee56",
+    "src/client/pages/home.js": "5582be47cd0ad32e43c901a4c6371445c827b5d3827fe73c3f5cb0e83da54a3d",
+    "src/client/pages/spaces.js": "7233a64042a0caab0ba3e77ae45f4bacee4b09745ee8de9f172fd414b26bb77c",
+    "src/client/pages/my-work.js": "eb3d5d51f5ce564bd1e4bbcb6f8c450709db4c896ef46d49a51d84fe2bbe9158",
+    "src/client/pages/work-log.js": "fc4dcd026bb0a4fd04d5d367c8055f7c13fd2e1d7cbb3681764df100f13f2bca",
+    "src/client/pages/roadmap.js": "decfa62d2bd6f5a9f64a378d28db7fa12a647a5e1dfdd5972018637ac0238b84",
+    "src/client/pages/work-log-pivot.js": "daf06dc277a79590e81e14c87ec8b5c0d4f682761b1a7b103363997acab20115",
+    "src/client/pages/space/summary.js": "face07962f1dc078bd7755040c5ffb6a7873b69cc98ce3f3c5c5b545294d8128",
+    "src/client/pages/space/timeline.js": "80cf2915ffb97e1ea16be538d1d1830b4ec06b6f12be0baf701af6bcb306017c",
+    "src/client/pages/space/backlog.js": "1998b9476ef1691337d9a69019420ca9f089d65c4ba5ecc5f7c173e6a328f66a",
+    "src/client/pages/space/board.js": "e8d6a94e77a3e486a76af695ad5c967da72dadea283c140467c933e1ff905d5b",
+    "src/client/pages/space/calendar.js": "beac6f46d01e8bb1abbaa557740f033c88acc8743e6b9af30cb6e2f05a285ae8",
+    "src/client/pages/space/reports.js": "25851498be7ac2d325518823f4156b1193981a94e579332e959faf67eb9d5d07",
+    "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
+    "src/client/pages/space/all-work.js": "4c51bdd4c14e77c2590a66b63888999a5852cca7a60dd64d64c77c11e03309d7",
+    "src/client/pages/space/settings.js": "7cef9f63b3a7c901e0ac07c5212f9c14086b9bcb4bc0740d3cb310316d88d372",
+    "src/client/components/space-context-menu.js": "304cd92f3c0f7a7345f3193b4b94ffe81b8531232ac7500e6682d62a8aea417f",
+    "src/client/components/issue-drawer.js": "f65b627949a1097125786704dbcf00007c519a7a48f16a39c72eebf5547f837c",
+    "src/client/components/drawer-panels.js": "64290d5494b31c10a5daf5222923eb5d3201b27a9cb63be99ceb292c38239768",
+    "src/client/crud/space.js": "a50414a9f359e3016808f8bfff76553752b24d5bf5a8c00da23c48eefdebb7ff",
+    "src/client/crud/sprint.js": "7cd1e769623a4f2ad117e63821433a93ad038be59d516af9af78e9c7955def55",
+    "src/client/crud/issue.js": "f1143b1e0083f2537549de2e1f5834d99cbfc01755474a69277f83ce205ee77c",
+    "src/client/components/worklog-modal.js": "9fc9cd49b08bc820ffff27b435deeffdafd078eb11a3f13bfe72d704028ab8a6",
+    "src/client/components/notifications.js": "a5a77c4e30cabc116a44dc31990bf6cc37ac886a41c328da7225e9822d515041",
+    "src/client/event-bindings.js": "2982c479f1380ff6261b94bde91e9034bd8a75428c91184c60d4b554da357f4f",
+    "src/client/pages/admin-settings.js": "88d435f08ba9b45f5a68d6675a70edfce3ec6556bf432bcaae07404f28839abb",
+    "src/client/components/global-search.js": "a720a6ed0c9837748bbd1acaaccb38af225db8271e64ecdc3c94637106ffb1a0"
   }
 }

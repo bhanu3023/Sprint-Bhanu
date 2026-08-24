@@ -144,8 +144,19 @@ for (const t of targets) {
   }
 
   // ── A. range fidelity (RAW, move-aware) ─────────────────────────────
+  // A part declared `modified: true` is EXPECTED to no longer match its
+  // original pristine range -- that is the whole point of the declaration.
+  // Skip the RAW comparison for it rather than let an expected, deliberate
+  // difference report as a failure; [E] below (pinned digest) is what keeps
+  // a modified part honest instead. Anything NOT declared modified still
+  // gets the full, unweakened check.
   let aOk = true;
+  const modifiedParts = parts.filter(p => p.modified);
   for (const p of parts) {
+    if (p.modified) {
+      console.log('   [A] ' + p.file.padEnd(48) + ' MODIFIED by declaration: ' + p.modifiedReason);
+      continue;
+    }
     const abs = path.join(ROOT, p.file);
     if (!fs.existsSync(abs)) { aOk = false; failed = true; console.log('   [A] MISSING FILE: ' + p.file); continue; }
     const actual = rd(abs).toString('latin1');
@@ -168,7 +179,9 @@ for (const t of targets) {
       console.log('        actual  : ' + JSON.stringify(actual.slice(Math.max(0, i - 60), i + 60)));
     }
   }
-  console.log('   [A] range fidelity  : ' + (aOk ? 'PASS — every part RAW-matches its original line range' : 'FAIL'));
+  console.log('   [A] range fidelity  : ' + (aOk
+    ? 'PASS — every non-modified part RAW-matches its original line range' + (modifiedParts.length ? ' (' + modifiedParts.length + ' modified by declaration, skipped -- see [E])' : '')
+    : 'FAIL'));
 
   // ── B. exact tiling ─────────────────────────────────────────────────
   const sorted = parts.slice().sort((x, y) => x.from - y.from);
@@ -190,7 +203,18 @@ for (const t of targets) {
 
   // ── C. concatenation / move-reversibility (RAW) ─────────────────────
   let cOk = false;
-  if (parts.every(p => fs.existsSync(path.join(ROOT, p.file)))) {
+  if (modifiedParts.length) {
+    // A modified part means the whole-file concatenation is EXPECTED to no
+    // longer equal pristine byte-for-byte -- that expectation doesn't
+    // change just because other parts are untouched. [B] above already
+    // proves nothing was lost (the declared ranges still tile completely);
+    // [E] below proves the modified content matches what was deliberately
+    // pinned. Reporting this as FAIL would treat a declared, reasoned change
+    // as if it were silent corruption.
+    cOk = true;
+    console.log('   [C] concatenation   : SKIPPED — ' + modifiedParts.length + ' part(s) modified by declaration ' +
+      '(full-file byte match against pristine is expected to fail now; [B] proves nothing was lost, [E] proves the change matches what was pinned)');
+  } else if (parts.every(p => fs.existsSync(path.join(ROOT, p.file)))) {
     const order = t.loadOrder && t.loadOrder.length ? t.loadOrder : sorted.map(p => p.file);
 
     if (!moves.length) {
@@ -286,8 +310,47 @@ for (const t of targets) {
   } else {
     console.log('   [D] order source    : n/a (no orderFrom declared)');
   }
+
+  // ── E. pinned digests — the live coverage figure ────────────────────
+  // Mirrors serverdiff's [SE]. [A]/[C] above are RAW comparisons against
+  // pristine app.js and go silent (by design) for a part declared modified,
+  // because that part is EXPECTED to differ now. This is what keeps a
+  // modified part honest instead: every part's CURRENT on-disk sha256 must
+  // match a pin recorded in manifest.clientPins, re-pinned deliberately in
+  // the SAME commit as any intentional change. Unlike modified:true spreading
+  // silently, a pin is a positive claim about exact content, and is restored
+  // (not left decaying) the moment a change is re-pinned.
+  const clientPins = manifest.clientPins || {};
+  let eOk = true, ePinned = 0;
+  for (const p of parts) {
+    if (!clientPins[p.file]) { eOk = false; failed = true; console.log('   [E] ' + p.file + ' has NO pin -- unpinned part'); continue; }
+    const abs = path.join(ROOT, p.file);
+    if (!fs.existsSync(abs)) { eOk = false; failed = true; console.log('   [E] ' + p.file + ' MISSING from disk'); continue; }
+    const actual = sha(rd(abs));
+    if (actual !== clientPins[p.file]) {
+      eOk = false; failed = true;
+      console.log('   [E] ' + p.file + ' DIGEST MISMATCH -- pinned=' + clientPins[p.file].slice(0, 16) + ' actual=' + actual.slice(0, 16));
+      continue;
+    }
+    ePinned++;
+  }
+  console.log('   [E] pinned digests  : ' + (eOk
+    ? 'PASS — all ' + ePinned + ' of ' + parts.length + ' client parts byte-verified by pinned digest'
+    : 'FAIL'));
+
+  if (modifiedParts.length) {
+    console.log('');
+    console.log('   *** NOT RAW-VERIFIED against pristine: ' + modifiedParts.length + ' of ' + parts.length +
+      ' part(s) carry modified:true, so [A] and [C] were SKIPPED for them. They are');
+    console.log('       covered instead by [B] (nothing lost from the original tiling) and by [E]');
+    console.log('       (current content matches what was deliberately pinned):');
+    modifiedParts.forEach(p => {
+      console.log('         - ' + p.file);
+      console.log('             ' + p.modifiedReason);
+    });
+  }
   console.log('');
 }
 
-console.log('=== RESULT: ' + (failed ? 'FAIL — move purity NOT proven' : 'PASS — all checks empty (RAW)') + ' ===');
+console.log('=== RESULT: ' + (failed ? 'FAIL — move purity NOT proven' : 'PASS — RAW where untouched, pinned digest where declared modified') + ' ===');
 process.exit(failed ? 1 : 0);

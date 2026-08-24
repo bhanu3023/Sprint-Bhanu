@@ -83,6 +83,19 @@ function bindDrawerTitleField() {
 }
 
 async function openDrawer(issueId) {
+  // Navigating from one open ticket straight to another (parent breadcrumb,
+  // a linked issue, etc.) previously left the PREVIOUS ticket's rendered
+  // content on screen, fully visible and interactive, for the whole fetch --
+  // only the drawer's very first open (while it's still `hidden`) had no
+  // stale content to show. Cover it the moment a switch is detected, drop
+  // the cover once the new issue has actually finished rendering (every
+  // early-return path below clears it too, so a failed or superseded fetch
+  // never leaves the spinner stuck).
+  var drawerEl = $('issueDrawer');
+  var loadingOverlay = $('drawerLoadingOverlay');
+  var switchingTickets = drawerEl && !drawerEl.hasAttribute('hidden') && S.drawerIssueId !== issueId;
+  if (switchingTickets && loadingOverlay) loadingOverlay.removeAttribute('hidden');
+
   // Save current location for back button - detect allwork from URL/view
   var currentTab = S.currentTab;
   if (!currentTab) {
@@ -103,17 +116,26 @@ async function openDrawer(issueId) {
   try {
     issue = await api('/api/issues/' + issueId);
   } catch (e) {
+    // Only drop the cover if THIS request is still the current one -- a
+    // slower-to-fail request from an earlier click must never clobber a
+    // newer request's still-loading overlay.
+    if (S.drawerIssueId === issueId && loadingOverlay) loadingOverlay.setAttribute('hidden', '');
     toast('Could not load issue', 'error');
     return;
   }
 
-  if (!issue) { toast('Could not load issue', 'error'); return; }
+  if (!issue) {
+    if (S.drawerIssueId === issueId && loadingOverlay) loadingOverlay.setAttribute('hidden', '');
+    toast('Could not load issue', 'error'); return;
+  }
   // The fetch above is async — if the user hit Back (popstate → _closeIssueDrawer
   // clears drawerIssueId) or opened a different issue while it was in flight,
   // this response is stale. Rendering it anyway re-opens a drawer the user just
   // closed and stomps the URL popstate just restored, which is why Back
   // sometimes looked like it needed two clicks: the first click's popstate ran
   // correctly, then this exact code below undid it a moment later.
+  // (The loading overlay is deliberately left alone here -- whichever request
+  // IS current owns hiding it, at its own success or failure point below.)
   if (S.drawerIssueId !== issueId) return;
   // Fallback for openIssuePage's same mount call — only needed when the issue
   // wasn't already in the local cache at click time, so its space_id wasn't
@@ -315,6 +337,10 @@ async function openDrawer(issueId) {
 
   bindDrawerEdits(issue);
   startDrawerLiveSync(issueId);
+  // Reached only when this request is still the current one (the stale-response
+  // check above already returned otherwise) -- the new issue is fully rendered,
+  // safe to drop the cover now.
+  if (loadingOverlay) loadingOverlay.setAttribute('hidden', '');
 }
 
 // Live sync: poll DB every 15s and update drawer if data changed
