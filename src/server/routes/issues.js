@@ -324,8 +324,12 @@ app.get('/api/issues/:id', requireAuth, wrap(async (req, res) => {
       FROM issues WHERE parent_id=$1 ORDER BY position, created_at`, [issueId]),
     q(`SELECT v.*, f.name AS field_name, f.field_type
       FROM issue_field_values v JOIN custom_fields f ON f.id=v.field_id WHERE v.issue_id=$1`, [issueId]),
-    q(`SELECT h.*, u.name AS user_name, u.color AS user_color
-      FROM issue_history h LEFT JOIN users u ON u.id=h.user_id WHERE h.issue_id=$1 ORDER BY h.created_at DESC`, [issueId]),
+    q(`SELECT h.*, u.name AS user_name, u.color AS user_color,
+              cf.name AS custom_field_name, cf.field_key AS custom_field_key
+      FROM issue_history h LEFT JOIN users u ON u.id=h.user_id
+      LEFT JOIN custom_fields cf ON h.field_name LIKE 'custom_field_%'
+             AND cf.id = substring(h.field_name FROM 14)
+      WHERE h.issue_id=$1 ORDER BY h.created_at DESC`, [issueId]),
     q(`SELECT a.*, u.name AS uploader_name FROM issue_attachments a
       LEFT JOIN users u ON u.id=a.uploaded_by WHERE a.issue_id=$1 ORDER BY a.created_at DESC`, [issueId])
   ]);

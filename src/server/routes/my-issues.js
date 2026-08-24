@@ -15,10 +15,12 @@ app.get('/api/my-issues', requireAuth, wrap(async (req, res) => {
   const scopeParams = admin ? [userId] : [userId, spaceIds];
   const [assigned, reported, recent] = await Promise.all([
     q(`SELECT i.*, s.name AS space_name, s.key AS project_key,
-              a.name AS assignee_name, a.color AS assignee_color
+              a.name AS assignee_name, a.color AS assignee_color,
+              r.name AS reporter_name, r.color AS reporter_color
        FROM issues i
        LEFT JOIN spaces s ON s.id = i.space_id
        LEFT JOIN users a ON a.id = i.assignee_id
+       LEFT JOIN users r ON r.id = i.reporter_id
        WHERE i.assignee_id = $1 AND i.deleted_at IS NULL${scopeSql}
        ORDER BY i.updated_at DESC`, scopeParams),
     q(`SELECT i.*, s.name AS space_name, s.key AS project_key,
@@ -66,11 +68,14 @@ app.get('/api/dashboard/activity', requireAuth, wrap(async (req, res) => {
               u.name AS user_name, u.color AS user_color,
               i.key AS issue_key, i.title AS issue_title, i.space_id,
               s.key AS project_key, s.name AS space_name,
+              cf.name AS custom_field_name, cf.field_key AS custom_field_key,
               'update' AS activity_type
        FROM issue_history h
        JOIN issues i ON i.id = h.issue_id AND i.deleted_at IS NULL
        JOIN spaces s ON s.id = i.space_id
        LEFT JOIN users u ON u.id = h.user_id
+       LEFT JOIN custom_fields cf ON h.field_name LIKE 'custom_field_%'
+              AND cf.id = substring(h.field_name FROM 14)
        WHERE h.created_at >= NOW() - ($2::int * INTERVAL '1 hour')
          AND i.space_id = ANY($1)
          AND h.field_name NOT IN ('restored', 'created')

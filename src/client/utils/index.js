@@ -406,7 +406,13 @@ function highlightMentionsInCommentBody(body) {
 function commentBodyToEditableHtml(body) {
   if (!body) return '';
   if (/<[a-z][\s\S]*>/i.test(body)) {
-    return body.replace(/<script[\s\S]*?<\/script>/gi, '');
+    var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
+    // Images in a stored HTML body are bare /api/files/<id> src's (no token --
+    // see _saveComment's stripFileAuthTokensFromHtml). bodyHtml()'s read-only
+    // render calls augmentFileUrlsInHtml for the same reason; without it here
+    // the <img> in the edit box 401s and shows broken, even though Save/Cancel
+    // (which never touch src) work fine.
+    return augmentFileUrlsInHtml(safe);
   }
   var html = highlightMentionsInCommentBody(body);
   html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
@@ -416,6 +422,29 @@ function commentBodyToEditableHtml(body) {
     return '<a href="' + esc(fileApiUrl(url)) + '" target="_blank">' + esc(fname) + '</a>';
   });
   return html;
+}
+
+// The Product Type + Combination picker stores BOTH selections in one custom
+// field's value ({v:2, productTypes:[...], combinations:[...]}) named
+// "Combination" -- so a pure product-type-only edit still writes a history
+// row against that field, and reporting it by the field's own name says
+// "updated Combination" even when only Product Type actually changed.
+// Diffing old vs new tells the caller which part(s) actually moved.
+function diffCombinationFieldChange(oldValue, newValue) {
+  function parse(v) {
+    if (!v) return { productTypes: [], combinations: [] };
+    try {
+      var p = JSON.parse(v);
+      return { productTypes: (p && p.productTypes) || [], combinations: (p && p.combinations) || [] };
+    } catch (e) { return { productTypes: [], combinations: [] }; }
+  }
+  var o = parse(oldValue), n = parse(newValue);
+  var ptChanged = o.productTypes.slice().sort().join(',') !== n.productTypes.slice().sort().join(',');
+  var comboChanged = o.combinations.slice().sort().join(',') !== n.combinations.slice().sort().join(',');
+  if (ptChanged && comboChanged) return 'product type and combination';
+  if (ptChanged) return 'product type';
+  if (comboChanged) return 'combination';
+  return null;
 }
 
 function fmtMins(mins) {

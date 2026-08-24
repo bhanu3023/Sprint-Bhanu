@@ -90,6 +90,14 @@ function statCard(label, value, color, filter) {
   return '<div class="stat-card"' + click + '><div class="stat-value" style="color:' + color + '">' + value + '</div><div class="stat-label">' + label + '</div></div>';
 }
 window._statCardClick = function(filter) {
+  // "Total Issues" goes to All Work (the space-wide list), not Backlog --
+  // the other four cards (To Do/In Progress/Done/Overdue) are unaffected,
+  // still go to Backlog with their status filter applied as before.
+  if (filter === 'all') {
+    window._awShowAllOverride = true;
+    navigateToSpace(S.currentSpace, 'allwork');
+    return;
+  }
   navigateToSpace(S.currentSpace, 'backlog');
   setTimeout(function() {
     window._activeStatFilter = filter;

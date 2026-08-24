@@ -504,6 +504,14 @@ function _renderActivityTab(tab, issue) {
     var name = user ? user.name : (h.user_name || 'Unknown');
     var color = (user && user.color) || h.user_color || '#6b7280';
     var fieldLabel = { title:'Title', status:'Status', priority:'Priority', assignee_id:'Assignee', reporter_id:'Reporter', sprint_id:'Sprint', labels:'Labels', story_points:'Story Points', start_date:'Start Date', due_date:'Due Date', description:'Description', attachment:'Attachment' }[h.field_name] || h.field_name;
+    if ((h.field_name || '').indexOf('custom_field_') === 0) {
+      if (h.custom_field_key === 'combination') {
+        var comboWhat = diffCombinationFieldChange(h.old_value, h.new_value);
+        fieldLabel = comboWhat ? cap(comboWhat) : (h.custom_field_name || fieldLabel);
+      } else {
+        fieldLabel = h.custom_field_name || fieldLabel;
+      }
+    }
     function resolveVal(field, val) {
       if (!val || val === '—') return val || '—';
       if (field === 'sprint_id') {

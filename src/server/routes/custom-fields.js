@@ -147,7 +147,9 @@ app.put('/api/issues/:id/field-values/:fieldId', requireAuth, wrap(async (req, r
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'issue.update'))) return;
   const { value } = req.body;
   // Check if record exists
-  const existing = await q('SELECT id FROM issue_field_values WHERE issue_id=$1 AND field_id=$2', [issueId, fieldId]);
+  const existing = await q('SELECT id, value FROM issue_field_values WHERE issue_id=$1 AND field_id=$2', [issueId, fieldId]);
+  const oldValue = existing.rows.length ? (existing.rows[0].value || '') : '';
+  const newValue = String(value || '');
   if (existing.rows.length) {
     if (value === '' || value === null || value === undefined) {
       await q('DELETE FROM issue_field_values WHERE issue_id=$1 AND field_id=$2', [issueId, fieldId]);
@@ -158,9 +160,14 @@ app.put('/api/issues/:id/field-values/:fieldId', requireAuth, wrap(async (req, r
     await q('INSERT INTO issue_field_values(id,issue_id,field_id,value) VALUES($1,$2,$3,$4)',
       [uid(), issueId, fieldId, String(value)]);
   }
-  // Track in history
-  await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,new_value,created_at)
-    VALUES($1,$2,$3,$4,$5,NOW())`, [uid(), issueId, req.user.id, 'custom_field_' + fieldId, String(value || '')]);
+  // Track in history -- skip when the debounced picker re-saves the same value
+  // (the Product Type + Combination picker always PUTs this field alongside
+  // its own product_type PUT, so a pure product-type-only change used to still
+  // write a no-op "combination changed" row here every time).
+  if (oldValue !== newValue) {
+    await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value,created_at)
+      VALUES($1,$2,$3,$4,$5,$6,NOW())`, [uid(), issueId, req.user.id, 'custom_field_' + fieldId, oldValue, newValue]);
+  }
   res.json({ ok: true });
 }));
 

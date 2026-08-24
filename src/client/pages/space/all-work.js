@@ -55,6 +55,25 @@ function _awSaveFilterState() {
   } catch (e) { /* storage unavailable/full -- filters just won't persist this time */ }
 }
 function _awLoadFilterState() {
+  // One-shot override for "Total Issues" on Summary -- set (synchronously,
+  // before navigation starts) by _statCardClick, consumed here rather than
+  // via a setTimeout in the caller. The 'allwork' case's own data refresh is
+  // a real network call of unpredictable duration, so a fixed-delay timeout
+  // clearing filters AFTER navigating would race this exact function and
+  // could lose either way depending on how long that refresh took. Reading
+  // the flag from inside the function this restore always runs through
+  // removes the race instead of hoping to win it.
+  if (window._awShowAllOverride) {
+    window._awShowAllOverride = false;
+    S.awFilters = {
+      type: [], status: [], priority: [], assignee: [], sprint: [],
+      productType: [], team: [], desc: '',
+      createdFrom: '', createdTo: '', updatedFrom: '', updatedTo: '',
+      dueDateFrom: '', dueDateTo: '', startDateFrom: '', startDateTo: ''
+    };
+    _awActiveFields = [];
+    return;
+  }
   var key = _awFilterStorageKey();
   if (!key) return;
   try {

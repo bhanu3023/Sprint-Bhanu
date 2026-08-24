@@ -1778,27 +1778,29 @@ body.issue-page .drawer-topbar {
 }
 body.light.issue-page .drawer-topbar { background: #fff; }
 
-/* Global Search */
+/* Global Search -- a real (thin, subtle) border defines the field at rest;
+   focus swaps that border for the accent colour plus a soft ring, rather than
+   changing the fill, so the box never blends into the page in either state. */
 .topbar-search-wrap {
-  position: relative; display: flex; align-items: center; gap: 8px;
-  background: var(--bg3); border: 1.5px solid var(--border); border-radius: 8px;
-  padding: 0 10px; flex: 1; max-width: 480px; transition: border-color .15s, box-shadow .15s;
+  position: relative; display: flex; align-items: center; gap: 9px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0 12px; flex: 1; max-width: 480px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.topbar-search-wrap:hover {
+  border-color: color-mix(in srgb, var(--border) 50%, var(--text3));
 }
 .topbar-search-wrap:focus-within {
-  border-color: var(--accent); box-shadow: 0 0 0 3px rgba(1,41,172,.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
-.topbar-search-icon { color: var(--text3); flex-shrink: 0; }
+.topbar-search-icon { color: var(--text3); flex-shrink: 0; transition: color .15s; }
+.topbar-search-wrap:focus-within .topbar-search-icon { color: var(--accent); }
 .topbar-search-input {
   flex: 1; border: none; background: transparent; outline: none;
-  font-size: 13px; color: var(--text); height: 34px; min-width: 0;
+  font-size: 13.5px; color: var(--text); height: 38px; min-width: 0; letter-spacing: .1px;
 }
 .topbar-search-input::placeholder { color: var(--text3); }
-.topbar-search-kbd {
-  font-size: 10px; color: var(--text3); background: var(--bg3);
-  border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
-  flex-shrink: 0; font-family: inherit;
-}
-.topbar-search-wrap:focus-within .topbar-search-kbd { display: none; }
 .gs-drop {
   position: absolute; top: calc(100% + 6px); left: 0; right: 0;
   background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
@@ -1822,7 +1824,6 @@ body.light.issue-page .drawer-topbar { background: #fff; }
 .gs-item-meta { font-size: 11px; color: var(--text3); white-space: nowrap; }
 .gs-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--text3); }
 body.light .gs-drop { background: #fff; }
-body.light .topbar-search-wrap { background: #f6f8fa; }
 
 /* Top bar */
 .drawer-topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }

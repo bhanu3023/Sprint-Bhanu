@@ -275,6 +275,7 @@ function restoreSidebarAfterSettings() {
 
 function navigateTo(view, opts) {
   opts = opts || {};
+  if (typeof window._gsReset === 'function') window._gsReset();
   document.body.classList.remove('settings-active');
   if (view !== 'settings') restoreSidebarAfterSettings();
   if (view === 'global-reports' && !canViewReports()) {
@@ -367,6 +368,7 @@ function renderGlobalReports() {
 
 function navigateToSpace(spaceId, tab, opts) {
   opts = opts || {};
+  if (typeof window._gsReset === 'function') window._gsReset();
   // Clicking a space is the other way out of the admin console — it doesn't go
   // through navigateTo(), so the sidebar has to be put back here too.
   document.body.classList.remove('settings-active');
@@ -439,19 +441,23 @@ function renderTab(tab, opts) {
   }
 
   switch (tab) {
-    case 'summary': renderSummary(); break;
+    case 'summary': (async function() {
+      var spaceAtStart = S.currentSpace;
+      await ensureSpaceDataFresh();
+      // Landing here right after clicking a space (summary is the default
+      // tab) used to render getSpaceIssues() off whatever S.data already
+      // held -- empty or another space's data on a cold nav -- showing every
+      // stat card as 0 even though the space has plenty of issues in
+      // production. Every OTHER stat card's own tab (allwork) already
+      // guards this same way; summary just never did.
+      if (S.currentTab === 'summary' && S.currentSpace === spaceAtStart) renderSummary();
+    })(); break;
     case 'backlog': renderBacklog(); break;
     case 'sprint': renderSprintBoard(); break;
     case 'reports': renderReports(); break;
     case 'mbr': renderMBR(); break;
     case 'allwork': (async function() {
-      // Skip full refresh if data was loaded within last 30s for this space
-      var now = Date.now();
-      if (!S._dataLoadedAt || (now - S._dataLoadedAt) > 30000 || S._dataLoadedSpace !== S.currentSpace) {
-        await refreshData();
-        S._dataLoadedAt = now;
-        S._dataLoadedSpace = S.currentSpace;
-      }
+      await ensureSpaceDataFresh();
       await _initAwMultiSelects();
       // Restores whatever was last saved for THIS space -- safe to do on every
       // entry into the tab, not just the first: _awSaveFilterState() runs on
@@ -498,6 +504,18 @@ async function refreshData() {
   if (S.currentSpace) url += '?space_id=' + S.currentSpace;
   var data = await api(url);
   S.data = data;
+}
+
+// Skip the full refetch if data was loaded within the last 30s for this same
+// space -- shared by every space tab that needs to render off a guaranteed-
+// current S.data rather than whatever the previous space/tab left behind.
+async function ensureSpaceDataFresh() {
+  var now = Date.now();
+  if (!S._dataLoadedAt || (now - S._dataLoadedAt) > 30000 || S._dataLoadedSpace !== S.currentSpace) {
+    await refreshData();
+    S._dataLoadedAt = now;
+    S._dataLoadedSpace = S.currentSpace;
+  }
 }
 
 // refreshData() scopes custom_fields to S.currentSpace like everything else

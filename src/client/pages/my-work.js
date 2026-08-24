@@ -168,9 +168,12 @@ window._ywFilterCheck = function (key, cb) {
   if (S.currentView === 'yourwork' && S.yourWorkTab === 'assigned') syncAppUrl({ replace: true });
 };
 
-function _renderYourWorkTable(issues, rawIssues, lastColLabel) {
-  lastColLabel = lastColLabel || 'Updated';
-  if (lastColLabel === 'Viewed') {
+// lastCol: { label, key } where key is 'viewed' (relative time, Recently
+// Viewed tab), 'reporter' or 'assignee' (avatar + name, Assigned/Reported
+// tabs) -- default is a plain 'Updated' relative-time column.
+function _renderYourWorkTable(issues, rawIssues, lastCol) {
+  lastCol = lastCol || { label: 'Updated', key: 'updated' };
+  if (lastCol.key === 'viewed') {
     issues.sort(function (a, b) { return new Date(b.viewedAt || 0) - new Date(a.viewedAt || 0); });
   } else {
     issues.sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); });
@@ -188,7 +191,7 @@ function _renderYourWorkTable(issues, rawIssues, lastColLabel) {
     _ywBuildFilterTh('status', 'Status', rawIssues) +
     _ywBuildFilterTh('priority', 'Priority', rawIssues) +
     _ywBuildFilterTh('space', 'Space', rawIssues) +
-    '<th>' + esc(lastColLabel) + '</th>' +
+    '<th>' + esc(lastCol.label) + '</th>' +
     '</tr></thead><tbody>';
   if (!issues.length) {
     html += '<tr><td colspan="7" class="yw-empty-row">' +
@@ -199,7 +202,18 @@ function _renderYourWorkTable(issues, rawIssues, lastColLabel) {
     for (var i = 0; i < issues.length; i++) {
       var iss = issues[i];
       var iid = iss.id;
-      var timeVal = lastColLabel === 'Viewed' ? (iss.viewedAt || iss.updated_at) : iss.updated_at;
+      var lastColHtml;
+      if (lastCol.key === 'reporter' || lastCol.key === 'assignee') {
+        var personId = lastCol.key === 'reporter' ? iss.reporter_id : iss.assignee_id;
+        var personName = lastCol.key === 'reporter' ? iss.reporter_name : iss.assignee_name;
+        var person = personId ? (findUser(personId) || { id: personId, name: personName, color: lastCol.key === 'reporter' ? iss.reporter_color : iss.assignee_color }) : null;
+        lastColHtml = person && personName
+          ? avatarHtml(person, 22) + '&nbsp;' + esc(personName)
+          : '<span class="text-muted">' + (lastCol.key === 'reporter' ? 'Unknown' : 'Unassigned') + '</span>';
+      } else {
+        var timeVal = lastCol.key === 'viewed' ? (iss.viewedAt || iss.updated_at) : iss.updated_at;
+        lastColHtml = relativeTime(timeVal);
+      }
       html += '<tr onclick="openIssuePage(\'' + iid + '\')">' +
         '<td class="yw-key">' + esc(issueKeyStr(iss)) + '</td>' +
         '<td class="yw-title-cell">' + esc(iss.title) + '</td>' +
@@ -207,7 +221,7 @@ function _renderYourWorkTable(issues, rawIssues, lastColLabel) {
         '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\')" style="cursor:pointer">' + statusBadge(iss.status) + '</td>' +
         '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\')" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>' +
         '<td class="yw-space-cell">' + esc(iss.space_name || '') + '</td>' +
-        '<td class="yw-time-cell">' + relativeTime(timeVal) + '</td></tr>';
+        '<td class="yw-time-cell">' + lastColHtml + '</td></tr>';
     }
   }
   html += '</tbody></table></div>';
@@ -294,12 +308,16 @@ function renderYourWorkContent(data) {
     return;
   }
 
+  var lastCol = S.yourWorkTab === 'assigned' ? { label: 'Reporter', key: 'reporter' }
+    : S.yourWorkTab === 'reported' ? { label: 'Assignee', key: 'assignee' }
+    : { label: 'Updated', key: 'updated' };
+
   if (!issues.length) {
-    $('yourWorkContent').innerHTML = _renderYourWorkTable([], rawIssues, 'Updated');
+    $('yourWorkContent').innerHTML = _renderYourWorkTable([], rawIssues, lastCol);
     return;
   }
 
-  $('yourWorkContent').innerHTML = _renderYourWorkTable(issues, rawIssues, 'Updated');
+  $('yourWorkContent').innerHTML = _renderYourWorkTable(issues, rawIssues, lastCol);
 }
 
 function renderRecentlyViewedContent() {
@@ -315,7 +333,7 @@ function renderRecentlyViewedContent() {
         '<h3>No recently viewed issues</h3><p>Open any ticket from a space you belong to — it will appear here.</p></div>';
       return;
     }
-    container.innerHTML = _renderYourWorkTable(issues, rawIssues, 'Viewed');
+    container.innerHTML = _renderYourWorkTable(issues, rawIssues, { label: 'Viewed', key: 'viewed' });
   });
 }
 

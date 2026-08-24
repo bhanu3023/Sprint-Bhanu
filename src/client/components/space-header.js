@@ -71,6 +71,13 @@ function formatDashboardActivity(row) {
   if (field === 'title') return 'updated title';
   if (field === 'description' || field === 'fix_description') return 'updated description';
   if (field === 'sprint_id') return 'moved sprint';
+  if (field.indexOf('custom_field_') === 0) {
+    if (row.custom_field_key === 'combination') {
+      var what = diffCombinationFieldChange(row.old_value, row.new_value);
+      if (what) return 'updated ' + what;
+    }
+    return row.custom_field_name ? 'updated ' + row.custom_field_name : 'updated a custom field';
+  }
   if (field) return 'updated ' + field.replace(/_/g, ' ');
   return 'updated an issue';
 }

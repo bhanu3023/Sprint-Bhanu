@@ -52,6 +52,16 @@
     _gsActive = false;
   }
 
+  // The search box lives in the top bar, outside every swapped view, so its
+  // typed text otherwise survives every navigateTo()/navigateToSpace() call
+  // (sidebar links, breadcrumbs, etc.) -- unlike picking a result, which
+  // already clears it. Called from navigation.js on every navigation.
+  window._gsReset = function() {
+    var input = $('globalSearchInput');
+    if (input) input.value = '';
+    gsClose();
+  };
+
   function gsShowRecent() {
     var drop = $('globalSearchDrop');
     if (!drop) return;
