@@ -729,8 +729,8 @@
       "note": "re-pinned: up() now also receives pool, so a migration needing a non-transactional connection uses the SAME pool the run was invoked with"
     },
     "lib/migrations/index.js": {
-      "sha256": "9c7fa71d4273357448629f5f7d3c3c1ee4dcb66d075c5b0ad5240da429c5ce95",
-      "note": "re-pinned: added migration 019-hot-column-indexes-at-scale"
+      "sha256": "5343ef164a96f11d76a1717c31408141794f24ed282d39d8452b6da8bdca0477",
+      "note": "re-pinned: added 017b-dedupe-issue-keys-active-space-priority (runs before 018, resolves the archived-space-vs-active-space key collision automatically) and 020-soft-delete-spaceless-issues (bins issues with a NULL or dangling space_id)"
     },
     "lib/permissions.js": {
       "sha256": "2e1a6737071d6502a75b382b450a83b1a46d4fbfa61ec4c2f0c32ffa5f2af9af",
