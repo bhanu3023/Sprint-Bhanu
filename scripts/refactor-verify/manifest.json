@@ -729,8 +729,8 @@
       "note": "re-pinned: up() now also receives pool, so a migration needing a non-transactional connection uses the SAME pool the run was invoked with"
     },
     "lib/migrations/index.js": {
-      "sha256": "5343ef164a96f11d76a1717c31408141794f24ed282d39d8452b6da8bdca0477",
-      "note": "re-pinned: added 017b-dedupe-issue-keys-active-space-priority (runs before 018, resolves the archived-space-vs-active-space key collision automatically) and 020-soft-delete-spaceless-issues (bins issues with a NULL or dangling space_id)"
+      "sha256": "345059e47820b73721809ab6a230c452d9f7fa2ff12e37b9329a4619dbaae8ab",
+      "note": "re-pinned: added 021-dedupe-and-enforce-space-key-uniqueness -- 014 skips silently (and marks itself applied forever) when a spaces.key duplicate already exists at boot, so the DB-level unique index can be permanently missing even after the duplicate is fixed by hand. 021 resolves any existing duplicate (active space keeps the key, archived one is renamed) and creates the index itself if 014 never could -- closes the same TOCTOU race findSpaceKeyConflict alone cannot"
     },
     "lib/permissions.js": {
       "sha256": "2e1a6737071d6502a75b382b450a83b1a46d4fbfa61ec4c2f0c32ffa5f2af9af",
