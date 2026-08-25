@@ -470,6 +470,13 @@ var RAW_ERROR_REASONS = {
 // Never returns '' — a bare `toast(e.message)` renders an empty or
 // "undefined" toast when the error carries no message.
 function errorReason(e, fallback) {
+  // A raw fetch() that never got a response throws TypeError with a
+  // browser-internal message ("Failed to fetch"). api() already converts
+  // those before throwing, but the upload handlers call fetch() directly,
+  // so handle it here too rather than at each of them.
+  if (e instanceof TypeError && typeof friendlyFetchErrorMessage === 'function') {
+    return friendlyFetchErrorMessage(e, fallback || 'reason unknown');
+  }
   var m = (e && e.message != null) ? String(e.message).trim() : '';
   if (!m || m === 'undefined' || m === 'null') return fallback || 'reason unknown';
   return RAW_ERROR_REASONS[m] || m;

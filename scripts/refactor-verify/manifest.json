@@ -22,7 +22,7 @@
           "from": 38,
           "to": 566,
           "modified": true,
-          "modifiedReason": "Adds linkedPairText() to the shared message helpers (errorReason, issueFieldLabel, cachedIssueKey, issueLabelFor, sprintName, issueSprintMoveText): \"ENG-12 linked to ENG-15\", both ends being in hand at the call site."
+          "modifiedReason": "errorReason() now also handles a raw fetch() TypeError by delegating to friendlyFetchErrorMessage() -- api() converts those before throwing, but the upload handlers call fetch() directly, so this belongs in one place rather than at each of them."
         },
         {
           "file": "src/client/services/api.js",
@@ -191,14 +191,16 @@
         {
           "file": "src/client/components/space-context-menu.js",
           "from": 9973,
-          "to": 10843
+          "to": 10843,
+          "modified": true,
+          "modifiedReason": "Attachment upload names the file: \"Uploading qa-report.pdf...\" then \"qa-report.pdf uploaded\", or a count for several. The names are captured synchronously rather than read in the response handler, because files is the input's LIVE FileList and the handler resets e.target.value at the end -- reading it later reported \"0 attachments uploaded\" (caught by triggering it). The comment-attach size check now names the offending file like the other two size checks already did, and both upload failures give a mapped reason instead of a bare \"Upload failed\"."
         },
         {
           "file": "src/client/components/issue-drawer.js",
           "from": 10844,
           "to": 12126,
           "modified": true,
-          "modifiedReason": "Vocabulary ticket->issue (the sprint-date warning, the delete permission message, and the delete dialog's own hint and button, which still said \"ticket\" while its toast said \"issues\"). Delete failure names the issue and the reason. Subtask creation uses the created row's own key (\"ENG-13 created as a subtask\") and its failure no longer toasts a bare e.message, which rendered an empty or \"undefined\" toast when the error carried no message. Drawer load failure names the issue and says why. Sprint-move text delegated to the shared issueSprintMoveText()."
+          "modifiedReason": "Comment attachment upload names the file being uploaded and both of its failure paths give a reason. (This file also carries the earlier drawer-edit, vocabulary and subtask message work.)"
         },
         {
           "file": "src/client/components/drawer-panels.js",
@@ -825,7 +827,7 @@
   "clientPins": {
     "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
     "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
-    "src/client/utils/index.js": "7b47cc3f002a36c364797656f95740722140769b6b203b4b35ad24c2e1fcb4db",
+    "src/client/utils/index.js": "88cd0b2274a6614de2c9807929079ef89c8750d5cae453a6eb035777dfa14792",
     "src/client/services/api.js": "bd16bd5f7ad5010664262450b05cd56f693e67efc8d6aeddf66cc5b2e2fa1431",
     "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
     "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
@@ -854,8 +856,8 @@
     "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
     "src/client/pages/space/all-work.js": "1306a221746eae181edc61f9becc83b5e1a42e2dc371fb19cc48a5b55e615df4",
     "src/client/pages/space/settings.js": "7cef9f63b3a7c901e0ac07c5212f9c14086b9bcb4bc0740d3cb310316d88d372",
-    "src/client/components/space-context-menu.js": "304cd92f3c0f7a7345f3193b4b94ffe81b8531232ac7500e6682d62a8aea417f",
-    "src/client/components/issue-drawer.js": "4842010d72465a98629b03386633f07a586a995b9ff1716ba2a5a9d7992f0627",
+    "src/client/components/space-context-menu.js": "ba154fbfa24cc81279b3bd479687ec1820b4b65084a32598fb8ea1efe56a7fbd",
+    "src/client/components/issue-drawer.js": "e2eb5fa6d137cca87c10ef0268e15a190f56d9cb89aad4cf77d7102c4fd9a6a9",
     "src/client/components/drawer-panels.js": "1bc6de45b867bd74efe4e9f9009710b2f9afae2239974e20bd4929e199c74ce7",
     "src/client/crud/space.js": "a50414a9f359e3016808f8bfff76553752b24d5bf5a8c00da23c48eefdebb7ff",
     "src/client/crud/sprint.js": "ad121ed7e44d3a69f8ec559429e06d81cf1a784e1d64986d635de31e1ff6c441",

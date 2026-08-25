@@ -1100,7 +1100,7 @@ function bindDrawerEdits(issue) {
       _commentFiles.forEach(function(f) { fd.append('files', f); });
       var uploadFailed = false;
       try {
-        toast('Uploading attachment…');
+        toast(_commentFiles.length === 1 ? 'Uploading ' + (_commentFiles[0].name || 'file') + '…' : 'Uploading ' + _commentFiles.length + ' files…');
         var uploadRes = await fetch('/api/comments/upload', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + getAuthToken() },
@@ -1108,7 +1108,7 @@ function bindDrawerEdits(issue) {
         });
         var uploadData = await uploadRes.json().catch(function () { return {}; });
         if (!uploadRes.ok) {
-          toast(uploadData.error || 'Attachment upload failed', 'error');
+          toast('Attachment upload failed — ' + errorReason({ message: uploadData.error }, 'the server rejected the upload'), 'error');
           uploadFailed = true;
         } else if (uploadData.files && uploadData.files.length) {
           if (bodyIsRich) {
@@ -1135,7 +1135,7 @@ function bindDrawerEdits(issue) {
           }
         }
       } catch(e) {
-        toast(friendlyFetchErrorMessage(e, 'Attachment upload failed'), 'error');
+        toast('Attachment upload failed — ' + errorReason(e, 'the upload failed'), 'error');
         uploadFailed = true;
       }
       if (uploadFailed) {

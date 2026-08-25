@@ -576,7 +576,7 @@ async function handleDescImagePaste(editorEl, file, fieldLabel) {
     if (editorEl.id === 'drawerDesc' || editorEl.id === 'drawerFixDesc') markDrawerDescDirty(editorEl.id);
     toast('Screenshot added to ' + fieldLabel, 'success');
   } catch (e) {
-    toast(e.message || 'Could not upload screenshot', 'error');
+    toast('Screenshot upload failed — ' + errorReason(e), 'error');
   }
 }
 
@@ -750,7 +750,7 @@ document.addEventListener('change', function(e) {
     var files = e.target.files;
     for (var i = 0; i < files.length; i++) {
       if (files[i].size > ISSUE_MAX_FILE_BYTES) {
-        toast('File too large (max ' + fmtByteLimit(ISSUE_MAX_FILE_BYTES) + ')', 'error');
+        toast('File too large (max ' + fmtByteLimit(ISSUE_MAX_FILE_BYTES) + '): ' + (files[i].name || 'file'), 'error');
         continue;
       }
       _commentFiles.push(files[i]);
@@ -767,7 +767,11 @@ document.addEventListener('change', function(e) {
     if (!files.length) return;
     var fd = new FormData();
     for (var i = 0; i < files.length; i++) fd.append('files', files[i]);
-    toast('Uploading…');
+    // Captured NOW, not read in the .then below: files is the input's live
+    // FileList and the handler resets e.target.value at the end, which empties
+    // it -- so by the time the response lands, files.length is 0.
+    var upNames = Array.prototype.map.call(files, function (f) { return f.name || 'file'; });
+    toast(upNames.length === 1 ? 'Uploading ' + upNames[0] + '…' : 'Uploading ' + upNames.length + ' files…');
     fetch('/api/issues/' + S.drawerIssueId + '/attachments', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + getAuthToken() },
@@ -775,10 +779,10 @@ document.addEventListener('change', function(e) {
     }).then(async function(r) {
       var data; try { data = await r.json(); } catch (_) { data = {}; }
       if (!r.ok) throw new Error(data.error || 'Upload failed');
-      toast('Attachment uploaded');
+      toast(upNames.length === 1 ? upNames[0] + ' uploaded' : upNames.length + ' attachments uploaded');
       var issue = await api('/api/issues/' + S.drawerIssueId);
       if (issue) renderDrawerAttachments(issue.attachments || []);
-    }).catch(function(e) { toast(friendlyFetchErrorMessage(e, 'Upload failed'), 'error'); });
+    }).catch(function(e) { toast('Upload failed — ' + errorReason(e, 'the upload failed'), 'error'); });
     e.target.value = '';
   }
 });
