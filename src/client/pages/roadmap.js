@@ -638,7 +638,7 @@ window._prmSave = async function(id) {
     window._prmCloseModal();
     await window._prmLoad();
   } catch(e) {
-    toast('Failed to save: ' + (e.message||e), 'error');
+    toast('Roadmap item save failed — ' + errorReason(e), 'error');
   }
 };
 
@@ -766,10 +766,10 @@ window._prmDelete = async function(id) {
   if (!confirm('Delete this roadmap item?')) return;
   window._prmCloseModal();
   try {
-    await api('/api/roadmap/' + id, 'DELETE');
-    toast('Deleted');
+    await api('/api/roadmap/' + id, 'DELETE', null, { silent: true });
+    toast('Roadmap item deleted');
     await window._prmLoad();
-  } catch(e) { toast('Delete failed', 'error'); }
+  } catch(e) { toast('Roadmap item delete failed — ' + errorReason(e), 'error'); }
 };
 
 // ═══════════════════════════════════════════════════════════

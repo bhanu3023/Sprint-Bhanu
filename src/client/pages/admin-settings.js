@@ -121,7 +121,7 @@ async function renderAdminOrgGeneral(el) {
       try {
         var updated = await api('/api/org', 'PUT', { name: name, slug: slug });
         if (S.data) S.data.org = updated;
-        popupAlert('Settings Saved', 'Organization profile updated successfully.', 'success');
+        popupAlert('Settings saved', 'The organization profile has been updated.', 'success');
       } catch(e) {}
     });
   }
@@ -401,7 +401,8 @@ async function renderAdminUsers(el) {
     sel.addEventListener('change', async function() {
       try {
         await api('/api/users/'+sel.dataset.uid, 'PUT', { role: sel.value });
-        popupAlert('Role Updated', 'User role changed to ' + formatOrgRoleLabel(sel.value) + ' successfully.', 'success');
+        var roleUser = findUser(sel.dataset.uid);
+        popupAlert('Role updated', (roleUser ? roleUser.name : 'That user') + ' is now ' + formatOrgRoleLabel(sel.value) + '.', 'success');
       } catch(e) {}
     });
   });
@@ -508,7 +509,7 @@ async function renderAdminUsers(el) {
         }
         renderAdminSettings('user-management');
       } catch(e) {
-        popupAlert('Error', 'Could not resend invitation.', 'error');
+        popupAlert('Resend failed', 'The invitation could not be resent.', 'error');
         btn.disabled = false;
         btn.textContent = 'Resend';
       }
@@ -524,7 +525,7 @@ async function renderAdminUsers(el) {
         popupAlert('Invitation Cancelled', 'The invitation to ' + email + ' has been cancelled.', 'warning');
         renderAdminSettings('user-management');
       } catch(e) {
-        popupAlert('Error', 'Could not cancel invitation.', 'error');
+        popupAlert('Cancel failed', 'The invitation could not be cancelled.', 'error');
       }
     });
   });
@@ -739,7 +740,7 @@ async function renderAdminEmailSettings(el) {
         smtp_from: qs('#smtpFrom').value.trim()
       });
       popupAlert('Email Settings Saved', 'SMTP configuration saved. Click "Send Test Email" to verify.', 'success');
-    } catch(e) { popupAlert('Error', 'Could not save settings.', 'error'); }
+    } catch(e) { popupAlert('Email settings not saved', 'The SMTP configuration could not be saved.', 'error'); }
     btn.disabled = false; btn.textContent = 'Save Settings';
   });
 
@@ -749,11 +750,11 @@ async function renderAdminEmailSettings(el) {
     try {
       var r = await api('/api/admin/email-test', 'POST');
       if (r.sent) {
-        popupAlert('Test Email Sent', 'Check your inbox — test email was delivered successfully!', 'success');
+        popupAlert('Test email sent', 'Check your inbox — the test email was delivered.', 'success');
       } else {
         popupAlert('Test Failed', (r.reason || 'Could not send.') + ' Check your credentials and try again.', 'error');
       }
-    } catch(e) { popupAlert('Error', 'Test email failed.', 'error'); }
+    } catch(e) { popupAlert('Test email failed', 'The test email could not be sent.', 'error'); }
     btn.disabled = false; btn.textContent = 'Send Test Email to Me';
   });
 }
@@ -1024,9 +1025,11 @@ function awInlineAssignee(e, issueId, current) {
       })
     );
     _awShowMenu(e, items, function(val) {
-      api('/api/issues/' + issueId, 'PUT', { assignee_id: val || null }).then(function() {
+      api('/api/issues/' + issueId, 'PUT', { assignee_id: val || null }, { silent: true }).then(function() {
         refreshData().then(renderAllWork);
-        toast('Assignee updated');
+        toast(issueChangeSummary(cachedIssueKey(issueId) || 'Issue', { assignee_id: val || null }));
+      }).catch(function (e) {
+        toast((cachedIssueKey(issueId) || 'Issue') + ' assignee update failed — ' + errorReason(e), 'error');
       });
     });
   }
@@ -1121,13 +1124,15 @@ function awInlineStatus(e, issueId, current) {
       var cached = (S.data.issues || []).find(function (iss) { return iss.id === issueId; });
       if (!canTransitionIssueToDone(cached || issueId, current)) return;
     }
-    api('/api/issues/' + issueId, 'PUT', { status: val }).then(function (updated) {
+    api('/api/issues/' + issueId, 'PUT', { status: val }, { silent: true }).then(function (updated) {
       afterIssueFieldUpdate(issueId, {
         status: val,
         updated_at: (updated && updated.updated_at) || new Date().toISOString()
       });
-      toast('Status updated');
-    }).catch(function () { toast('Failed to update status', 'error'); });
+      toast(issueChangeSummary(cachedIssueKey(issueId) || 'Issue', { status: val }));
+    }).catch(function (e) {
+      toast((cachedIssueKey(issueId) || 'Issue') + ' status update failed — ' + errorReason(e), 'error');
+    });
   });
 }
 
@@ -1142,13 +1147,15 @@ function awInlinePriority(e, issueId, current) {
     return { value: p, html: '<span style="font-size:14px;color:#172b4d;flex:1;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' + cap(p) + '</span>' + check };
   });
   _awShowMenu(e, items, function(val) {
-    api('/api/issues/' + issueId, 'PUT', { priority: val }).then(function (updated) {
+    api('/api/issues/' + issueId, 'PUT', { priority: val }, { silent: true }).then(function (updated) {
       afterIssueFieldUpdate(issueId, {
         priority: val,
         updated_at: (updated && updated.updated_at) || new Date().toISOString()
       });
-      toast('Priority updated');
-    }).catch(function () { toast('Failed to update priority', 'error'); });
+      toast(issueChangeSummary(cachedIssueKey(issueId) || 'Issue', { priority: val }));
+    }).catch(function (e) {
+      toast((cachedIssueKey(issueId) || 'Issue') + ' priority update failed — ' + errorReason(e), 'error');
+    });
   });
 }
 
@@ -1266,10 +1273,10 @@ function copyIssueLinkByKey(issueKey) {
     el.select();
     document.execCommand('copy');
     document.body.removeChild(el);
-    toast('Link copied!');
+    toast('Invite link copied');
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(function() { toast('Link copied!'); }).catch(fallbackCopy);
+    navigator.clipboard.writeText(url).then(function() { toast('Invite link copied'); }).catch(fallbackCopy);
   } else {
     fallbackCopy();
   }

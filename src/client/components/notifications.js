@@ -120,7 +120,7 @@ async function openIssueFromNotifLink(link, title) {
     openIssuePage(fetched.id);
     return true;
   }
-  toast('Could not open linked issue', 'error');
+  toast('Could not open ' + issueLabelFor(issueKey) + ' — it may have been deleted', 'error');
   return false;
 }
 
@@ -231,7 +231,7 @@ window._markNotifRead = async function (id, link, type, spaceId, title) {
   try {
     await openNotifTarget({ link: link, type: type, space_id: spaceId, title: title });
   } catch (_) {
-    toast('Could not open notification', 'error');
+    toast('Could not open that notification — ' + errorReason(e), 'error');
   }
 };
 

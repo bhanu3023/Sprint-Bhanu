@@ -133,7 +133,8 @@ $('inviteMemberForm').addEventListener('submit', async function (e) {
       renderSettingsPeople(getSpace(S.currentSpace));
     }
     renderSidebar();
-    popupAlert('User Added', 'User has been added to the space successfully.', 'success');
+    var addedUser = findUser(userId);
+    popupAlert('User added', (addedUser ? addedUser.name : 'That user') + ' now has access to this space.', 'success');
   } catch (e) { /* error shown by api() */ }
 });
 

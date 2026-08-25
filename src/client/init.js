@@ -359,7 +359,8 @@ function openProfileSettingsModal() {
     var saveBtn = overlay.querySelector('#_profileSaveBtn');
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
-      var updated = await api('/api/users/' + user.id, 'PUT', { name: fullName });
+      // silent: the catch renders its own 'Profile update failed - <why>'
+      var updated = await api('/api/users/' + user.id, 'PUT', { name: fullName }, { silent: true });
       // Update local state
       if (S.currentUserObj) { S.currentUserObj.name = updated.name; }
       if (S.data && S.data.users) {
@@ -368,9 +369,9 @@ function openProfileSettingsModal() {
       }
       renderTopbarProfile(S.currentUserObj);
       close();
-      toast('Profile updated successfully', 'success');
+      toast('Profile updated', 'success');
     } catch(e) {
-      toast('Failed to save: ' + (e.message || 'Unknown error'), 'error');
+      toast('Profile update failed — ' + errorReason(e), 'error');
       saveBtn.disabled = false; saveBtn.textContent = 'Save Changes';
     }
   };

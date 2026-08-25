@@ -22,7 +22,7 @@
           "from": 38,
           "to": 566,
           "modified": true,
-          "modifiedReason": "errorReason() now also handles a raw fetch() TypeError by delegating to friendlyFetchErrorMessage() -- api() converts those before throwing, but the upload handlers call fetch() directly, so this belongs in one place rather than at each of them."
+          "modifiedReason": "Now also holds issueChangeSummary(), lifted out of issue-drawer.js and renamed from drawerSaveSummary because All Work's inline status/priority/assignee menus use it too -- the same change now reads identically whether it is made in the drawer or in the table."
         },
         {
           "file": "src/client/services/api.js",
@@ -80,7 +80,9 @@
         {
           "file": "src/client/init.js",
           "from": 1666,
-          "to": 2080
+          "to": 2080,
+          "modified": true,
+          "modifiedReason": "\"Profile updated successfully\" -> \"Profile updated\"; the save failure gives a mapped reason and its PUT is {silent:true} so one failure is one toast."
         },
         {
           "file": "src/client/navigation.js",
@@ -126,7 +128,9 @@
         {
           "file": "src/client/pages/roadmap.js",
           "from": 3491,
-          "to": 4438
+          "to": 4438,
+          "modified": true,
+          "modifiedReason": "\"Deleted\" -- the vaguest string in the app -- is now \"Roadmap item deleted\"; save/delete failures give mapped reasons instead of raw ones, and the DELETE is {silent:true}."
         },
         {
           "file": "src/client/pages/work-log-pivot.js",
@@ -195,14 +199,14 @@
           "from": 9973,
           "to": 10843,
           "modified": true,
-          "modifiedReason": "Custom-field create/update name the field the user just typed (\"\"Team\" created\") instead of the generic \"Custom field created\". (This file also carries the earlier attachment-upload message work.)"
+          "modifiedReason": "The \"User added\" alert drops \"successfully\" and names the user via findUser(userId). (Also carries attachment-upload and custom-field message work.)"
         },
         {
           "file": "src/client/components/issue-drawer.js",
           "from": 10844,
           "to": 12126,
           "modified": true,
-          "modifiedReason": "Comment attachment upload names the file being uploaded and both of its failure paths give a reason. (This file also carries the earlier drawer-edit, vocabulary and subtask message work.)"
+          "modifiedReason": "drawerSaveSummary() moved to utils as issueChangeSummary(); the drawer calls the shared version. (Also carries the earlier drawer-edit, vocabulary, subtask and comment-upload message work.)"
         },
         {
           "file": "src/client/components/drawer-panels.js",
@@ -214,7 +218,9 @@
         {
           "file": "src/client/crud/space.js",
           "from": 14088,
-          "to": 14257
+          "to": 14257,
+          "modified": true,
+          "modifiedReason": "Space created/updated alerts drop \"successfully\"; the save failure reports a mapped reason instead of \"Error\"."
         },
         {
           "file": "src/client/crud/sprint.js",
@@ -242,26 +248,28 @@
           "from": 14567,
           "to": 14788,
           "modified": true,
-          "modifiedReason": "openNotifTarget() navigated sprint_started/sprint_completed notifications to a tab literally named 'board' -- but the app's tab for that view is 'sprint' (Active Sprint), and there is no 'board' case in renderTab()'s switch, so the click silently rendered nothing. Now routes sprint_started -> 'sprint' and sprint_completed -> 'reports' (its real link target per notification-triggers.md), both by type and by matching the link's URL segment directly. sprint_completed additionally checks canManageSpace() first: Reports is site_admin-only, so a plain member goes to 'backlog' instead (the completed sprint's issues spilled back there) rather than hitting a permission-denied toast."
+          "modifiedReason": "A dead notification link now names the issue it could not open; the generic catch gives a reason. (Also carries the sprint-notification routing fix.)"
         },
         {
           "file": "src/client/event-bindings.js",
           "from": 14789,
-          "to": 15335
+          "to": 15335,
+          "modified": true,
+          "modifiedReason": "\"Invite Created!\" loses the banned !; the password-reset alert drops \"successfully\" and says what the user can now do."
         },
         {
           "file": "src/client/pages/admin-settings.js",
           "from": 15336,
           "to": 16818,
           "modified": true,
-          "modifiedReason": "SECURITY (stored XSS), paired with toast.js: the 'Invitation Resent / email not sent' popupAlert is the ONLY caller in the app that deliberately renders markup (a <br><small style=\"word-break:break-all\"> so a long invite URL wraps instead of overflowing). popupAlert now defaults msg to textContent, so this call opts back in with the new allowHtmlMsg flag and escapes its own three interpolations (email, email_reason, invite_url) with esc(). Verified: the <br> and <small> still render as real elements with the wrap style intact, while a hostile email/URL renders as literal text and fires nothing."
+          "modifiedReason": "All Work inline menus now produce the same sentences as the drawer via issueChangeSummary(), and their failures name the issue and the reason -- all three catches previously took no error argument, discarding it. \"Link copied!\" -> \"Invite link copied\" (banned !). popupAlert titles/messages lose \"successfully\" and the stray !, and the org role-change alert names the user via findUser(sel.dataset.uid) rather than an undefined variable."
         },
         {
           "file": "src/client/components/global-search.js",
           "from": 16819,
           "to": 17295,
           "modified": true,
-          "modifiedReason": "Added window._gsReset(), called from navigateTo()/navigateToSpace() in navigation.js -- the search box lives in the top bar outside every swapped view, so typed text used to survive any sidebar/breadcrumb navigation (only picking a search RESULT cleared it before)."
+          "modifiedReason": "Bin messages: ticket->issue, \"N item(s) restored\" -> \"N items restored\" with a denominator on partial failure, and the three raw \"e.message ||\" failures now lead with what failed. (Also carries the search-box reset.)"
         }
       ],
       "moves": [
@@ -829,7 +837,7 @@
   "clientPins": {
     "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
     "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
-    "src/client/utils/index.js": "88cd0b2274a6614de2c9807929079ef89c8750d5cae453a6eb035777dfa14792",
+    "src/client/utils/index.js": "b84646bc5c697ee2bf5445a612e0fa86e73521796e91b6e3f79690deb9aba3a4",
     "src/client/services/api.js": "bd16bd5f7ad5010664262450b05cd56f693e67efc8d6aeddf66cc5b2e2fa1431",
     "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
     "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
@@ -839,7 +847,7 @@
     "src/client/components/badges.js": "bd8d667462e74c8327398beafca48dbbf1e235e8a742a7f136e138dbe269e7d9",
     "src/client/services/data-helpers.js": "a208317527e04b249c7991d8e0c112d2dc3b9778c4e6a9006e9dbc292a0c0a74",
     "src/client/services/theme.js": "2f28888928a9225b8787269f4a30ecf626e0beb76342739c61cabeef0665ecef",
-    "src/client/init.js": "3cbb54725304398a5e780c6d1dde69f3efae185b413a9a1588e683342631f34f",
+    "src/client/init.js": "0f4f250ee3bb6018a0c9d2a8a01156791e5137feb032112c127eeb3f418ac7d8",
     "src/client/navigation.js": "8a2f72261aace14bde5518b1c870056d5e805b6fb120f7a547fa26f1413132a7",
     "src/client/components/sidebar.js": "811df61b1ffd758ccfa5974a895ce1a99eb448e727811e9ca0f3f33a13a278fb",
     "src/client/components/space-header.js": "0e7ae82772af0db8fdbe494a3f2cfcd44855319d140f650abf289f83ed66aef5",
@@ -847,7 +855,7 @@
     "src/client/pages/spaces.js": "7233a64042a0caab0ba3e77ae45f4bacee4b09745ee8de9f172fd414b26bb77c",
     "src/client/pages/my-work.js": "be4b4ab740920ef39a86d3d21bcb04123dbe1879ee79ba4e2c534b880d34a391",
     "src/client/pages/work-log.js": "fc4dcd026bb0a4fd04d5d367c8055f7c13fd2e1d7cbb3681764df100f13f2bca",
-    "src/client/pages/roadmap.js": "decfa62d2bd6f5a9f64a378d28db7fa12a647a5e1dfdd5972018637ac0238b84",
+    "src/client/pages/roadmap.js": "f422b58e997ff8373f48641146c5eab5c3ff2da4a226a1a854d8020a59c79e22",
     "src/client/pages/work-log-pivot.js": "113e5e9a57054c358b255c97570aa3123b6322055ef3b0e12ab429fa8cd55933",
     "src/client/pages/space/summary.js": "face07962f1dc078bd7755040c5ffb6a7873b69cc98ce3f3c5c5b545294d8128",
     "src/client/pages/space/timeline.js": "80cf2915ffb97e1ea16be538d1d1830b4ec06b6f12be0baf701af6bcb306017c",
@@ -858,16 +866,16 @@
     "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
     "src/client/pages/space/all-work.js": "1306a221746eae181edc61f9becc83b5e1a42e2dc371fb19cc48a5b55e615df4",
     "src/client/pages/space/settings.js": "3e3539739fab6155ae91de8de02e0b18e411161f0923dd7a02bdb3e5512a0354",
-    "src/client/components/space-context-menu.js": "06827faad04fbb3c1d7218a8dead1999fde4a9c885c5aa6bcde7c617927271fd",
-    "src/client/components/issue-drawer.js": "e2eb5fa6d137cca87c10ef0268e15a190f56d9cb89aad4cf77d7102c4fd9a6a9",
+    "src/client/components/space-context-menu.js": "d83fb5f86fbba783592d7af32933b4d4f1cc6e2ec6ef51110461f271f5174e1c",
+    "src/client/components/issue-drawer.js": "67f89056203f8e2b1b4fee76b58f681fb223018f3f780c289a1b44a4e8615bbc",
     "src/client/components/drawer-panels.js": "1bc6de45b867bd74efe4e9f9009710b2f9afae2239974e20bd4929e199c74ce7",
-    "src/client/crud/space.js": "a50414a9f359e3016808f8bfff76553752b24d5bf5a8c00da23c48eefdebb7ff",
+    "src/client/crud/space.js": "f5fa59288dc093d3e595b5a0f6144333b77b2376aff647e01a4cf7ffee27d3d0",
     "src/client/crud/sprint.js": "ad121ed7e44d3a69f8ec559429e06d81cf1a784e1d64986d635de31e1ff6c441",
     "src/client/crud/issue.js": "cea9549fe3b16d8af00d1a2d8b42a5f2cdc76e304d3b2e4a310967561546fe86",
     "src/client/components/worklog-modal.js": "353fe05ee96f64410a530fb69b808a1216185fc3dffc64f30dae508daa08877d",
-    "src/client/components/notifications.js": "1033e30e53454439af931ea027ad657c02c927b5e6185f7524cbe64c8e40102d",
-    "src/client/event-bindings.js": "2982c479f1380ff6261b94bde91e9034bd8a75428c91184c60d4b554da357f4f",
-    "src/client/pages/admin-settings.js": "9517a4bdd88f6d726c7f678f1142a5357c7f365e8967f62f8ebff8093dbba513",
-    "src/client/components/global-search.js": "72c083a7147a7bde1fc652bd1dec243e02c1cc6c225808785808f054c5732c10"
+    "src/client/components/notifications.js": "805825a82492371da22d15008b59e45f852f6582a518700320c43408973de008",
+    "src/client/event-bindings.js": "3e080633a150a69a878796d52f08325395ca8a030e0994584788996d32758c74",
+    "src/client/pages/admin-settings.js": "3a2b9d38dab394493e44fa0e2af05ca9f03f8ba89b7f4f15bd4f844c2b1234c6",
+    "src/client/components/global-search.js": "d1dadb7c5764a664ede907d5d4eb41d53bb095f1c8436c311724193396650d1f"
   }
 }

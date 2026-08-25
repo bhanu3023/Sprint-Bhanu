@@ -523,7 +523,7 @@ document.addEventListener('DOMContentLoaded', function () {
         $('inviteUserSubmitBtn').setAttribute('hidden', '');
         $('inviteLinkResult').removeAttribute('hidden');
         $('inviteLinkUrl').value = r.invite_url;
-        popupAlert('Invite Created!', 'Share the invite link with the user. It expires in 7 days.', 'success');
+        popupAlert('Invite created', 'Share the invite link with the user. It expires in 7 days.', 'success');
       } catch (e) {}
     });
   }
@@ -540,7 +540,7 @@ document.addEventListener('DOMContentLoaded', function () {
       try {
         await api('/api/users/' + uid + '/change-password', 'PUT', { new_password: np });
         closeModal('modal-reset-pw');
-        popupAlert('Password Reset', 'Password has been updated successfully.', 'success');
+        popupAlert('Password reset', 'That user can now sign in with the new password.', 'success');
       } catch (e) {}
     });
   }

@@ -527,6 +527,33 @@ function linkedPairText(sourceId, targetId) {
   return 'Issue linked';
 }
 
+// What an inline issue edit actually changed, for the confirmation toast.
+// Every value used here is already in hand at the call site: the field name
+// and its new value are the autoSave/saveFieldNow arguments, and the user and
+// sprint lookups are the same S.data the drawer already rendered from -- so
+// this reads existing state and computes nothing new. Shared by the drawer's
+// inline fields and All Work's inline status/priority/assignee menus, so the
+// same change reads the same way wherever it is made. A batch (the 800ms
+// debounce can coalesce several edits into one PUT) reports the count rather
+// than listing fields, which keeps the line short and stops it growing
+// unboundedly with the number of fields touched.
+function issueChangeSummary(key, saved) {
+  var fields = Object.keys(saved || {});
+  if (!fields.length) return key + ' updated';
+  if (fields.length > 1) return key + ' updated — ' + fields.length + ' fields';
+  var field = fields[0];
+  var value = saved[field];
+  if (field === 'status') return key + ' moved to ' + value;
+  if (field === 'priority') return key + ' priority set to ' + cap(value);
+  if (field === 'type') return key + ' type set to ' + cap(value);
+  if (field === 'assignee_id') {
+    var u = value ? findUser(value) : null;
+    return u ? key + ' assigned to ' + u.name : key + ' unassigned';
+  }
+  if (field === 'sprint_id') return issueSprintMoveText(key, value);
+  return key + ' ' + issueFieldLabel(field) + ' updated';
+}
+
 // A sprint's name from the already-loaded cache, for the messages that only
 // have its id in hand. '' when it is not cached, so callers stay generic.
 function sprintName(sprintId) {
