@@ -849,7 +849,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
       if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
         renderSettingsCustomFields(getSpace(S.currentSpace));
       }
-      toast('Custom field updated');
+      toast('"' + name + '" updated');
     } else if (applyAll) {
       var result = await api('/api/custom-fields/create-for-all', 'POST', { name: name, field_type: type, is_required: required, options: options, show_in: showIn, required_types: requiredTypes });
       await refreshData();
@@ -869,7 +869,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
       if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
         renderSettingsCustomFields(getSpace(S.currentSpace));
       }
-      toast('Custom field created');
+      toast('"' + name + '" created');
     }
   } catch (e) { /* error shown by api() */ }
 });

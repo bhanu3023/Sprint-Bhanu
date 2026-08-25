@@ -186,14 +186,16 @@
         {
           "file": "src/client/pages/space/settings.js",
           "from": 9183,
-          "to": 9972
+          "to": 9972,
+          "modified": true,
+          "modifiedReason": "Member and custom-field messages name what they acted on: \"Role updated\" -> \"Sujana Manapuram set to Space Admin\" (the select carries data-user-id and the new role is the changed value), \"Member removed\" -> \"<name> removed from this space\" (userName was already in scope for the confirm dialog), \"Custom field deleted\" -> \"\"Team\" deleted\" (fieldName likewise). The spillover-toggle failure gives a mapped reason and its PUT is now {silent:true} -- it was raising two error toasts for one failure."
         },
         {
           "file": "src/client/components/space-context-menu.js",
           "from": 9973,
           "to": 10843,
           "modified": true,
-          "modifiedReason": "Attachment upload names the file: \"Uploading qa-report.pdf...\" then \"qa-report.pdf uploaded\", or a count for several. The names are captured synchronously rather than read in the response handler, because files is the input's LIVE FileList and the handler resets e.target.value at the end -- reading it later reported \"0 attachments uploaded\" (caught by triggering it). The comment-attach size check now names the offending file like the other two size checks already did, and both upload failures give a mapped reason instead of a bare \"Upload failed\"."
+          "modifiedReason": "Custom-field create/update name the field the user just typed (\"\"Team\" created\") instead of the generic \"Custom field created\". (This file also carries the earlier attachment-upload message work.)"
         },
         {
           "file": "src/client/components/issue-drawer.js",
@@ -855,8 +857,8 @@
     "src/client/pages/space/reports.js": "5f88efd867de83b888f99cca6880319515361a595ccb6bd4eb40b9d37dbca652",
     "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
     "src/client/pages/space/all-work.js": "1306a221746eae181edc61f9becc83b5e1a42e2dc371fb19cc48a5b55e615df4",
-    "src/client/pages/space/settings.js": "7cef9f63b3a7c901e0ac07c5212f9c14086b9bcb4bc0740d3cb310316d88d372",
-    "src/client/components/space-context-menu.js": "ba154fbfa24cc81279b3bd479687ec1820b4b65084a32598fb8ea1efe56a7fbd",
+    "src/client/pages/space/settings.js": "3e3539739fab6155ae91de8de02e0b18e411161f0923dd7a02bdb3e5512a0354",
+    "src/client/components/space-context-menu.js": "06827faad04fbb3c1d7218a8dead1999fde4a9c885c5aa6bcde7c617927271fd",
     "src/client/components/issue-drawer.js": "e2eb5fa6d137cca87c10ef0268e15a190f56d9cb89aad4cf77d7102c4fd9a6a9",
     "src/client/components/drawer-panels.js": "1bc6de45b867bd74efe4e9f9009710b2f9afae2239974e20bd4929e199c74ce7",
     "src/client/crud/space.js": "a50414a9f359e3016808f8bfff76553752b24d5bf5a8c00da23c48eefdebb7ff",

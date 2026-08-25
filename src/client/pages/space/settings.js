@@ -116,12 +116,13 @@ window._updateSpilloverSetting = async function (key, checked) {
     next[box.dataset.key] = box.checked;
   });
   try {
-    var updated = await api('/api/spaces/' + S.currentSpace, 'PUT', { spillover_settings: next });
+    // silent: the catch below renders its own message with the reason
+    var updated = await api('/api/spaces/' + S.currentSpace, 'PUT', { spillover_settings: next }, { silent: true });
     var cached = (S.data.spaces || []).find(function (sp) { return sp.id === S.currentSpace; });
     if (cached) cached.spillover_settings = updated.spillover_settings;
     toast('Spillover setting updated', 'success');
   } catch (e) {
-    toast(e.message || 'Could not update setting', 'error');
+    toast('Spillover setting update failed — ' + errorReason(e), 'error');
     var box = document.querySelector('.spillover-setting-toggle[data-key="' + key + '"]');
     if (box) box.checked = !checked; // revert the visible toggle on failure
   }
@@ -239,7 +240,8 @@ function renderSettingsPeople(space) {
       var newRole = sel.value;
       try {
         await api('/api/space-members/' + memberId, 'PUT', { role: newRole });
-        toast('Role updated');
+        var roleUser = findUser(sel.dataset.userId);
+        toast((roleUser ? roleUser.name : 'Member') + ' set to ' + formatSpaceRoleLabel(newRole));
       } catch (e) { /* error shown by api() */ }
     });
   });
@@ -256,7 +258,7 @@ function renderSettingsPeople(space) {
         await refreshData();
         renderSettingsPeople(getSpace(S.currentSpace));
         renderSidebar();
-        toast('Member removed');
+        toast(userName + ' removed from this space');
       } catch (e) { /* error shown by api() */ }
     });
   });
@@ -714,7 +716,7 @@ function paintSettingsCustomFields(space) {
         await api('/api/custom-fields/' + fieldId, 'DELETE');
         await refreshData();
         renderSettingsCustomFields(getSpace(S.currentSpace));
-        toast('Custom field deleted');
+        toast('"' + fieldName + '" deleted');
       } catch (e) { /* error shown by api() */ }
     });
   });
