@@ -98,7 +98,6 @@ async function handleIssueSubmit(e) {
       }
     }
   }
-  var id = $('issueId').value;
   var parentId = $('issueParentId').value || null;
   // Already validated above as non-empty — reuse it rather than re-resolving with
   // a different fallback chain, which is how the two could disagree.
@@ -124,18 +123,17 @@ async function handleIssueSubmit(e) {
   };
   if (parentId) payload.parent_id = parentId;
 
-  if (id) {
-    delete payload.status;
-    await api('/api/issues/' + id, 'PUT', payload);
-    // Stays generic about WHAT changed: the modal saves many fields at once
-    // and does not diff them, so naming a field would need a server response
-    // change or a client-side diff. The key itself is already in hand.
-    var editedKey = cachedIssueKey(id);
-    toast((editedKey || 'Issue') + ' updated');
-    closeModal('modal-issue');
-    await refreshData();
-    renderCurrentView();
-  } else {
+  // NOTE: this modal only ever CREATES. There used to be an `if (id)` branch
+  // here that PUT to /api/issues/:id and toasted an "updated" message, reading
+  // its id from the hidden #issueId input -- but nothing in the app ever writes
+  // to that input except resetIssueForm(), which sets it to ''. Grep it: three
+  // references in the whole codebase -- the declaration in index.html, that one
+  // `= ''`, and the read that used to be here. Every caller also sets the modal
+  // title to "Create Issue" or "Create Subtask", never an Edit variant. Editing
+  // happens through the drawer's inline fields instead, so the branch and its
+  // message were unreachable. The braces are kept so the body below is not
+  // reindented for no reason.
+  {
     var submitBtn = $('issueSubmitBtn');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
     try {

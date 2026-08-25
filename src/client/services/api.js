@@ -83,7 +83,10 @@ async function api(url, method, body, opts) {
     // unchanged. Applied here so every call site that does NOT render its own
     // message still gets readable text; sites that DO render their own pass
     // {silent:true} so one failure never stacks two error toasts.
-    if (!opts.silent) toast(errorReason(e, 'the request failed'), 'error');
+    // capitaliseFirst because here the reason IS the whole message rather
+    // than a clause after a dash -- errorReason lower-cases the first letter
+    // for the dash form, and this is its one standalone caller.
+    if (!opts.silent) toast(capitaliseFirst(errorReason(e, 'the request failed')), 'error');
     throw e;
   }
 }

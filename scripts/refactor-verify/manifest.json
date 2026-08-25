@@ -20,272 +20,213 @@
         {
           "file": "src/client/utils/index.js",
           "from": 38,
-          "to": 566,
-          "modified": true,
-          "modifiedReason": "Now also holds issueChangeSummary(), lifted out of issue-drawer.js and renamed from drawerSaveSummary because All Work's inline status/priority/assignee menus use it too -- the same change now reads identically whether it is made in the drawer or in the table."
+          "to": 776
         },
         {
           "file": "src/client/services/api.js",
-          "from": 567,
-          "to": 649,
-          "modified": true,
-          "modifiedReason": "The wrapper toasted e.message raw, so every unhandled failure showed \"Internal server error\" or a bare HTTP statusText. Now routed through errorReason(), which maps machine text to a readable clause and passes user-written API messages through untouched. Fixes the raw text at ~150 call sites at once rather than per site; sites that render their own message pass {silent:true} so one failure never stacks two toasts."
+          "from": 777,
+          "to": 868
         },
         {
           "file": "src/client/services/recently-viewed.js",
-          "from": 650,
-          "to": 914
+          "from": 869,
+          "to": 1133
         },
         {
           "file": "src/client/components/toast.js",
-          "from": 915,
-          "to": 996,
-          "modified": true,
-          "modifiedReason": "SECURITY (stored XSS): all three renderers built their text by concatenating the caller's message into innerHTML, so any markup in it executed. Real call sites interpolate user-controlled values -- an uploaded file's name (space-context-menu.js:371/398), a custom field's name (space/settings.js:737/741), a space name or key (crud/space.js:135/158/164, space/settings.js:786), a user's display name (admin-settings.js:417) and an invitee's email (admin-settings.js:501/520) -- so a file named `<img src=x onerror=...>.png` ran on upload. toast() and toastWithButtons() now build every node with textContent; popupAlert() renders msg as textContent too, gated by a new allowHtmlMsg flag used by exactly one caller (admin-settings.js:507) that needs <br><small> to wrap a long invite URL and escapes its own interpolations. textContent was chosen over esc()-at-the-call-site so the vector is closed at the sink and a future caller cannot forget. Rendered output is unchanged: no toast message in the codebase contains markup or an HTML entity (verified by extracting all 214 literals from all 169 call sites and rendering each through the old and new implementations, 1603 comparisons, 0 differences in what the user reads), and each function's original falsy-handling is preserved exactly (toast renders \"undefined\", toastWithButtons renders \"\", matching concat vs esc() before). compare [1][2][2b][3][4] all empty."
+          "from": 1134,
+          "to": 1273
         },
         {
           "file": "src/client/components/confirm.js",
-          "from": 997,
-          "to": 1102
+          "from": 1274,
+          "to": 1379
         },
         {
           "file": "src/client/components/modal-drawer.js",
-          "from": 1103,
-          "to": 1245
+          "from": 1380,
+          "to": 1548
         },
         {
           "file": "src/client/constants.js",
-          "from": 1246,
-          "to": 1305
+          "from": 1549,
+          "to": 1608
         },
         {
           "file": "src/client/components/badges.js",
-          "from": 1306,
-          "to": 1403,
-          "modified": true,
-          "modifiedReason": "The Summary tab's \"Total Issues\" stat card now navigates to All Work instead of Backlog -- the other four cards (To Do/In Progress/Done/Overdue) are unchanged, still go to Backlog with their status filter. Sets a one-shot window._awShowAllOverride flag before navigating; see all-work.js's _awLoadFilterState for why that flag exists instead of a setTimeout here."
+          "from": 1609,
+          "to": 1714
         },
         {
           "file": "src/client/services/data-helpers.js",
-          "from": 1404,
-          "to": 1633,
-          "modified": true,
-          "modifiedReason": "Star toggle names the issue (\"ENG-12 starred\" / \"ENG-12 unstarred\", was \"Issue starred\" / \"Star removed\") and its failure gives a reason instead of \"Could not update star\". The catch was swallowing the error object entirely (catch (_)), so no reason was available to report; it now binds it."
+          "from": 1715,
+          "to": 1945
         },
         {
           "file": "src/client/services/theme.js",
-          "from": 1634,
-          "to": 1665
+          "from": 1946,
+          "to": 1977
         },
         {
           "file": "src/client/init.js",
-          "from": 1666,
-          "to": 2080,
-          "modified": true,
-          "modifiedReason": "\"Profile updated successfully\" -> \"Profile updated\"; the save failure gives a mapped reason and its PUT is {silent:true} so one failure is one toast."
+          "from": 1978,
+          "to": 2393
         },
         {
           "file": "src/client/navigation.js",
-          "from": 2081,
-          "to": 2598,
-          "modified": true,
-          "modifiedReason": "The Summary tab never called refreshData() before rendering -- unlike All Work, which already guarded this -- so landing on Summary right after clicking a space could render getSpaceIssues() off stale/empty S.data and show every stat card as 0 despite the space having real issues. Extracted the shared 30s-staleness gate (previously inlined only in the 'allwork' case) into ensureSpaceDataFresh() and applied it to 'summary' too. Also: navigateTo()/navigateToSpace() now call window._gsReset() (global-search.js) so the top-bar search box's typed text doesn't survive a sidebar/breadcrumb navigation the way it used to."
+          "from": 2394,
+          "to": 2929
         },
         {
           "file": "src/client/components/sidebar.js",
-          "from": 2599,
-          "to": 2737
+          "from": 2930,
+          "to": 3068
         },
         {
           "file": "src/client/components/space-header.js",
-          "from": 2738,
-          "to": 2813,
-          "modified": true,
-          "modifiedReason": "formatDashboardActivity() now resolves a custom-field history row to its real field name (row.custom_field_name, from my-issues.js's new join) instead of the raw 'custom_field_<uuid>' -- and for the Product Type + Combination compound field specifically, diffs old_value/new_value (diffCombinationFieldChange) to say 'updated product type' vs 'updated combination' instead of always 'updated Combination', since one edit to either half writes a history row against that same field."
+          "from": 3069,
+          "to": 3151
         },
         {
           "file": "src/client/pages/home.js",
-          "from": 2814,
-          "to": 2955
+          "from": 3152,
+          "to": 3293
         },
         {
           "file": "src/client/pages/spaces.js",
-          "from": 2956,
-          "to": 3023
+          "from": 3294,
+          "to": 3361
         },
         {
           "file": "src/client/pages/my-work.js",
-          "from": 3024,
-          "to": 3350,
-          "modified": true,
-          "modifiedReason": "_renderYourWorkTable's last column is now a caller-chosen {label,key} instead of a fixed 'Updated' string: Assigned to Me shows Reporter (avatar+name) and Reported by Me shows Assignee (avatar+name) instead of an Updated timestamp on either -- Recently Viewed is unchanged (still Viewed, relative time). Server now joins reporter_name/reporter_color into the assigned-issues query (my-issues.js already had assignee_name on both)."
+          "from": 3362,
+          "to": 3706
         },
         {
           "file": "src/client/pages/work-log.js",
-          "from": 3351,
-          "to": 3490
+          "from": 3707,
+          "to": 3846
         },
         {
           "file": "src/client/pages/roadmap.js",
-          "from": 3491,
-          "to": 4438,
-          "modified": true,
-          "modifiedReason": "\"Deleted\" -- the vaguest string in the app -- is now \"Roadmap item deleted\"; save/delete failures give mapped reasons instead of raw ones, and the DELETE is {silent:true}."
+          "from": 3847,
+          "to": 4794
         },
         {
           "file": "src/client/pages/work-log-pivot.js",
-          "from": 4439,
-          "to": 5105,
-          "modified": true,
-          "modifiedReason": "Work-log update/delete failures said \"Failed to save: <raw>\"; they now lead with what failed and give a mapped reason. \"No data to export\" was styled as an error although nothing had gone wrong -- it is a warning now, and says which filters produced nothing."
+          "from": 4795,
+          "to": 5461
         },
         {
           "file": "src/client/pages/space/summary.js",
-          "from": 5106,
-          "to": 5201
+          "from": 5462,
+          "to": 5557
         },
         {
           "file": "src/client/pages/space/timeline.js",
-          "from": 5202,
-          "to": 5291
+          "from": 5558,
+          "to": 5647
         },
         {
           "file": "src/client/pages/space/backlog.js",
-          "from": 5292,
-          "to": 5812,
-          "modified": true,
-          "modifiedReason": "Sprint start/complete/delete name the sprint and, on completion, report the velocity the server just froze -- /start and /complete both return the sprint row, which the client was discarding. \"Sprint completed\" -> \"Sprint 4 completed - 21 story points\" (singular \"1 story point\"). Failures state the reason instead of being swallowed: start and complete had no catch at all, so a refusal surfaced only as the wrapper's raw text. Sprint delete failure quotes the name."
+          "from": 5648,
+          "to": 6187
         },
         {
           "file": "src/client/pages/space/board.js",
-          "from": 5813,
-          "to": 5907,
-          "modified": true,
-          "modifiedReason": "Board drag-and-drop names the issue: \"ENG-12 moved to In Progress\" (was \"Issue moved to In Progress\")."
+          "from": 6188,
+          "to": 6282
         },
         {
           "file": "src/client/pages/space/calendar.js",
-          "from": 5908,
-          "to": 5974
+          "from": 6283,
+          "to": 6349
         },
         {
           "file": "src/client/pages/space/reports.js",
-          "from": 5975,
-          "to": 7489,
-          "modified": true,
-          "modifiedReason": "Spillover-removal failure names the issue and the reason instead of \"Could not remove it from spillover\"; the confirm dialog said \"ticket number\", now \"issue key\"."
+          "from": 6350,
+          "to": 7864
         },
         {
           "file": "src/client/pages/space/mbr.js",
-          "from": 7490,
-          "to": 8356,
-          "modified": true,
-          "modifiedReason": "MBR achievements save names the sprint (\"Foundation achievements saved\") and its failure gives a mapped reason instead of passing e.message through raw; the PUT is {silent:true} so one failure is one toast. This was the last message in the app still forwarding raw server text."
+          "from": 7865,
+          "to": 8732
         },
         {
           "file": "src/client/pages/space/all-work.js",
-          "from": 8357,
-          "to": 9182,
-          "modified": true,
-          "modifiedReason": "Vocabulary ticket->issue across the bulk-delete permission message, the result message and the confirm dialog. The partial-failure message now states the denominator (\"5 of 7 issues moved to Deleted Items - 2 failed\") instead of two bare counts."
+          "from": 8733,
+          "to": 9577
         },
         {
           "file": "src/client/pages/space/settings.js",
-          "from": 9183,
-          "to": 9972,
-          "modified": true,
-          "modifiedReason": "Member and custom-field messages name what they acted on: \"Role updated\" -> \"Sujana Manapuram set to Space Admin\" (the select carries data-user-id and the new role is the changed value), \"Member removed\" -> \"<name> removed from this space\" (userName was already in scope for the confirm dialog), \"Custom field deleted\" -> \"\"Team\" deleted\" (fieldName likewise). The spillover-toggle failure gives a mapped reason and its PUT is now {silent:true} -- it was raising two error toasts for one failure. SILENT FAILURE: its custom-field fetch swallowed the error and rendered an empty section, indistinguishable from a space that has no custom fields -- it now reports the reason and says the section failed to load."
+          "from": 9578,
+          "to": 10380
         },
         {
           "file": "src/client/components/space-context-menu.js",
-          "from": 9973,
-          "to": 10843,
-          "modified": true,
-          "modifiedReason": "The \"User added\" alert drops \"successfully\" and names the user via findUser(userId). (Also carries attachment-upload and custom-field message work.) MECHANISM: adding a member now uses toast() like removing one already did, so the two halves of the same event match."
+          "from": 10381,
+          "to": 11261
         },
         {
           "file": "src/client/components/issue-drawer.js",
-          "from": 10844,
-          "to": 12126,
-          "modified": true,
-          "modifiedReason": "drawerSaveSummary() moved to utils as issueChangeSummary(); the drawer calls the shared version. (Also carries the earlier drawer-edit, vocabulary, subtask and comment-upload message work.)"
+          "from": 11262,
+          "to": 12582
         },
         {
           "file": "src/client/components/drawer-panels.js",
-          "from": 12127,
-          "to": 14087,
-          "modified": true,
-          "modifiedReason": "Links name both ends and both failures state the reason. Comment save/delete failures were the worst error handling in the app: catch(function(){}) with no argument, so the reason was discarded before it could be shown, and the call was not silent so api() toasted the raw text above it -- \"You can only edit your own comments.\" and \"Only a space admin can delete comments.\" are now what the user actually reads. No success toast was added to comment save/delete: they never had one, and adding one would change WHEN a toast fires. Attachment rename failure gains its reason. SILENT FAILURE: its custom-field fetch swallowed the error and rendered an empty section, indistinguishable from a space that has no custom fields -- it now reports the reason and says the section failed to load."
+          "from": 12583,
+          "to": 14558
         },
         {
           "file": "src/client/crud/space.js",
-          "from": 14088,
-          "to": 14257,
-          "modified": true,
-          "modifiedReason": "Space created/updated alerts drop \"successfully\"; the save failure reports a mapped reason instead of \"Error\"."
+          "from": 14559,
+          "to": 14728
         },
         {
           "file": "src/client/crud/sprint.js",
-          "from": 14258,
-          "to": 14288,
-          "modified": true,
-          "modifiedReason": "\"Sprint created\"/\"Sprint updated\" now name the sprint the user just typed (payload.name is already in hand): \"Sprint 4 created\". Both calls are {silent:true} so a failure is one toast, not the raw wrapper message plus this one."
+          "from": 14729,
+          "to": 14762
         },
         {
           "file": "src/client/crud/issue.js",
-          "from": 14289,
-          "to": 14518,
-          "modified": true,
-          "modifiedReason": "Create/update messages name the issue: \"ENG-12 created\" on all four create paths (the key is on the POST response already), \"ENG-12 created - opening...\", \"ENG-12 created, attachments failed - <reason>\". \"Failed to create issue: <raw>\" became \"Issue creation failed - <reason>\", and the POST is now {silent:true} so it is one toast rather than the raw one plus mine. The edit path stays a generic \"<KEY> updated\": it saves many fields at once without diffing them, and naming a field would need a server change or a client-side diff. NOTE: that edit branch is currently unreachable -- nothing ever sets #issueId (only clears it), so the modal cannot open on an existing issue."
+          "from": 14763,
+          "to": 14997
         },
         {
           "file": "src/client/components/worklog-modal.js",
-          "from": 14519,
-          "to": 14566,
-          "modified": true,
-          "modifiedReason": "\"Time logged successfully\" -> \"1h 30m logged on ENG-12\": drops the banned \"successfully\", and states the amount and the issue, both already in hand (the form fields and the modal's issue id)."
+          "from": 14998,
+          "to": 15045
         },
         {
           "file": "src/client/components/notifications.js",
-          "from": 14567,
-          "to": 14788,
-          "modified": true,
-          "modifiedReason": "A dead notification link now names the issue it could not open; the generic catch gives a reason. (Also carries the sprint-notification routing fix.)"
+          "from": 15046,
+          "to": 15290
         },
         {
           "file": "src/client/event-bindings.js",
-          "from": 14789,
-          "to": 15335,
-          "modified": true,
-          "modifiedReason": "\"Invite Created!\" loses the banned !; the password-reset alert drops \"successfully\" and says what the user can now do."
+          "from": 15291,
+          "to": 15837
         },
         {
           "file": "src/client/pages/admin-settings.js",
-          "from": 15336,
-          "to": 16818,
-          "modified": true,
-          "modifiedReason": "All Work inline menus now produce the same sentences as the drawer via issueChangeSummary(), and their failures name the issue and the reason -- all three catches previously took no error argument, discarding it. \"Link copied!\" -> \"Invite link copied\" (banned !). popupAlert titles/messages lose \"successfully\" and the stray !, and the org role-change alert names the user via findUser(sel.dataset.uid) rather than an undefined variable."
+          "from": 15838,
+          "to": 17305
         },
         {
           "file": "src/client/components/global-search.js",
-          "from": 16819,
-          "to": 17295,
-          "modified": true,
-          "modifiedReason": "Bin messages: ticket->issue, \"N item(s) restored\" -> \"N items restored\" with a denominator on partial failure, and the three raw \"e.message ||\" failures now lead with what failed. (Also carries the search-box reset.)"
+          "from": 17306,
+          "to": 17794
         }
       ],
-      "moves": [
-        {
-          "block": [
-            16664,
-            16689
-          ],
-          "from": "src/client/pages/admin-settings.js",
-          "to": "src/client/components/modal-drawer.js",
-          "afterOriginalLine": 1189,
-          "why": "placement: goBackFromIssue belongs with closeDrawer and goBackToSavedPage in components/modal-drawer.js, not in pages/admin-settings.js"
-        }
-      ]
+      "moves": [],
+      "rebaselined": {
+        "from": "c22c688",
+        "why": "modified:true had reached 28 of 42 client parts, so two-thirds of the client was verified only by its own pins and no longer against the original app.js. The current parts become the new pristine so [A]/[B]/[C]/[D] cover all 42 again.",
+        "originalBaselineRecoverableBy": "git show c22c688:app.js, then LF -> CRLF (verified byte-identical to the previous snapshot before it was replaced)",
+        "previousSnapshotKeptAt": ".refactor-verify/app.js.baseline-c22c688",
+        "movesFoldedIn": 0,
+        "changedNoShippedFile": true
+      }
     },
     {
       "original": "server.js",
@@ -740,10 +681,10 @@
   ],
   "pristine": {
     "app.js": {
-      "bytes": 891641,
-      "sha256": "b66e0f8f382aa7acc3c3a9815961fcf645644600af49141424ed34dbd101222f",
-      "crlf": 17294,
-      "lf": 17294
+      "bytes": 921155,
+      "sha256": "cbcdc7bc17575bd0d117274d962bfd8a1ac1b2af902467d651c5585fedb63336",
+      "crlf": 17793,
+      "lf": 17793
     },
     "server.js": {
       "bytes": 171150,
@@ -839,8 +780,8 @@
   "clientPins": {
     "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
     "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
-    "src/client/utils/index.js": "b84646bc5c697ee2bf5445a612e0fa86e73521796e91b6e3f79690deb9aba3a4",
-    "src/client/services/api.js": "bd16bd5f7ad5010664262450b05cd56f693e67efc8d6aeddf66cc5b2e2fa1431",
+    "src/client/utils/index.js": "a42146525f8714191d831c292d849175a87fed4a96c4ce0a4102a889d7360a63",
+    "src/client/services/api.js": "ee215b34aad4a904d2c717f124637d30a27f6abc12bf33ee7a41ba08a9c39a72",
     "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
     "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
     "src/client/components/confirm.js": "74ca56323f0cd80a0addddb3b7f610bcb4743a775d53173655bfe7baca4f355d",
@@ -873,7 +814,7 @@
     "src/client/components/drawer-panels.js": "4589a92e5533345bac272108ae73bc06b3369f843ca6d69da71d3cbbe189ff63",
     "src/client/crud/space.js": "f5fa59288dc093d3e595b5a0f6144333b77b2376aff647e01a4cf7ffee27d3d0",
     "src/client/crud/sprint.js": "ad121ed7e44d3a69f8ec559429e06d81cf1a784e1d64986d635de31e1ff6c441",
-    "src/client/crud/issue.js": "cea9549fe3b16d8af00d1a2d8b42a5f2cdc76e304d3b2e4a310967561546fe86",
+    "src/client/crud/issue.js": "ec4f5f47985e26dbc04e9a7ceb63cb9b925df1e67f319cf6d9872bf02f7bba20",
     "src/client/components/worklog-modal.js": "353fe05ee96f64410a530fb69b808a1216185fc3dffc64f30dae508daa08877d",
     "src/client/components/notifications.js": "805825a82492371da22d15008b59e45f852f6582a518700320c43408973de008",
     "src/client/event-bindings.js": "3e080633a150a69a878796d52f08325395ca8a030e0994584788996d32758c74",

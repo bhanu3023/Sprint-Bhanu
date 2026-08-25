@@ -467,6 +467,50 @@ var RAW_ERROR_REASONS = {
   'Request Timeout': 'the request timed out'
 };
 
+// Domain nouns this app capitalises as labels in its own UI. Lower-casing
+// these would read as a typo ("sprint is not active" where every screen says
+// Sprint), so they are left alone even at the start of a clause.
+var MESSAGE_PROPER_FIRST_WORDS = {
+  Space: 1, Spaces: 1, Sprint: 1, Sprints: 1, Issue: 1, Issues: 1,
+  Backlog: 1, Board: 1, Roadmap: 1, Microsoft: 1
+};
+
+// True when the first word must keep its capital: a domain noun above, an
+// identifier (space_id, ENG-12, site_admin), an acronym (SMTP, API), or
+// anything with a second capital in it.
+function isProperFirstWord(word) {
+  var bare = String(word || '').replace(/[^A-Za-z0-9_'’-]/g, '');
+  if (!bare) return true;
+  if (MESSAGE_PROPER_FIRST_WORDS[bare]) return true;
+  if (/[0-9_]/.test(bare)) return true;
+  if (/^[A-Z]{2,}$/.test(bare)) return true;
+  if (/^[A-Z].*[A-Z]/.test(bare)) return true;
+  return false;
+}
+
+// A reason is rendered after a dash -- "ENG-12 update failed — <reason>" -- but
+// the server writes its messages as standalone sentences, so they arrive with a
+// sentence-initial capital and a full stop and read grafted on. This lowers the
+// first letter and drops one trailing period, but only where that is safe:
+//   * never an identifier, acronym or domain noun (ENG-12, SMTP, Sprint)
+//   * never a multi-sentence string -- mangling the first of two sentences is
+//     worse than leaving both intact, so those pass through untouched
+//   * exactly one trailing '.', never '!', '?', ')' or an ellipsis
+function toReasonClause(msg) {
+  var s = String(msg);
+  if (/[.!?]\s+[A-Za-z]/.test(s)) return s;
+  if (!isProperFirstWord(s.split(/\s+/)[0])) s = s.charAt(0).toLowerCase() + s.slice(1);
+  if (/[^.]\.$/.test(s)) s = s.slice(0, -1);
+  return s;
+}
+
+// The inverse, for the one place a reason is shown on its own rather than after
+// a dash (services/api.js's catch-all toast).
+function capitaliseFirst(msg) {
+  var s = String(msg);
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
 // Never returns '' — a bare `toast(e.message)` renders an empty or
 // "undefined" toast when the error carries no message.
 function errorReason(e, fallback) {
@@ -479,7 +523,10 @@ function errorReason(e, fallback) {
   }
   var m = (e && e.message != null) ? String(e.message).trim() : '';
   if (!m || m === 'undefined' || m === 'null') return fallback || 'reason unknown';
-  return RAW_ERROR_REASONS[m] || m;
+  // A mapped reason is already written as a clause; anything passed through is
+  // the server's own sentence and needs reshaping to sit after a dash.
+  if (RAW_ERROR_REASONS[m]) return RAW_ERROR_REASONS[m];
+  return toReasonClause(m);
 }
 
 // Lower-case field names, for use mid-sentence ("ENG-12 due date updated").
