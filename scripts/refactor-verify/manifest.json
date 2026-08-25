@@ -37,7 +37,9 @@
         {
           "file": "src/client/components/toast.js",
           "from": 915,
-          "to": 996
+          "to": 996,
+          "modified": true,
+          "modifiedReason": "SECURITY (stored XSS): all three renderers built their text by concatenating the caller's message into innerHTML, so any markup in it executed. Real call sites interpolate user-controlled values -- an uploaded file's name (space-context-menu.js:371/398), a custom field's name (space/settings.js:737/741), a space name or key (crud/space.js:135/158/164, space/settings.js:786), a user's display name (admin-settings.js:417) and an invitee's email (admin-settings.js:501/520) -- so a file named `<img src=x onerror=...>.png` ran on upload. toast() and toastWithButtons() now build every node with textContent; popupAlert() renders msg as textContent too, gated by a new allowHtmlMsg flag used by exactly one caller (admin-settings.js:507) that needs <br><small> to wrap a long invite URL and escapes its own interpolations. textContent was chosen over esc()-at-the-call-site so the vector is closed at the sink and a future caller cannot forget. Rendered output is unchanged: no toast message in the codebase contains markup or an HTML entity (verified by extracting all 214 literals from all 169 call sites and rendering each through the old and new implementations, 1603 comparisons, 0 differences in what the user reads), and each function's original falsy-handling is preserved exactly (toast renders \"undefined\", toastWithButtons renders \"\", matching concat vs esc() before). compare [1][2][2b][3][4] all empty."
         },
         {
           "file": "src/client/components/confirm.js",
@@ -228,7 +230,9 @@
         {
           "file": "src/client/pages/admin-settings.js",
           "from": 15336,
-          "to": 16818
+          "to": 16818,
+          "modified": true,
+          "modifiedReason": "SECURITY (stored XSS), paired with toast.js: the 'Invitation Resent / email not sent' popupAlert is the ONLY caller in the app that deliberately renders markup (a <br><small style=\"word-break:break-all\"> so a long invite URL wraps instead of overflowing). popupAlert now defaults msg to textContent, so this call opts back in with the new allowHtmlMsg flag and escapes its own three interpolations (email, email_reason, invite_url) with esc(). Verified: the <br> and <small> still render as real elements with the wrap style intact, while a hostile email/URL renders as literal text and fires nothing."
         },
         {
           "file": "src/client/components/global-search.js",
@@ -806,7 +810,7 @@
     "src/client/utils/index.js": "849551f709e209f1f3a295ea0c1c3da434c9500a05ec01e695af19b9aa9b0047",
     "src/client/services/api.js": "49e8bbe2ac1f56c7d1066d377b397c223e1b1a7333ffc485ae075b5ffa6bee7c",
     "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
-    "src/client/components/toast.js": "a68b458575eef494d2efcf5106c5bed3e1d28cb01aea42f0619bec4380e19727",
+    "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
     "src/client/components/confirm.js": "74ca56323f0cd80a0addddb3b7f610bcb4743a775d53173655bfe7baca4f355d",
     "src/client/components/modal-drawer.js": "61eb4f0bedc7a32ae862fadf1ce7308c926c9aecdffef39741c0a7e624e926e1",
     "src/client/constants.js": "05cb1e906b9cd370173495c95dfe7555c677d865f3b6782cd98f507a134bba5d",
@@ -841,7 +845,7 @@
     "src/client/components/worklog-modal.js": "9fc9cd49b08bc820ffff27b435deeffdafd078eb11a3f13bfe72d704028ab8a6",
     "src/client/components/notifications.js": "1033e30e53454439af931ea027ad657c02c927b5e6185f7524cbe64c8e40102d",
     "src/client/event-bindings.js": "2982c479f1380ff6261b94bde91e9034bd8a75428c91184c60d4b554da357f4f",
-    "src/client/pages/admin-settings.js": "88d435f08ba9b45f5a68d6675a70edfce3ec6556bf432bcaae07404f28839abb",
+    "src/client/pages/admin-settings.js": "9517a4bdd88f6d726c7f678f1142a5357c7f365e8967f62f8ebff8093dbba513",
     "src/client/components/global-search.js": "72c083a7147a7bde1fc652bd1dec243e02c1cc6c225808785808f054c5732c10"
   }
 }

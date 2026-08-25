@@ -500,7 +500,11 @@ async function renderAdminUsers(el) {
         if (data.email_sent) {
           popupAlert('Invitation Resent', 'A new invitation email has been sent to ' + email + '.', 'success');
         } else {
-          popupAlert('Invitation Resent', 'Invite link renewed for ' + email + '. Email not sent: ' + (data.email_reason || 'SMTP not configured') + '<br><small style="word-break:break-all">' + (data.invite_url||'') + '</small>', 'info');
+          // The only popupAlert that renders markup (the <small> wraps a long
+          // invite URL) -- so it opts in with allowHtmlMsg and escapes each
+          // interpolation itself. esc() covers & < >, which is what matters
+          // for values landing in element text rather than an attribute.
+          popupAlert('Invitation Resent', 'Invite link renewed for ' + esc(email) + '. Email not sent: ' + esc(data.email_reason || 'SMTP not configured') + '<br><small style="word-break:break-all">' + esc(data.invite_url||'') + '</small>', 'info', true);
         }
         renderAdminSettings('user-management');
       } catch(e) {
