@@ -1,0 +1,6 @@
+# Vendored third-party build output. core.autocrlf is true for this repo, which
+# would rewrite this file's line endings on checkout -- and then
+# `node scripts/vendor-dompurify.js`, which copies the npm dist file verbatim,
+# would report a diff on every machine after a fresh clone. Keep the bytes as
+# they are so re-vendoring stays a genuine no-op.
+src/client/vendor/purify.min.js -text

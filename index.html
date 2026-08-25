@@ -1426,6 +1426,9 @@
   <script src="/config.js"></script>
   <script src="/hotjar.js"></script>
   <script src="combination-options.js"></script>
+  <!-- Unmanaged, and must stay ahead of the managed block: utils/index.js calls
+       DOMPurify at module scope. Vendored because there is no build step. -->
+  <script src="src/client/vendor/purify.min.js"></script>
   <script src="src/client/bootstrap.js"></script>
   <script src="src/client/state/index.js"></script>
   <script src="src/client/utils/index.js"></script>

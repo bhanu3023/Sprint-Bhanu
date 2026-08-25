@@ -13,6 +13,24 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// Comment images open full-size in a new tab. This used to be an inline
+// onclick="window.open(this.src)" on the generated <img>, which meant the
+// behaviour also depended on that attribute surviving in every STORED comment
+// body that had been through the edit-and-save round trip — and the sanitiser
+// strips event-handler attributes from stored bodies, correctly. Delegation
+// restores the behaviour for both the generated and the legacy stored images
+// without an inline handler and without an allowlist exception for onclick.
+//
+// Scoped to rendered comments, and skipped inside the edit box, where a click
+// on an image is placing the caret rather than asking to view it.
+document.addEventListener('click', function (e) {
+  var img = e.target;
+  if (!img || img.tagName !== 'IMG' || !img.src) return;
+  if (!img.closest('.drawer-comment-item')) return;
+  if (img.closest('[contenteditable="true"]')) return;
+  window.open(img.src, '_blank', 'noopener');
+});
+
 document.addEventListener('DOMContentLoaded', function () {
   initTheme();
   initDescEditorImageTrays();

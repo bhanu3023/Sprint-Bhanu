@@ -20,13 +20,103 @@ const esc = (str) => {
 // containing a quote silently terminates the attribute.
 const escAttr = (str) => esc(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+// ═══════════════════════════════════════════════════════════
+// STORED-HTML SANITISER
+// ═══════════════════════════════════════════════════════════
+// Comment bodies, descriptions and fix_descriptions are stored as HTML and
+// rendered through innerHTML. Until this landed, the only filtering was a
+// `<script>` regex strip, so a stored `<img src=x onerror=...>` executed for
+// every viewer who opened the issue — one user writing, everyone else running.
+//
+// The allowlist below was derived by applying candidate policies to the bodies
+// actually in the database and diffing the render, not by picking a tidy set.
+// That matters: the first candidate stripped img@style, class, data-url,
+// data-fp, contenteditable and <button>, which would have silently broken the
+// description image tray and made every inline screenshot render at full size.
+// Those entries are here because real content needs them.
+//
+// `style` is allowed knowingly. It permits CSS redressing (a stored
+// position:fixed overlay), which is far below script execution and which
+// existing content depends on for image sizing. The path out is to migrate the
+// bodies that use it to classes and then drop it — see the planned-work note in
+// docs/REFACTOR-2026-08.md §9.
+var SANITISE_ALLOWED_TAGS = [
+  'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'p', 'br', 'div', 'span',
+  'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'code', 'pre',
+  'a', 'img', 'button'
+];
+
+// Per TAG, deliberately. DOMPurify's own ALLOWED_ATTR is a global set, which
+// would allow href on <div> and src on <span>; harmless in practice but looser
+// than the reviewed policy. The hook below narrows it back to exactly this
+// table, so what ships is what was approved.
+var SANITISE_ALLOWED_ATTRS = {
+  a: ['href', 'target', 'rel'],
+  img: ['src', 'alt', 'title', 'class', 'width', 'height', 'style', 'data-url', 'data-fp'],
+  div: ['style', 'class', 'contenteditable', 'data-url', 'data-fp'],
+  span: ['style', 'class'],
+  p: ['style', 'class'],
+  code: ['class'],
+  pre: ['class'],
+  button: ['class', 'type', 'aria-label']
+};
+
+// The union, so DOMPurify still runs its own URI validation on href/src before
+// the per-tag hook ever sees them. Dropping an attribute from here drops it
+// everywhere regardless of the table above.
+var SANITISE_ATTR_UNION = (function () {
+  var seen = {};
+  Object.keys(SANITISE_ALLOWED_ATTRS).forEach(function (tag) {
+    SANITISE_ALLOWED_ATTRS[tag].forEach(function (a) { seen[a] = true; });
+  });
+  return Object.keys(seen);
+})();
+
+if (typeof DOMPurify !== 'undefined') {
+  DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
+    var tag = (node.tagName || '').toLowerCase();
+    var allowed = SANITISE_ALLOWED_ATTRS[tag];
+    if (!allowed || allowed.indexOf(data.attrName) === -1) data.keepAttr = false;
+  });
+}
+
+// Sanitise a stored, user-written HTML body for rendering. Call this on the
+// STORED string, before the app wraps its own trusted markup around it — not on
+// the finished HTML, or the app's own generated attributes get stripped too.
+function sanitiseStoredHtml(html) {
+  if (!html) return '';
+  var s = String(html);
+  if (typeof DOMPurify === 'undefined') {
+    // Fail closed. A missing vendor file must not silently revert five sinks to
+    // rendering raw attacker HTML; showing text is a visible bug, executing is
+    // not.
+    return esc(s);
+  }
+  return DOMPurify.sanitize(s, {
+    ALLOWED_TAGS: SANITISE_ALLOWED_TAGS,
+    ALLOWED_ATTR: SANITISE_ATTR_UNION,
+    ALLOW_DATA_ATTR: false,   // only data-url/data-fp, via the table above
+    ALLOW_ARIA_ATTR: false,   // only button@aria-label, via the table above
+    KEEP_CONTENT: true        // an unlisted tag is unwrapped, its text survives
+  });
+}
+
+
+// Extract plain text from a stored HTML body WITHOUT loading or executing it.
+//
+// This used to assign innerHTML to a detached div and read textContent back,
+// which LOOKS safe because only text comes out. It is not: `<img src=x
+// onerror=...>` fires from a detached div — verified in Chrome, not assumed.
+// That made this function a live XSS sink at both its call sites (the History
+// tab, which has real markup in it, and htmlFieldIsEmpty below, which fires on
+// an emptiness *check*). A DOMParser document has no browsing context, so
+// nothing inside it loads or runs.
 function stripHtmlForDisplay(html) {
   if (!html) return '';
   var s = String(html);
   if (!/<[a-z][\s\S]*>/i.test(s)) return s;
-  var d = document.createElement('div');
-  d.innerHTML = s;
-  return (d.textContent || d.innerText || '').replace(/\s+/g, ' ').trim();
+  var doc = new DOMParser().parseFromString(s, 'text/html');
+  return ((doc.body && doc.body.textContent) || '').replace(/\s+/g, ' ').trim();
 }
 
 function truncateForHistory(text, max) {
@@ -406,7 +496,7 @@ function highlightMentionsInCommentBody(body) {
 function commentBodyToEditableHtml(body) {
   if (!body) return '';
   if (/<[a-z][\s\S]*>/i.test(body)) {
-    var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
+    var safe = sanitiseStoredHtml(body);
     // Images in a stored HTML body are bare /api/files/<id> src's (no token --
     // see _saveComment's stripFileAuthTokensFromHtml). bodyHtml()'s read-only
     // render calls augmentFileUrlsInHtml for the same reason; without it here

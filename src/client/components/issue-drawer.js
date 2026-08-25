@@ -193,8 +193,13 @@ async function openDrawer(issueId) {
     if (!text) return '';
     var linkStyle = 'color:#0129AC;text-decoration:underline;cursor:pointer';
     if (/<[a-z][\s\S]*>/i.test(text)) {
+      // Sanitise the STORED body first, then let the link fixing and linkify
+      // below add the app's own trusted markup on top. Sanitising the finished
+      // string instead would strip the inline `style` this function itself puts
+      // on every anchor it generates, so links would lose their styling.
+      var clean = sanitiseStoredHtml(text);
       // Fix broken <a href=""> by using the link text as the href
-      var fixed = text.replace(/<a\s[^>]*href=["']["'][^>]*>(https?:\/\/[^<]+)<\/a>/gi, function(m, url) {
+      var fixed = clean.replace(/<a\s[^>]*href=["']["'][^>]*>(https?:\/\/[^<]+)<\/a>/gi, function(m, url) {
         return '<a href="' + url.trim() + '" style="' + linkStyle + '" target="_blank">' + url.trim() + '</a>';
       });
       // Linkify bare URLs not already inside an <a> tag
@@ -210,6 +215,12 @@ async function openDrawer(issueId) {
     }
     var p = text.replace(/\n{3,}/g,'\n\n').replace(/\n/g,'<br>');
     var d = p.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+    // That decode turns stored `&lt;img onerror=...&gt;` back into live markup,
+    // so a payload that was safely escaped at rest got re-armed on render — and
+    // it reached this branch precisely BECAUSE it contained no literal '<'.
+    // Sanitise after the decode and before the linkify, for the same reason as
+    // the branch above: the anchors added below carry app-generated styling.
+    d = sanitiseStoredHtml(d);
     return d.replace(/(https?:\/\/[^\s<"]+)/g,'<a href="$1" style="' + linkStyle + '" target="_blank">$1</a>');
   }
   $('drawerDesc').innerHTML = renderDesc(descText);

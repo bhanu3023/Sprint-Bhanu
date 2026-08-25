@@ -369,7 +369,7 @@ function _renderActivityTab(tab, issue) {
       '</span>';
     var bodyHtml = (function(body) {
       if (/<[a-z][\s\S]*>/i.test(body)) {
-        var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
+        var safe = sanitiseStoredHtml(body);
         // A comment that has been through the rich-edit-and-save cycle below
         // stores its images as real <img src="/api/files/id"> (no token, by
         // design — see _saveComment) rather than the [img:name|url] markup the
@@ -386,7 +386,7 @@ function _renderActivityTab(tab, issue) {
       // the attribute (it escapes quotes, which esc does not), esc for text.
       // alt is added at the same time so the image has an accessible name.
       html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
-        return '<div style="margin-top:8px"><img src="' + fileApiUrl(url) + '" alt="' + escAttr(fname) + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" onclick="window.open(this.src)" title="' + escAttr(fname) + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + esc(fname) + '</div></div>';
+        return '<div style="margin-top:8px"><img src="' + fileApiUrl(url) + '" alt="' + escAttr(fname) + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" title="' + escAttr(fname) + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + esc(fname) + '</div></div>';
       });
       html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
         return '<div style="margin-top:6px"><a href="' + fileApiUrl(url) + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + esc(fname) + '</a></div>';

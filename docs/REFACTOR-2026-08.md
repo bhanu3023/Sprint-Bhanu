@@ -736,6 +736,30 @@ changes):**
   day a second instance is added. Needs a shared store (Redis or the database
   itself) if that day comes.
 
+**Planned work, decided and deferred (not open questions — the call was made):**
+
+- **Ban `style` in stored HTML, once the content is migrated.** The comment/
+  description sanitiser (§5b) allows `style` on `img`, `div`, `span` and `p`.
+  That was a knowing trade, not an oversight: 8 stored bodies carry the inline
+  sizing for their images in a `style` attribute, so banning it outright would
+  have made every inline screenshot render at full size. What `style` still
+  permits is CSS redressing — a stored `position:fixed;z-index:9999` overlay
+  covering the app — which is real but far below script execution, and which
+  DOMPurify does not filter by default. The path out, in order: migrate the
+  bodies that use `style` onto classes, confirm no stored body needs it, then
+  drop `style` from `SANITISE_ALLOWED_ATTRS` in `src/client/utils/index.js` and
+  re-run the render-fidelity comparison. Recorded here so a future reader does
+  not mistake the allowance for carelessness, and does not silently ban the
+  attribute and break the existing content.
+- **The other two classes found in the same audit.** The sanitiser commit closed
+  the five sinks where stored HTML reaches `innerHTML`. Two separate classes
+  came out of the same audit and are their own work: a **session token embedded
+  in a stored comment body** (readable by every member of the space, so a
+  credential leak, and `stripFileAuthTokensFromHtml` did not catch the row that
+  has it), and **185 quote-sensitive `esc()` interpolations** inside HTML
+  attributes — the same bug class as the `title=` filename hole fixed in
+  `7d0c4c4`, since `esc()` does not escape quotes.
+
 **Smaller open items:**
 
 - `lib/schema-check.js:50,106` name two SQL files that have never existed.
