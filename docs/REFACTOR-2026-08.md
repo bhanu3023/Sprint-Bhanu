@@ -752,13 +752,46 @@ changes):**
   not mistake the allowance for carelessness, and does not silently ban the
   attribute and break the existing content.
 - **The other two classes found in the same audit.** The sanitiser commit closed
-  the five sinks where stored HTML reaches `innerHTML`. Two separate classes
-  came out of the same audit and are their own work: a **session token embedded
-  in a stored comment body** (readable by every member of the space, so a
-  credential leak, and `stripFileAuthTokensFromHtml` did not catch the row that
-  has it), and **185 quote-sensitive `esc()` interpolations** inside HTML
-  attributes — the same bug class as the `title=` filename hole fixed in
-  `7d0c4c4`, since `esc()` does not escape quotes.
+  the five sinks where stored HTML reaches `innerHTML`. Two separate classes came
+  out of the same audit. One is **done** (below); the other, **185
+  quote-sensitive `esc()` interpolations** inside HTML attributes, is still open
+  — the same bug class as the `title=` filename hole fixed in `7d0c4c4`, since
+  `esc()` does not escape quotes.
+
+**Closed: the embedded session token (data repair, no code change).**
+
+A live session token was embedded in stored text as `/api/files/<id>?t=<token>`,
+in content readable by every member of the space — a credential leak, not just
+untidy data.
+
+The first read was that `stripFileAuthTokensFromHtml` had a bug. **It does not.**
+`issue_history` shows the tokenised values were written at 2026-08-20 14:26Z and
+14:40Z, and the two commits that added stripping to those save paths landed at
+15:07Z (`80a95e2`, descriptions) and 15:29Z (`1746ca3`, comment edit). The rows
+predate the fix; nothing was missed. All five call sites strip today, and the one
+conditional (`if (bodyIsRich)` in `issue-drawer.js`) is correct because the
+non-rich branch stores the bare `f.url` with no token in it. `fileApiUrl` only
+ever emits `?t=`, never `&t=`, so the regex has no gap either.
+
+What made this look like a live leak was reading `issues.updated_at`, which bumps
+on *any* field change: the row's description was last written pre-fix, but later
+status and assignee edits moved `updated_at` to Aug 25. `issue_history` is the
+only column that answers "when was this field written".
+
+Repaired: 8 column-values across `issues.description` and
+`issue_history.old_value`/`new_value` (6 rows, 1 distinct token). The exact
+`?t=<token>` substring was removed rather than a pattern, so nothing else could
+be touched; `updated_at` was not bumped and no history row was written for the
+repair, since a history row would re-embed the value being removed. The session
+was deleted, and `GET /api/files/<id>?t=<token>` now returns **401** — verified
+dead, not merely absent from storage. Images still render: the stored `src` is
+now bare and `augmentFileUrlsInHtml` adds a fresh token per render (checked on
+both affected issues).
+
+Still worth doing, and **not** done here because it was not in scope: strip file
+tokens **server-side on write**. Every client save path strips correctly today,
+but that is five call sites each of which a future path could forget, and the
+server currently stores whatever it is given.
 
 **Smaller open items:**
 
