@@ -22,7 +22,7 @@
           "from": 38,
           "to": 566,
           "modified": true,
-          "modifiedReason": "commentBodyToEditableHtml() now calls augmentFileUrlsInHtml() on the HTML-body branch, matching bodyHtml()'s read-only render -- fixes broken comment images in edit mode (missing auth token on /api/files/ src)."
+          "modifiedReason": "Added errorReason() + RAW_ERROR_REASONS (raw server text -> a clause a person can act on) and issueFieldLabel() + ISSUE_FIELD_LABELS (lower-case field names for use mid-sentence). errorReason never returns empty, which is what let a bare toast(e.message) render an empty or \"undefined\" toast. Payload Too Large maps to \"the request is too large\" rather than \"upload\" because it also fires on an oversized description PUT."
         },
         {
           "file": "src/client/services/api.js",
@@ -186,7 +186,7 @@
           "from": 10844,
           "to": 12126,
           "modified": true,
-          "modifiedReason": "Switching from one open ticket straight to another (parent breadcrumb, a linked issue) left the PREVIOUS ticket's rendered content on screen, fully visible and interactive, for the whole fetch of the new one -- fixed by covering it with a loading overlay the moment a switch is detected, dropped once the new issue actually finishes rendering (every early-return path, including a slower-to-fail stale request, clears it correctly without clobbering a newer request's own overlay). First client-side use of `modified: true` in this project -- see [E] in catdiff.js, added specifically to keep this declaration honest via a pinned digest rather than a silent, unrecoverable exception."
+          "modifiedReason": "The four highest-traffic messages in the app -- \"Saved\"/\"Save failed\" on every inline drawer edit -- now name the issue and what changed: \"ENG-12 moved to In Review\", \"ENG-12 priority set to High\", \"ENG-12 assigned to Alex Kumar\", \"ENG-12 unassigned\", \"ENG-12 moved to the backlog\", \"ENG-12 due date updated\", and \"ENG-12 updated -- 3 fields\" when the 800ms debounce coalesces several edits. Failures name the issue and the reason: \"ENG-12 update failed -- you do not have permission\". New drawerSaveSummary() reads only what the call site already had (the field name and value passed to autoSave/saveFieldNow, plus the same S.data the drawer rendered from) -- no new computation, no server change. Both save paths now pass {silent:true} to api(): the wrapper toasts the raw thrown message itself, so one failure was raising TWO error toasts with the technical one on top."
         },
         {
           "file": "src/client/components/drawer-panels.js",
@@ -807,7 +807,7 @@
   "clientPins": {
     "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
     "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
-    "src/client/utils/index.js": "849551f709e209f1f3a295ea0c1c3da434c9500a05ec01e695af19b9aa9b0047",
+    "src/client/utils/index.js": "7290b4e9109fc3b79ec3cc2a021b7c090e8b03e160bfdcf4bd34fad6acc25e0c",
     "src/client/services/api.js": "49e8bbe2ac1f56c7d1066d377b397c223e1b1a7333ffc485ae075b5ffa6bee7c",
     "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
     "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
@@ -837,7 +837,7 @@
     "src/client/pages/space/all-work.js": "26f7b38ccdb90a6bfdfa07a32ae4a912964ce09fe945e86eeabed1313589b601",
     "src/client/pages/space/settings.js": "7cef9f63b3a7c901e0ac07c5212f9c14086b9bcb4bc0740d3cb310316d88d372",
     "src/client/components/space-context-menu.js": "304cd92f3c0f7a7345f3193b4b94ffe81b8531232ac7500e6682d62a8aea417f",
-    "src/client/components/issue-drawer.js": "f65b627949a1097125786704dbcf00007c519a7a48f16a39c72eebf5547f837c",
+    "src/client/components/issue-drawer.js": "81274b338be8d859c75959bb29733be831bcddf5c7ba7fb22d1b803e5b7e59c2",
     "src/client/components/drawer-panels.js": "0ee1f75e465f5f6a345b90d090b98818c1ce0cc14e75e49601fbf8b9d27c0ef9",
     "src/client/crud/space.js": "a50414a9f359e3016808f8bfff76553752b24d5bf5a8c00da23c48eefdebb7ff",
     "src/client/crud/sprint.js": "7cd1e769623a4f2ad117e63821433a93ad038be59d516af9af78e9c7955def55",

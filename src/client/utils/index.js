@@ -447,6 +447,54 @@ function diffCombinationFieldChange(oldValue, newValue) {
   return null;
 }
 
+// Server text that is written for a machine, not a person, mapped to a clause
+// that reads inside "<what> failed — <reason>". Anything not listed passes
+// through unchanged: most API errors already carry a sentence meant for the
+// user (permissions, validation, lifecycle guards) and rewriting those would
+// lose detail. Keys are matched exactly against the thrown message, which is
+// `err.error` from the JSON body or the raw HTTP statusText (services/api.js).
+var RAW_ERROR_REASONS = {
+  'Internal server error': 'something went wrong on the server',
+  'Unauthorized': 'your session has expired — sign in again',
+  'Forbidden': 'you do not have permission',
+  'Not Found': 'it no longer exists',
+  'Payload Too Large': 'the request is too large',
+  'Unsupported Media Type': 'that file type is not accepted',
+  'Too Many Requests': 'too many requests — wait a moment and retry',
+  'Bad Gateway': 'the server is unreachable',
+  'Service Unavailable': 'the server is unavailable',
+  'Gateway Timeout': 'the server took too long to respond',
+  'Request Timeout': 'the request timed out'
+};
+
+// Never returns '' — a bare `toast(e.message)` renders an empty or
+// "undefined" toast when the error carries no message.
+function errorReason(e, fallback) {
+  var m = (e && e.message != null) ? String(e.message).trim() : '';
+  if (!m || m === 'undefined' || m === 'null') return fallback || 'reason unknown';
+  return RAW_ERROR_REASONS[m] || m;
+}
+
+// Lower-case field names, for use mid-sentence ("ENG-12 due date updated").
+// The History tab keeps its own Title-Case map because it renders the field as
+// a standalone label ("Updated Due Date from … to …") rather than in a clause.
+var ISSUE_FIELD_LABELS = {
+  title: 'title', status: 'status', priority: 'priority',
+  assignee_id: 'assignee', reporter_id: 'reporter', sprint_id: 'sprint',
+  labels: 'labels', story_points: 'story points', type: 'type',
+  start_date: 'start date', due_date: 'due date',
+  description: 'description', fix_description: 'fix description',
+  team: 'team', product_type: 'product type',
+  original_estimate: 'original estimate', time_spent: 'time spent',
+  parent_id: 'parent', position: 'position', attachment: 'attachment'
+};
+
+function issueFieldLabel(field) {
+  if (!field) return 'field';
+  return ISSUE_FIELD_LABELS[field] ||
+    String(field).replace(/_id$/, '').replace(/_/g, ' ');
+}
+
 function fmtMins(mins) {
   if (!mins || mins <= 0) return '0h';
   const h = Math.floor(mins / 60);
