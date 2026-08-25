@@ -192,8 +192,8 @@ function renderTopbarProfile(user) {
   if (!btn) return;
 
   if (user.avatar_url) {
-    btn.innerHTML = '<img src="' + esc(user.avatar_url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
-    if (av2) av2.innerHTML = '<img src="' + esc(user.avatar_url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    btn.innerHTML = '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    if (av2) av2.innerHTML = '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
   } else {
     var ini = initials(user.name);
     btn.style.background = color;
@@ -291,7 +291,7 @@ function openProfileSettingsModal() {
   var spaceRole = S.currentSpace ? getMySpaceRole(S.currentSpace) : null;
   var currentSpace = S.currentSpace && (S.data.spaces || []).find(function (s) { return s.id === S.currentSpace; });
   var av = user.avatar_url
-    ? '<img src="' + esc(user.avatar_url) + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover">'
+    ? '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover">'
     : '<div style="width:64px;height:64px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">' + initials(user.name) + '</div>';
 
   var overlay = document.createElement('div');
@@ -383,7 +383,7 @@ function renderUserFooter(user) {
   var isAdmin = user.role === 'admin' || user.role === 'owner';
   var color = user.color || '#6366f1';
   var av = user.avatar_url
-    ? '<img src="' + esc(user.avatar_url) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.2)" />'
+    ? '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.2)" />'
     : '<div style="width:36px;height:36px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;border:2px solid rgba(255,255,255,0.2);flex-shrink:0">' + initials(user.name) + '</div>';
   var roleBadge = orgRoleBadgeHtml(user.role, { compact: true, dark: true });
   footer.innerHTML =

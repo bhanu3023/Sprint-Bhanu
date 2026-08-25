@@ -76,7 +76,9 @@
         {
           "file": "src/client/init.js",
           "from": 1978,
-          "to": 2393
+          "to": 2393,
+          "modified": true,
+          "modifiedReason": "Accessibility: the four avatar <img> tags built here had no alt, and in the topbar profile button the image is the control's only content, so an empty alt would have lost who it is -- each is named from the user. Attribute-only; alt text is invisible."
         },
         {
           "file": "src/client/navigation.js",
@@ -96,7 +98,9 @@
         {
           "file": "src/client/pages/home.js",
           "from": 3152,
-          "to": 3293
+          "to": 3293,
+          "modified": true,
+          "modifiedReason": "Accessibility: alt on the hero avatar <img>. Attribute-only."
         },
         {
           "file": "src/client/pages/spaces.js",
@@ -183,7 +187,9 @@
         {
           "file": "src/client/components/drawer-panels.js",
           "from": 12583,
-          "to": 14558
+          "to": 14558,
+          "modified": true,
+          "modifiedReason": "SECURITY + accessibility in the comment body renderer: an uploaded FILENAME (user-controlled) was interpolated raw into a title=\"...\" attribute and into element text by the [img:]/[file:] branch, so a filename containing a double quote broke out of the attribute and one containing markup was parsed as markup -- the same defect as the toast renderer (blind spot 17), in a different renderer. Now escAttr() for the attribute (it escapes quotes, which esc() does not) and esc() for the text, with alt added at the same time. Verified: a filename of pwn\" onerror=\"window.X=1 now renders as literal text with no onerror attribute and no handler firing."
         },
         {
           "file": "src/client/crud/space.js",
@@ -798,11 +804,11 @@
     "src/client/components/badges.js": "bd8d667462e74c8327398beafca48dbbf1e235e8a742a7f136e138dbe269e7d9",
     "src/client/services/data-helpers.js": "a208317527e04b249c7991d8e0c112d2dc3b9778c4e6a9006e9dbc292a0c0a74",
     "src/client/services/theme.js": "2f28888928a9225b8787269f4a30ecf626e0beb76342739c61cabeef0665ecef",
-    "src/client/init.js": "0f4f250ee3bb6018a0c9d2a8a01156791e5137feb032112c127eeb3f418ac7d8",
+    "src/client/init.js": "450abb9c9b99a3319c9bd938aeb4d3b4ef6c5c6aab170bcbf21cf8caddd198a0",
     "src/client/navigation.js": "8a2f72261aace14bde5518b1c870056d5e805b6fb120f7a547fa26f1413132a7",
     "src/client/components/sidebar.js": "811df61b1ffd758ccfa5974a895ce1a99eb448e727811e9ca0f3f33a13a278fb",
     "src/client/components/space-header.js": "0e7ae82772af0db8fdbe494a3f2cfcd44855319d140f650abf289f83ed66aef5",
-    "src/client/pages/home.js": "5582be47cd0ad32e43c901a4c6371445c827b5d3827fe73c3f5cb0e83da54a3d",
+    "src/client/pages/home.js": "a4ad9a1e7f2ba1c49f2a26b32492f7bf34c97fa1d2e6306a6af1bd9f2347d2de",
     "src/client/pages/spaces.js": "7233a64042a0caab0ba3e77ae45f4bacee4b09745ee8de9f172fd414b26bb77c",
     "src/client/pages/my-work.js": "09499fce943ce747f86a0d360febe0dadaf9433dcf077b7a21b028ce6937c6de",
     "src/client/pages/work-log.js": "fc4dcd026bb0a4fd04d5d367c8055f7c13fd2e1d7cbb3681764df100f13f2bca",
@@ -819,7 +825,7 @@
     "src/client/pages/space/settings.js": "62f0eac8f961011c857e2ee46bbee825b9033c9c48b04fcc250eacb826f87035",
     "src/client/components/space-context-menu.js": "756b42b926f8a8ac0f69946edfe881a63ac21276e4a4612c987dd7bc558cbf3c",
     "src/client/components/issue-drawer.js": "67f89056203f8e2b1b4fee76b58f681fb223018f3f780c289a1b44a4e8615bbc",
-    "src/client/components/drawer-panels.js": "4589a92e5533345bac272108ae73bc06b3369f843ca6d69da71d3cbbe189ff63",
+    "src/client/components/drawer-panels.js": "30938611d88d9635c343c7cf36553a99e0cffd96585dedeb56e7d8961e33b9b3",
     "src/client/crud/space.js": "f5fa59288dc093d3e595b5a0f6144333b77b2376aff647e01a4cf7ffee27d3d0",
     "src/client/crud/sprint.js": "ad121ed7e44d3a69f8ec559429e06d81cf1a784e1d64986d635de31e1ff6c441",
     "src/client/crud/issue.js": "ec4f5f47985e26dbc04e9a7ceb63cb9b925df1e67f319cf6d9872bf02f7bba20",
