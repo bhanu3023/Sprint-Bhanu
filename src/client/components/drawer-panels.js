@@ -1875,7 +1875,14 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
           .filter(function (f) { return f.space_id != spaceId; })
           .concat(fetched);
       }
-    } catch(e) {}
+    } catch (e) {
+      // Was catch(e) {} followed by rendering nothing, so a failed fetch looked
+      // exactly like a space with no custom fields -- the fields were simply
+      // missing from the drawer with no way to tell why.
+      toast('Could not load custom fields — ' + errorReason(e), 'error');
+      c.innerHTML = '<p class="text-muted text-sm">Custom fields could not be loaded.</p>';
+      return;
+    }
   }
 
   if (!spaceFields.length) { c.innerHTML = ''; return; }

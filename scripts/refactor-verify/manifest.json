@@ -192,7 +192,7 @@
           "from": 9183,
           "to": 9972,
           "modified": true,
-          "modifiedReason": "Member and custom-field messages name what they acted on: \"Role updated\" -> \"Sujana Manapuram set to Space Admin\" (the select carries data-user-id and the new role is the changed value), \"Member removed\" -> \"<name> removed from this space\" (userName was already in scope for the confirm dialog), \"Custom field deleted\" -> \"\"Team\" deleted\" (fieldName likewise). The spillover-toggle failure gives a mapped reason and its PUT is now {silent:true} -- it was raising two error toasts for one failure."
+          "modifiedReason": "Member and custom-field messages name what they acted on: \"Role updated\" -> \"Sujana Manapuram set to Space Admin\" (the select carries data-user-id and the new role is the changed value), \"Member removed\" -> \"<name> removed from this space\" (userName was already in scope for the confirm dialog), \"Custom field deleted\" -> \"\"Team\" deleted\" (fieldName likewise). The spillover-toggle failure gives a mapped reason and its PUT is now {silent:true} -- it was raising two error toasts for one failure. SILENT FAILURE: its custom-field fetch swallowed the error and rendered an empty section, indistinguishable from a space that has no custom fields -- it now reports the reason and says the section failed to load."
         },
         {
           "file": "src/client/components/space-context-menu.js",
@@ -213,7 +213,7 @@
           "from": 12127,
           "to": 14087,
           "modified": true,
-          "modifiedReason": "Links name both ends and both failures state the reason. Comment save/delete failures were the worst error handling in the app: catch(function(){}) with no argument, so the reason was discarded before it could be shown, and the call was not silent so api() toasted the raw text above it -- \"You can only edit your own comments.\" and \"Only a space admin can delete comments.\" are now what the user actually reads. No success toast was added to comment save/delete: they never had one, and adding one would change WHEN a toast fires. Attachment rename failure gains its reason."
+          "modifiedReason": "Links name both ends and both failures state the reason. Comment save/delete failures were the worst error handling in the app: catch(function(){}) with no argument, so the reason was discarded before it could be shown, and the call was not silent so api() toasted the raw text above it -- \"You can only edit your own comments.\" and \"Only a space admin can delete comments.\" are now what the user actually reads. No success toast was added to comment save/delete: they never had one, and adding one would change WHEN a toast fires. Attachment rename failure gains its reason. SILENT FAILURE: its custom-field fetch swallowed the error and rendered an empty section, indistinguishable from a space that has no custom fields -- it now reports the reason and says the section failed to load."
         },
         {
           "file": "src/client/crud/space.js",
@@ -865,10 +865,10 @@
     "src/client/pages/space/reports.js": "5f88efd867de83b888f99cca6880319515361a595ccb6bd4eb40b9d37dbca652",
     "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
     "src/client/pages/space/all-work.js": "1306a221746eae181edc61f9becc83b5e1a42e2dc371fb19cc48a5b55e615df4",
-    "src/client/pages/space/settings.js": "3e3539739fab6155ae91de8de02e0b18e411161f0923dd7a02bdb3e5512a0354",
+    "src/client/pages/space/settings.js": "62f0eac8f961011c857e2ee46bbee825b9033c9c48b04fcc250eacb826f87035",
     "src/client/components/space-context-menu.js": "d83fb5f86fbba783592d7af32933b4d4f1cc6e2ec6ef51110461f271f5174e1c",
     "src/client/components/issue-drawer.js": "67f89056203f8e2b1b4fee76b58f681fb223018f3f780c289a1b44a4e8615bbc",
-    "src/client/components/drawer-panels.js": "1bc6de45b867bd74efe4e9f9009710b2f9afae2239974e20bd4929e199c74ce7",
+    "src/client/components/drawer-panels.js": "4589a92e5533345bac272108ae73bc06b3369f843ca6d69da71d3cbbe189ff63",
     "src/client/crud/space.js": "f5fa59288dc093d3e595b5a0f6144333b77b2376aff647e01a4cf7ffee27d3d0",
     "src/client/crud/sprint.js": "ad121ed7e44d3a69f8ec559429e06d81cf1a784e1d64986d635de31e1ff6c441",
     "src/client/crud/issue.js": "cea9549fe3b16d8af00d1a2d8b42a5f2cdc76e304d3b2e4a310967561546fe86",

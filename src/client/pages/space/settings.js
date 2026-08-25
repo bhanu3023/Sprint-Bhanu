@@ -297,7 +297,13 @@ function ensureSpaceFieldsLoaded(spaceId) {
       }
       return getSpaceFieldRows(spaceId);
     })
-    .catch(function () { return []; });
+    .catch(function (e) {
+      // Returned [] silently, so every caller behaved as if the space had no
+      // custom fields at all -- required fields stopped being enforced and
+      // pickers came up empty with no explanation.
+      toast('Could not load custom fields for this space — ' + errorReason(e), 'error');
+      return [];
+    });
 }
 
 function isSpaceBuiltinFieldEnabled(spaceId, fieldKey, place) {
@@ -607,8 +613,13 @@ function renderSettingsCustomFields(space) {
       }
       paintSettingsCustomFields(space);
     })
-    .catch(function () {
-      paintSettingsCustomFields(space);
+    .catch(function (e) {
+      // Painted from whatever happened to be cached (often nothing), so a
+      // failed load was indistinguishable from a space with no fields.
+      toast('Could not load custom fields — ' + errorReason(e), 'error');
+      $('settingsTabContent').innerHTML =
+        '<div class="text-muted" style="padding:24px;text-align:center">' +
+        'Custom fields could not be loaded. Refresh to try again.</div>';
     });
 }
 
