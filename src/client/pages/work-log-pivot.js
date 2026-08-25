@@ -527,7 +527,7 @@ window._wlrSaveWorklog = async function(id) {
     var ov = $('wlrEditOverlay'); if (ov) ov.remove();
     toast('Work log updated');
     await _wlrFetch();
-  } catch(e) { toast('Failed to save: ' + (e.message||e), 'error'); }
+  } catch(e) { toast('Work log update failed — ' + errorReason(e), 'error'); }
 };
 
 window._wlrDeleteWorklog = async function(id, issueId) {
@@ -536,7 +536,7 @@ window._wlrDeleteWorklog = async function(id, issueId) {
     await api('/api/worklogs/' + id, 'DELETE');
     toast('Work log deleted');
     await _wlrFetch();
-  } catch(e) { toast('Delete failed: ' + (e.message||e), 'error'); }
+  } catch(e) { toast('Work log delete failed — ' + errorReason(e), 'error'); }
 };
 
 // ── Old fixed Pivot (reused by Timesheet for matrix section) ──
@@ -643,7 +643,7 @@ function _wlrCard(icon, label, value, color) {
 }
 
 window._wlrExportCSV = function() {
-  if (!_wlrData.length) { toast('No data to export', 'error'); return; }
+  if (!_wlrData.length) { toast('Nothing to export — no work logs match the current filters', 'warning'); return; }
   var rows = [['Date','User','Space','Ticket','Title','Time (mins)','Time (h:m)','Description','Billable']];
   _wlrData.forEach(function(r) {
     var u = findUser(r.user_id), sp = getSpace(r.space_id);

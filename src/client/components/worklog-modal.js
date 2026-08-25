@@ -20,7 +20,7 @@ async function handleWorklogSubmit(e) {
 
   await api('/api/worklogs', 'POST', payload);
   closeModal('modal-worklog');
-  toast('Time logged successfully');
+  toast(fmtMins(timeSpent) + ' logged on ' + (cachedIssueKey(payload.issue_id) || 'this issue'));
 
   if (S.drawerIssueId) {
     // Re-fetch fresh issue data (includes new worklog) then switch to Work log tab
