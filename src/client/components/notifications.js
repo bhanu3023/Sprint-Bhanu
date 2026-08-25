@@ -134,18 +134,41 @@ async function openNotifTarget(notif) {
     return openIssueFromNotifLink(link, notif.title);
   }
 
-  // Space board route: /space/ENG/board
+  // Space board route: /space/ENG/board -- 'board' is the URL segment, but
+  // the app's own tab for this view is named 'sprint' (Active Sprint); there
+  // is no 'board' case in renderTab()'s switch, so navigating to it left the
+  // content pane blank -- looked exactly like the click did nothing.
   var spaceBoardMatch = link.match(/^\/space\/([^/]+)\/board\/?$/i);
   if (spaceBoardMatch) {
     var sp = getSpaceByKey(decodeURIComponent(spaceBoardMatch[1]));
     if (sp) {
-      navigateToSpace(sp.id, 'board');
+      navigateToSpace(sp.id, 'sprint');
       return true;
     }
   }
 
-  if ((type === 'sprint_started' || type === 'sprint_completed') && spaceId) {
-    navigateToSpace(spaceId, 'board');
+  // Space reports route: /space/ENG/reports -- sprint_completed's real link
+  // target (notification-triggers.md), which the old 'board'-only regex
+  // never matched at all. Reports is site_admin-only (permission-matrix.md);
+  // a plain member sent there gets a permission toast instead of a redirect,
+  // so send them to Backlog & Sprints instead -- the completed sprint's own
+  // issues live there now (spilled back per sprint-lifecycle.md), so it is
+  // still the right place to land, just not the reports view.
+  var spaceReportsMatch = link.match(/^\/space\/([^/]+)\/reports\/?$/i);
+  if (spaceReportsMatch) {
+    var spr = getSpaceByKey(decodeURIComponent(spaceReportsMatch[1]));
+    if (spr) {
+      navigateToSpace(spr.id, canManageSpace(spr.id) ? 'reports' : 'backlog');
+      return true;
+    }
+  }
+
+  if (type === 'sprint_started' && spaceId) {
+    navigateToSpace(spaceId, 'sprint');
+    return true;
+  }
+  if (type === 'sprint_completed' && spaceId) {
+    navigateToSpace(spaceId, canManageSpace(spaceId) ? 'reports' : 'backlog');
     return true;
   }
 

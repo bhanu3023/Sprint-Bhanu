@@ -216,7 +216,9 @@
         {
           "file": "src/client/components/notifications.js",
           "from": 14567,
-          "to": 14788
+          "to": 14788,
+          "modified": true,
+          "modifiedReason": "openNotifTarget() navigated sprint_started/sprint_completed notifications to a tab literally named 'board' -- but the app's tab for that view is 'sprint' (Active Sprint), and there is no 'board' case in renderTab()'s switch, so the click silently rendered nothing. Now routes sprint_started -> 'sprint' and sprint_completed -> 'reports' (its real link target per notification-triggers.md), both by type and by matching the link's URL segment directly. sprint_completed additionally checks canManageSpace() first: Reports is site_admin-only, so a plain member goes to 'backlog' instead (the completed sprint's issues spilled back there) rather than hitting a permission-denied toast."
         },
         {
           "file": "src/client/event-bindings.js",
@@ -837,7 +839,7 @@
     "src/client/crud/sprint.js": "7cd1e769623a4f2ad117e63821433a93ad038be59d516af9af78e9c7955def55",
     "src/client/crud/issue.js": "f1143b1e0083f2537549de2e1f5834d99cbfc01755474a69277f83ce205ee77c",
     "src/client/components/worklog-modal.js": "9fc9cd49b08bc820ffff27b435deeffdafd078eb11a3f13bfe72d704028ab8a6",
-    "src/client/components/notifications.js": "a5a77c4e30cabc116a44dc31990bf6cc37ac886a41c328da7225e9822d515041",
+    "src/client/components/notifications.js": "1033e30e53454439af931ea027ad657c02c927b5e6185f7524cbe64c8e40102d",
     "src/client/event-bindings.js": "2982c479f1380ff6261b94bde91e9034bd8a75428c91184c60d4b554da357f4f",
     "src/client/pages/admin-settings.js": "88d435f08ba9b45f5a68d6675a70edfce3ec6556bf432bcaae07404f28839abb",
     "src/client/components/global-search.js": "72c083a7147a7bde1fc652bd1dec243e02c1cc6c225808785808f054c5732c10"
