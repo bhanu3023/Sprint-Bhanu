@@ -178,7 +178,9 @@
         {
           "file": "src/client/pages/space/mbr.js",
           "from": 7490,
-          "to": 8356
+          "to": 8356,
+          "modified": true,
+          "modifiedReason": "MBR achievements save names the sprint (\"Foundation achievements saved\") and its failure gives a mapped reason instead of passing e.message through raw; the PUT is {silent:true} so one failure is one toast. This was the last message in the app still forwarding raw server text."
         },
         {
           "file": "src/client/pages/space/all-work.js",
@@ -863,7 +865,7 @@
     "src/client/pages/space/board.js": "d31805f0fd5ad00ee6d126444583ff2415ebd0091360a51f78eb5a7cc12226f1",
     "src/client/pages/space/calendar.js": "beac6f46d01e8bb1abbaa557740f033c88acc8743e6b9af30cb6e2f05a285ae8",
     "src/client/pages/space/reports.js": "5f88efd867de83b888f99cca6880319515361a595ccb6bd4eb40b9d37dbca652",
-    "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
+    "src/client/pages/space/mbr.js": "61ae235e11b9d48052e55624e20c80c04cb4c0fa290b65db6fb30324372c8710",
     "src/client/pages/space/all-work.js": "1306a221746eae181edc61f9becc83b5e1a42e2dc371fb19cc48a5b55e615df4",
     "src/client/pages/space/settings.js": "62f0eac8f961011c857e2ee46bbee825b9033c9c48b04fcc250eacb826f87035",
     "src/client/components/space-context-menu.js": "756b42b926f8a8ac0f69946edfe881a63ac21276e4a4612c987dd7bc558cbf3c",

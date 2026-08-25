@@ -632,18 +632,19 @@ window._openAchievementsModal = function (sprintId) {
     var btn = overlay.querySelector('#_achModalSave');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      var updated = await api('/api/sprints/' + sprintId, 'PUT', { achievements: achievements });
+      // silent: the catch renders its own 'Achievements save failed - <why>'
+      var updated = await api('/api/sprints/' + sprintId, 'PUT', { achievements: achievements }, { silent: true });
       var cached = (S.data.sprints || []).find(function (sp) { return sp.id === sprintId; });
       if (cached) cached.achievements = updated.achievements;
       if (_mbrData) {
         var mbrSp = (_mbrData.completed_sprints || []).find(function (sp) { return sp.id === sprintId; });
         if (mbrSp) mbrSp.achievements = updated.achievements;
       }
-      toast('Achievements saved', 'success');
+      toast((sprintName(sprintId) || 'Sprint') + ' achievements saved', 'success');
       close();
       if (_mbrActiveTab === 'achievements') renderMBRAchievements($('mbrTabContent'), _mbrData);
     } catch (e) {
-      toast(e.message || 'Could not save achievements', 'error');
+      toast('Achievements save failed — ' + errorReason(e), 'error');
       btn.disabled = false; btn.textContent = 'Save';
     }
   };
