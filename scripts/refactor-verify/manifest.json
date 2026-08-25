@@ -22,7 +22,7 @@
           "from": 38,
           "to": 566,
           "modified": true,
-          "modifiedReason": "Adds sprintName() alongside cachedIssueKey()/issueLabelFor()/issueSprintMoveText()/errorReason()/issueFieldLabel(): a sprint name from the already-loaded cache, for the messages that only hold its id."
+          "modifiedReason": "Adds linkedPairText() to the shared message helpers (errorReason, issueFieldLabel, cachedIssueKey, issueLabelFor, sprintName, issueSprintMoveText): \"ENG-12 linked to ENG-15\", both ends being in hand at the call site."
         },
         {
           "file": "src/client/services/api.js",
@@ -131,7 +131,9 @@
         {
           "file": "src/client/pages/work-log-pivot.js",
           "from": 4439,
-          "to": 5105
+          "to": 5105,
+          "modified": true,
+          "modifiedReason": "Work-log update/delete failures said \"Failed to save: <raw>\"; they now lead with what failed and give a mapped reason. \"No data to export\" was styled as an error although nothing had gone wrong -- it is a warning now, and says which filters produced nothing."
         },
         {
           "file": "src/client/pages/space/summary.js",
@@ -203,7 +205,7 @@
           "from": 12127,
           "to": 14087,
           "modified": true,
-          "modifiedReason": "historyHtml()'s fieldLabel now resolves a custom-field history row via h.custom_field_name/h.custom_field_key (from issues.js's new join), same fix as space-header.js's dashboard activity feed and same reason -- the drawer's own History tab had the identical raw-field_name and misleading-Combination-label bugs. Uses the shared diffCombinationFieldChange() helper from utils/index.js."
+          "modifiedReason": "Links name both ends and both failures state the reason. Comment save/delete failures were the worst error handling in the app: catch(function(){}) with no argument, so the reason was discarded before it could be shown, and the call was not silent so api() toasted the raw text above it -- \"You can only edit your own comments.\" and \"Only a space admin can delete comments.\" are now what the user actually reads. No success toast was added to comment save/delete: they never had one, and adding one would change WHEN a toast fires. Attachment rename failure gains its reason."
         },
         {
           "file": "src/client/crud/space.js",
@@ -227,7 +229,9 @@
         {
           "file": "src/client/components/worklog-modal.js",
           "from": 14519,
-          "to": 14566
+          "to": 14566,
+          "modified": true,
+          "modifiedReason": "\"Time logged successfully\" -> \"1h 30m logged on ENG-12\": drops the banned \"successfully\", and states the amount and the issue, both already in hand (the form fields and the modal's issue id)."
         },
         {
           "file": "src/client/components/notifications.js",
@@ -821,7 +825,7 @@
   "clientPins": {
     "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
     "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
-    "src/client/utils/index.js": "29fe36d7b41e3f7252b2b1c881149b6de74dc3fa9d8437dd02236c5aa422bb1b",
+    "src/client/utils/index.js": "7b47cc3f002a36c364797656f95740722140769b6b203b4b35ad24c2e1fcb4db",
     "src/client/services/api.js": "bd16bd5f7ad5010664262450b05cd56f693e67efc8d6aeddf66cc5b2e2fa1431",
     "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
     "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
@@ -840,7 +844,7 @@
     "src/client/pages/my-work.js": "be4b4ab740920ef39a86d3d21bcb04123dbe1879ee79ba4e2c534b880d34a391",
     "src/client/pages/work-log.js": "fc4dcd026bb0a4fd04d5d367c8055f7c13fd2e1d7cbb3681764df100f13f2bca",
     "src/client/pages/roadmap.js": "decfa62d2bd6f5a9f64a378d28db7fa12a647a5e1dfdd5972018637ac0238b84",
-    "src/client/pages/work-log-pivot.js": "daf06dc277a79590e81e14c87ec8b5c0d4f682761b1a7b103363997acab20115",
+    "src/client/pages/work-log-pivot.js": "113e5e9a57054c358b255c97570aa3123b6322055ef3b0e12ab429fa8cd55933",
     "src/client/pages/space/summary.js": "face07962f1dc078bd7755040c5ffb6a7873b69cc98ce3f3c5c5b545294d8128",
     "src/client/pages/space/timeline.js": "80cf2915ffb97e1ea16be538d1d1830b4ec06b6f12be0baf701af6bcb306017c",
     "src/client/pages/space/backlog.js": "1bfff04e92a7d7bd3aeef163e6f11440760aa4e2e00c9ee9ff03387247cee468",
@@ -852,11 +856,11 @@
     "src/client/pages/space/settings.js": "7cef9f63b3a7c901e0ac07c5212f9c14086b9bcb4bc0740d3cb310316d88d372",
     "src/client/components/space-context-menu.js": "304cd92f3c0f7a7345f3193b4b94ffe81b8531232ac7500e6682d62a8aea417f",
     "src/client/components/issue-drawer.js": "4842010d72465a98629b03386633f07a586a995b9ff1716ba2a5a9d7992f0627",
-    "src/client/components/drawer-panels.js": "0ee1f75e465f5f6a345b90d090b98818c1ce0cc14e75e49601fbf8b9d27c0ef9",
+    "src/client/components/drawer-panels.js": "1bc6de45b867bd74efe4e9f9009710b2f9afae2239974e20bd4929e199c74ce7",
     "src/client/crud/space.js": "a50414a9f359e3016808f8bfff76553752b24d5bf5a8c00da23c48eefdebb7ff",
     "src/client/crud/sprint.js": "ad121ed7e44d3a69f8ec559429e06d81cf1a784e1d64986d635de31e1ff6c441",
     "src/client/crud/issue.js": "cea9549fe3b16d8af00d1a2d8b42a5f2cdc76e304d3b2e4a310967561546fe86",
-    "src/client/components/worklog-modal.js": "9fc9cd49b08bc820ffff27b435deeffdafd078eb11a3f13bfe72d704028ab8a6",
+    "src/client/components/worklog-modal.js": "353fe05ee96f64410a530fb69b808a1216185fc3dffc64f30dae508daa08877d",
     "src/client/components/notifications.js": "1033e30e53454439af931ea027ad657c02c927b5e6185f7524cbe64c8e40102d",
     "src/client/event-bindings.js": "2982c479f1380ff6261b94bde91e9034bd8a75428c91184c60d4b554da357f4f",
     "src/client/pages/admin-settings.js": "9517a4bdd88f6d726c7f678f1142a5357c7f365e8967f62f8ebff8093dbba513",

@@ -320,11 +320,11 @@ window._submitLink = async function() {
       target_id: targetId,
       link_type: linkType
     }, { silent: true });
-    toast('Issue linked', 'success');
+    toast(linkedPairText(S.drawerIssueId, targetId), 'success');
     window._hideLinkDialog();
     await _refreshDrawerLinks();
   } catch(e) {
-    toast(e.message || 'Failed to create link', 'error');
+    toast('Link failed — ' + errorReason(e), 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Link'; }
   }
@@ -337,7 +337,7 @@ window._removeLink = async function(linkId) {
     await api('/api/links/' + linkId, 'DELETE', null, { silent: true });
     toast('Link removed', 'success');
     await _refreshDrawerLinks();
-  } catch(e) { toast(e.message || 'Failed to remove link', 'error'); }
+  } catch(e) { toast('Link removal failed — ' + errorReason(e), 'error'); }
 };
 
 // Store current issue data for tab switching
@@ -469,14 +469,14 @@ function _renderActivityTab(tab, issue) {
 
   window._deleteComment = function(id) {
     if (!confirm('Delete this comment?')) return;
-    api('/api/comments/' + id, 'DELETE').then(function() {
+    api('/api/comments/' + id, 'DELETE', null, { silent: true }).then(function() {
       var issueId = S.drawerIssueId;
       if (issueId) {
         api('/api/issues/' + issueId).then(function(fresh) {
           renderDrawerActivity(fresh);
         }).catch(function(){});
       }
-    }).catch(function() { toast('Failed to delete comment', 'error'); });
+    }).catch(function(e) { toast('Comment delete failed — ' + errorReason(e), 'error'); });
   };
 
   window._saveComment = function(id) {
@@ -489,14 +489,14 @@ function _renderActivityTab(tab, issue) {
     // the token verbatim bakes today's token in permanently.
     var newBody = stripFileAuthTokensFromHtml(richEl.innerHTML.trim());
     if (!newBody || newBody === '<br>') return;
-    api('/api/comments/' + id, 'PUT', { body: newBody }).then(function() {
+    api('/api/comments/' + id, 'PUT', { body: newBody }, { silent: true }).then(function() {
       var issueId = S.drawerIssueId;
       if (issueId) {
         api('/api/issues/' + issueId).then(function(fresh) {
           renderDrawerActivity(fresh);
         }).catch(function(){});
       }
-    }).catch(function() { toast('Failed to save comment', 'error'); });
+    }).catch(function(e) { toast('Comment save failed — ' + errorReason(e), 'error'); });
   };
 
   function historyHtml(h) {
@@ -692,7 +692,7 @@ window.renameAttachment = async function(id, currentName) {
     var issue = await api('/api/issues/' + S.drawerIssueId);
     if (issue) renderDrawerAttachments(issue.attachments || []);
     toast('Attachment renamed');
-  } catch(e) { toast('Rename failed', 'error'); }
+  } catch(e) { toast('Attachment rename failed — ' + errorReason(e), 'error'); }
 };
 
 window.deleteAttachment = async function(id) {

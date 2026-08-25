@@ -509,6 +509,17 @@ function issueLabelFor(issueIdOrKey) {
   return cachedIssueKey(s) || 'that issue';
 }
 
+// "ENG-12 linked to ENG-15" -- both ends are in hand at the call site (the
+// open drawer's issue and the target picked in the dialog), so the message can
+// say what was linked to what instead of just that something was linked.
+function linkedPairText(sourceId, targetId) {
+  var a = cachedIssueKey(sourceId);
+  var b = cachedIssueKey(targetId);
+  if (a && b) return a + ' linked to ' + b;
+  if (b) return 'Linked to ' + b;
+  return 'Issue linked';
+}
+
 // A sprint's name from the already-loaded cache, for the messages that only
 // have its id in hand. '' when it is not cached, so callers stay generic.
 function sprintName(sprintId) {
