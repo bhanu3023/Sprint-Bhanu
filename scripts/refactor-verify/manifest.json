@@ -15,12 +15,16 @@
         {
           "file": "src/client/state/index.js",
           "from": 10,
-          "to": 37
+          "to": 37,
+          "modified": true,
+          "modifiedReason": "ywFilters gains productType, combination, assignee and reporter (see emptyYwFilters() in utils for the shared shape)."
         },
         {
           "file": "src/client/utils/index.js",
           "from": 38,
-          "to": 776
+          "to": 776,
+          "modified": true,
+          "modifiedReason": "Adds emptyYwFilters(), the single source of truth for the My Work filter shape. It existed as three separate copies of the same object literal that had to be kept in step by hand, so adding a filter key meant remembering all three or the key silently stayed undefined in two code paths."
         },
         {
           "file": "src/client/services/api.js",
@@ -30,7 +34,9 @@
         {
           "file": "src/client/services/recently-viewed.js",
           "from": 869,
-          "to": 1133
+          "to": 1133,
+          "modified": true,
+          "modifiedReason": "clearYourWorkFilters() and applyYourWorkOpenFilter() now build the filter object from emptyYwFilters() instead of each repeating the literal."
         },
         {
           "file": "src/client/components/toast.js",
@@ -100,7 +106,9 @@
         {
           "file": "src/client/pages/my-work.js",
           "from": 3362,
-          "to": 3706
+          "to": 3706,
+          "modified": true,
+          "modifiedReason": "Assigned to Me and Reported by Me gain Product Type and Combination columns, and the Reporter/Assignee column becomes filterable. Product Type reads the comma-joined string off the issue row (same shape All Work reads); Combination reads combination_value, which the server now sends because issue_field_values is only loaded for a single space and My Work spans all of them. Values render via the same formatCombinationFieldDisplayValue() All Work uses, so one value reads identically in both views. Four new filters (productType, combination, assignee, reporter) built from the values actually present in the current result set, with a __none__ sentinel so \"nobody assigned\" is selectable. Recently Viewed deliberately does NOT get the two columns -- it is a local history list whose rows are not guaranteed to carry either value -- so the column count and the empty-row colspan are both derived from the tab."
         },
         {
           "file": "src/client/pages/work-log.js",
@@ -421,7 +429,7 @@
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { getMemberSpaceIds, getVisibleSpaceIds, isOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
           "glueSuffix": "",
           "modified": true,
-          "modifiedReason": "GET /api/dashboard/activity's history query now LEFT JOINs custom_fields to resolve a custom-field history row's real name/field_key -- without it, a custom-field change showed as the raw 'updated custom field <uuid>' in the Team Activity feed instead of a real label like the built-in fields get. Also: GET /api/my-issues' assigned-issues query now joins reporter_name/reporter_color (it already had assignee_name/assignee_color) so My Work's Assigned to Me tab can show a Reporter column."
+          "modifiedReason": "GET /api/dashboard/activity's history query now LEFT JOINs custom_fields to resolve a custom-field history row's real name/field_key -- without it, a custom-field change showed as the raw 'updated custom field <uuid>' in the Team Activity feed instead of a real label like the built-in fields get. Also: GET /api/my-issues' assigned-issues query now joins reporter_name/reporter_color (it already had assignee_name/assignee_color) so My Work's Assigned to Me tab can show a Reporter column. Also: GET /api/my-issues now returns combination_value on the assigned and reported queries -- a correlated subquery reading the space's Combination custom field value for each issue. My Work spans every space, but issue_field_values is only loaded by /api/data when scoped to ONE space, so without this the new Combination column could never be populated cross-space. A subquery rather than a join because a space could hold two fields keyed \"combination\" and a join would multiply issue rows."
         },
         {
           "file": "src/server/routes/org.js",
@@ -754,7 +762,7 @@
     "src/server/files.js": "fc97fa7f83ed02d3f98770d8aed2d11c9086f5d9f3fb4ff1c37b1d71ac18c458",
     "src/server/oauth-helpers.js": "bc13361d710c9cf5f37e763b832d7be08bb62fd962c3795ce0d1c9d1327f1f42",
     "src/server/routes/data.js": "1c72806ecc1f1c08bd1147671c1646b71255c19d896795a92634ca83717bcbf3",
-    "src/server/routes/my-issues.js": "d734253a451b761d95e9da1399cc10e5ec714dfc9687a4f7b83a3265f5a409ae",
+    "src/server/routes/my-issues.js": "9993d236b30b41ff488ff514f2ad75e5a6435bce57435131ff3e6d74b2ec0da5",
     "src/server/routes/org.js": "0cd17f12d3dad8ca8840dee85db0fd28aca97821d65e85bcd42bdc216f142a91",
     "src/server/routes/spaces.js": "b722347c2e31f9ef76e5a8e01b28961e981eb15419a06a69b9e503a156989c0a",
     "src/server/routes/sprints.js": "8da54e382be46d856f7e03af10fc9e08985754df47420136630a6ba5574cd754",
@@ -779,10 +787,10 @@
   },
   "clientPins": {
     "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
-    "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
-    "src/client/utils/index.js": "a42146525f8714191d831c292d849175a87fed4a96c4ce0a4102a889d7360a63",
+    "src/client/state/index.js": "fede08d2b78f8b94ac5c989802281ba04f00663ed5d5c20fa53aa3c113f75015",
+    "src/client/utils/index.js": "4a51130ec0796e0109969ed74032efd4d1a912e509dafefd936748b80275ed3c",
     "src/client/services/api.js": "ee215b34aad4a904d2c717f124637d30a27f6abc12bf33ee7a41ba08a9c39a72",
-    "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
+    "src/client/services/recently-viewed.js": "44f8b9859daaa962aa32b5cb8a40f78415c97feeb59e07e8acab4720dc3db1fb",
     "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
     "src/client/components/confirm.js": "74ca56323f0cd80a0addddb3b7f610bcb4743a775d53173655bfe7baca4f355d",
     "src/client/components/modal-drawer.js": "61eb4f0bedc7a32ae862fadf1ce7308c926c9aecdffef39741c0a7e624e926e1",
@@ -796,7 +804,7 @@
     "src/client/components/space-header.js": "0e7ae82772af0db8fdbe494a3f2cfcd44855319d140f650abf289f83ed66aef5",
     "src/client/pages/home.js": "5582be47cd0ad32e43c901a4c6371445c827b5d3827fe73c3f5cb0e83da54a3d",
     "src/client/pages/spaces.js": "7233a64042a0caab0ba3e77ae45f4bacee4b09745ee8de9f172fd414b26bb77c",
-    "src/client/pages/my-work.js": "be4b4ab740920ef39a86d3d21bcb04123dbe1879ee79ba4e2c534b880d34a391",
+    "src/client/pages/my-work.js": "09499fce943ce747f86a0d360febe0dadaf9433dcf077b7a21b028ce6937c6de",
     "src/client/pages/work-log.js": "fc4dcd026bb0a4fd04d5d367c8055f7c13fd2e1d7cbb3681764df100f13f2bca",
     "src/client/pages/roadmap.js": "f422b58e997ff8373f48641146c5eab5c3ff2da4a226a1a854d8020a59c79e22",
     "src/client/pages/work-log-pivot.js": "113e5e9a57054c358b255c97570aa3123b6322055ef3b0e12ab429fa8cd55933",

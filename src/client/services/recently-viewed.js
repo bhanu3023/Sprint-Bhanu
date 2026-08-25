@@ -132,14 +132,14 @@ function refreshRecentViewedUI() {
 
 function clearYourWorkFilters() {
   S.ywExcludeDone = false;
-  S.ywFilters = { key: [], type: [], status: [], priority: [], space: [] };
+  S.ywFilters = emptyYwFilters();
   var srch = $('ywSearch');
   if (srch) srch.value = '';
 }
 
 function applyYourWorkOpenFilter() {
   S.ywExcludeDone = true;
-  S.ywFilters = { key: [], type: [], status: [], priority: [], space: [] };
+  S.ywFilters = emptyYwFilters();
   var srch = $('ywSearch');
   if (srch) srch.value = '';
 }

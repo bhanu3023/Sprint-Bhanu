@@ -14,9 +14,21 @@ app.get('/api/my-issues', requireAuth, wrap(async (req, res) => {
   const scopeSql = admin ? '' : ' AND i.space_id = ANY($2)';
   const scopeParams = admin ? [userId] : [userId, spaceIds];
   const [assigned, reported, recent] = await Promise.all([
+    // combination_value: My Work spans every space, but a Combination field is
+    // per-space and its value lives in issue_field_values -- which /api/data
+    // only loads when scoped to ONE space. So the value has to come from here or
+    // the column could never be populated cross-space. A correlated subquery
+    // rather than a join: a space could in principle hold two fields keyed
+    // 'combination', and a join would then multiply the issue rows.
+    // NULL means either the space has no Combination field or this issue has no
+    // value for it; the client renders both as an em dash.
     q(`SELECT i.*, s.name AS space_name, s.key AS project_key,
               a.name AS assignee_name, a.color AS assignee_color,
-              r.name AS reporter_name, r.color AS reporter_color
+              r.name AS reporter_name, r.color AS reporter_color,
+              (SELECT ifv.value FROM issue_field_values ifv
+                 JOIN custom_fields cf ON cf.id = ifv.field_id
+                WHERE ifv.issue_id = i.id AND cf.space_id = i.space_id
+                  AND cf.field_key = 'combination' LIMIT 1) AS combination_value
        FROM issues i
        LEFT JOIN spaces s ON s.id = i.space_id
        LEFT JOIN users a ON a.id = i.assignee_id
@@ -24,10 +36,16 @@ app.get('/api/my-issues', requireAuth, wrap(async (req, res) => {
        WHERE i.assignee_id = $1 AND i.deleted_at IS NULL${scopeSql}
        ORDER BY i.updated_at DESC`, scopeParams),
     q(`SELECT i.*, s.name AS space_name, s.key AS project_key,
-              a.name AS assignee_name, a.color AS assignee_color
+              a.name AS assignee_name, a.color AS assignee_color,
+              r.name AS reporter_name, r.color AS reporter_color,
+              (SELECT ifv.value FROM issue_field_values ifv
+                 JOIN custom_fields cf ON cf.id = ifv.field_id
+                WHERE ifv.issue_id = i.id AND cf.space_id = i.space_id
+                  AND cf.field_key = 'combination' LIMIT 1) AS combination_value
        FROM issues i
        LEFT JOIN spaces s ON s.id = i.space_id
        LEFT JOIN users a ON a.id = i.assignee_id
+       LEFT JOIN users r ON r.id = i.reporter_id
        WHERE i.reporter_id = $1 AND i.deleted_at IS NULL${scopeSql}
        ORDER BY i.updated_at DESC`, scopeParams),
     q(`SELECT DISTINCT i.*, s.name AS space_name, s.key AS project_key,

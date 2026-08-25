@@ -78,8 +78,64 @@ function _ywGetKeyOpts(issues) {
   return opts;
 }
 
+// Product Type lives on the issue row as a comma-joined string (same shape All
+// Work reads it in); Combination is a per-space CUSTOM field whose raw value the
+// server sends as combination_value, because issue_field_values is only loaded
+// for a single space and My Work spans all of them.
+function _ywGetProductTypeOpts(issues) {
+  var seen = {}, out = [];
+  (issues || []).forEach(function (i) {
+    String(i.product_type || '').split(',').forEach(function (v) {
+      v = v.trim();
+      if (!v || seen[v]) return;
+      seen[v] = true; out.push({ v: v, l: v });
+    });
+  });
+  out.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return out;
+}
+
+// Only the .combinations half of the structured value -- productTypes is a
+// different field and counting it here would put the same values in both
+// filters. Mirrors _awDistinctCFOptions in all-work.js.
+function _ywGetCombinationOpts(issues) {
+  var seen = {}, out = [];
+  (issues || []).forEach(function (i) {
+    if (!i.combination_value) return;
+    parsePtComboSelection('', i.combination_value).combinations.forEach(function (v) {
+      v = String(v || '').trim();
+      if (!v || seen[v]) return;
+      seen[v] = true; out.push({ v: v, l: v });
+    });
+  });
+  out.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return out;
+}
+
+// Whoever actually appears in this set of issues, not every user in the org --
+// a filter listing people with nothing here would be noise. Unassigned gets a
+// real entry so 'show me the ones with nobody on them' is reachable.
+function _ywGetPersonOpts(issues, idField, nameField) {
+  var seen = {}, out = [], anyBlank = false;
+  (issues || []).forEach(function (i) {
+    var id = i[idField];
+    if (!id) { anyBlank = true; return; }
+    if (seen[id]) return;
+    seen[id] = true;
+    var u = findUser(id);
+    out.push({ v: id, l: (u && u.name) || i[nameField] || 'Unknown' });
+  });
+  out.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  if (anyBlank) out.push({ v: '__none__', l: idField === 'assignee_id' ? 'Unassigned' : 'No reporter' });
+  return out;
+}
+
 function _ywGetFilterOpts(key, issues) {
   if (key === 'space') return _ywGetSpaceOpts(issues);
+  if (key === 'productType') return _ywGetProductTypeOpts(issues);
+  if (key === 'combination') return _ywGetCombinationOpts(issues);
+  if (key === 'assignee') return _ywGetPersonOpts(issues, 'assignee_id', 'assignee_name');
+  if (key === 'reporter') return _ywGetPersonOpts(issues, 'reporter_id', 'reporter_name');
   if (key === 'key') return _ywGetKeyOpts(issues);
   if (key === 'type' || key === 'priority') return _ywGetTypeOrPriorityOpts(key, issues);
   return (YW_FILTER_DEFS[key] && YW_FILTER_DEFS[key].opts) || [];
@@ -110,6 +166,31 @@ function _ywApplyFilters(issues) {
   if (f.space && f.space.length) {
     out = out.filter(function (i) { return f.space.indexOf(i.space_id) >= 0; });
   }
+  if (f.productType && f.productType.length) {
+    out = out.filter(function (i) {
+      var vals = String(i.product_type || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      return f.productType.some(function (a) { return vals.indexOf(a) >= 0; });
+    });
+  }
+  if (f.combination && f.combination.length) {
+    out = out.filter(function (i) {
+      if (!i.combination_value) return false;
+      var vals = parsePtComboSelection('', i.combination_value).combinations.map(function (s) { return String(s).trim(); });
+      return f.combination.some(function (a) { return vals.indexOf(a) >= 0; });
+    });
+  }
+  // '__none__' is the sentinel for 'nobody set' -- a plain empty string cannot
+  // be a checkbox value that round-trips through the DOM reliably.
+  if (f.assignee && f.assignee.length) {
+    out = out.filter(function (i) {
+      return i.assignee_id ? f.assignee.indexOf(i.assignee_id) >= 0 : f.assignee.indexOf('__none__') >= 0;
+    });
+  }
+  if (f.reporter && f.reporter.length) {
+    out = out.filter(function (i) {
+      return i.reporter_id ? f.reporter.indexOf(i.reporter_id) >= 0 : f.reporter.indexOf('__none__') >= 0;
+    });
+  }
   if (S.ywExcludeDone) {
     out = out.filter(function (i) { return i.status !== 'Done'; });
   }
@@ -123,7 +204,9 @@ function _ywAnyFilterActive() {
     ($('ywSearch') && $('ywSearch').value.trim()) ||
     (f.key && f.key.length) ||
     (f.type && f.type.length) || (f.status && f.status.length) ||
-    (f.priority && f.priority.length) || (f.space && f.space.length)
+    (f.priority && f.priority.length) || (f.space && f.space.length) ||
+    (f.productType && f.productType.length) || (f.combination && f.combination.length) ||
+    (f.assignee && f.assignee.length) || (f.reporter && f.reporter.length)
   );
 }
 
@@ -178,6 +261,12 @@ function _renderYourWorkTable(issues, rawIssues, lastCol) {
   } else {
     issues.sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); });
   }
+  // Product Type and Combination are shown on Assigned/Reported only. The
+  // Recently Viewed tab is a different kind of list (a local history with a
+  // Viewed timestamp) and its rows are not guaranteed to carry either value.
+  var isPersonCol = lastCol.key === 'reporter' || lastCol.key === 'assignee';
+  var showPtCombo = isPersonCol;
+  var colCount = 7 + (showPtCombo ? 2 : 0);
   var toolbarHtml = _ywAnyFilterActive()
     ? '<div class="yw-table-toolbar">' +
         '<button type="button" class="btn btn-outline btn-sm yw-clear-all-btn" onclick="window._ywClearFilters()">&#10005; Clear all</button>' +
@@ -191,10 +280,14 @@ function _renderYourWorkTable(issues, rawIssues, lastCol) {
     _ywBuildFilterTh('status', 'Status', rawIssues) +
     _ywBuildFilterTh('priority', 'Priority', rawIssues) +
     _ywBuildFilterTh('space', 'Space', rawIssues) +
-    '<th>' + esc(lastCol.label) + '</th>' +
+    (showPtCombo ? _ywBuildFilterTh('productType', 'Product Type', rawIssues) : '') +
+    (showPtCombo ? _ywBuildFilterTh('combination', 'Combination', rawIssues) : '') +
+    // Reporter/Assignee is filterable; 'Viewed' is a timestamp, so it is not.
+    (isPersonCol ? _ywBuildFilterTh(lastCol.key, lastCol.label, rawIssues)
+                 : '<th>' + esc(lastCol.label) + '</th>') +
     '</tr></thead><tbody>';
   if (!issues.length) {
-    html += '<tr><td colspan="7" class="yw-empty-row">' +
+    html += '<tr><td colspan="' + colCount + '" class="yw-empty-row">' +
       'No issues match your filters. ' +
       '<button type="button" class="btn btn-link btn-sm" onclick="window._ywClearFilters()">Clear filters</button>' +
       '</td></tr>';
@@ -214,6 +307,20 @@ function _renderYourWorkTable(issues, rawIssues, lastCol) {
         var timeVal = lastCol.key === 'viewed' ? (iss.viewedAt || iss.updated_at) : iss.updated_at;
         lastColHtml = relativeTime(timeVal);
       }
+      // A space without these fields and an issue with no value both render as
+      // an em dash -- from the row's point of view they are the same thing.
+      var ptHtml = '<span class="text-muted">—</span>';
+      if (iss.product_type) {
+        var ptList = String(iss.product_type).split(',')
+          .map(function (x) { return x.trim(); }).filter(Boolean);
+        if (ptList.length) ptHtml = esc(ptList.join(', '));
+      }
+      var comboHtml = '<span class="text-muted">—</span>';
+      if (iss.combination_value) {
+        // the same renderer All Work uses, so one value reads identically in both
+        var comboText = formatCombinationFieldDisplayValue(iss.combination_value);
+        if (comboText && comboText !== '—') comboHtml = esc(comboText);
+      }
       html += '<tr onclick="openIssuePage(\'' + iid + '\')">' +
         '<td class="yw-key">' + esc(issueKeyStr(iss)) + '</td>' +
         '<td class="yw-title-cell">' + esc(iss.title) + '</td>' +
@@ -221,6 +328,8 @@ function _renderYourWorkTable(issues, rawIssues, lastCol) {
         '<td onclick="event.stopPropagation();awInlineStatus(event,\'' + iid + '\',\'' + (iss.status||'') + '\')" style="cursor:pointer">' + statusBadge(iss.status) + '</td>' +
         '<td onclick="event.stopPropagation();awInlinePriority(event,\'' + iid + '\',\'' + (iss.priority||'') + '\')" style="cursor:pointer">' + priorityBadge(iss.priority) + '</td>' +
         '<td class="yw-space-cell">' + esc(iss.space_name || '') + '</td>' +
+        (showPtCombo ? '<td class="yw-pt-cell">' + ptHtml + '</td>' : '') +
+        (showPtCombo ? '<td class="yw-combo-cell">' + comboHtml + '</td>' : '') +
         '<td class="yw-time-cell">' + lastColHtml + '</td></tr>';
     }
   }

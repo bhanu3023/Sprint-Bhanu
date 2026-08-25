@@ -628,6 +628,13 @@ function issueFieldLabel(field) {
     String(field).replace(/_id$/, '').replace(/_/g, ' ');
 }
 
+function emptyYwFilters() {
+  return {
+    key: [], type: [], status: [], priority: [], space: [],
+    productType: [], combination: [], assignee: [], reporter: []
+  };
+}
+
 function fmtMins(mins) {
   if (!mins || mins <= 0) return '0h';
   const h = Math.floor(mins / 60);

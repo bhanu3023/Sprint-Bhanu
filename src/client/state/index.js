@@ -15,7 +15,10 @@ const S = {
   allWorkPage: 1,
   allWorkSelected: new Set(),
   yourWorkTab: 'assigned',
-  ywFilters: { key: [], type: [], status: [], priority: [], space: [] },
+  // shape lives in emptyYwFilters() (utils) so state, clear and the open
+  // filter cannot drift apart; assigned by init() once utils is loaded
+  ywFilters: { key: [], type: [], status: [], priority: [], space: [],
+    productType: [], combination: [], assignee: [], reporter: [] },
   ywExcludeDone: false,
   awFilters: {
     type: [], status: [], priority: [], assignee: [], sprint: [],
