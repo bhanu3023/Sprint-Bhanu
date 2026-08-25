@@ -199,7 +199,7 @@
           "from": 9973,
           "to": 10843,
           "modified": true,
-          "modifiedReason": "The \"User added\" alert drops \"successfully\" and names the user via findUser(userId). (Also carries attachment-upload and custom-field message work.)"
+          "modifiedReason": "The \"User added\" alert drops \"successfully\" and names the user via findUser(userId). (Also carries attachment-upload and custom-field message work.) MECHANISM: adding a member now uses toast() like removing one already did, so the two halves of the same event match."
         },
         {
           "file": "src/client/components/issue-drawer.js",
@@ -866,7 +866,7 @@
     "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
     "src/client/pages/space/all-work.js": "1306a221746eae181edc61f9becc83b5e1a42e2dc371fb19cc48a5b55e615df4",
     "src/client/pages/space/settings.js": "62f0eac8f961011c857e2ee46bbee825b9033c9c48b04fcc250eacb826f87035",
-    "src/client/components/space-context-menu.js": "d83fb5f86fbba783592d7af32933b4d4f1cc6e2ec6ef51110461f271f5174e1c",
+    "src/client/components/space-context-menu.js": "756b42b926f8a8ac0f69946edfe881a63ac21276e4a4612c987dd7bc558cbf3c",
     "src/client/components/issue-drawer.js": "67f89056203f8e2b1b4fee76b58f681fb223018f3f780c289a1b44a4e8615bbc",
     "src/client/components/drawer-panels.js": "4589a92e5533345bac272108ae73bc06b3369f843ca6d69da71d3cbbe189ff63",
     "src/client/crud/space.js": "f5fa59288dc093d3e595b5a0f6144333b77b2376aff647e01a4cf7ffee27d3d0",

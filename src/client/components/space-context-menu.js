@@ -133,8 +133,13 @@ $('inviteMemberForm').addEventListener('submit', async function (e) {
       renderSettingsPeople(getSpace(S.currentSpace));
     }
     renderSidebar();
+    // toast, not popupAlert: adding a member finishes in place on the page
+    // the user is already looking at, exactly like removing one -- which was
+    // already a toast. The two halves of the same event now match. popupAlert
+    // is reserved for messages that must outlive a navigation or that tell the
+    // user how to undo or continue (deleting a space, creating an invite).
     var addedUser = findUser(userId);
-    popupAlert('User added', (addedUser ? addedUser.name : 'That user') + ' now has access to this space.', 'success');
+    toast((addedUser ? addedUser.name : 'That user') + ' added to this space');
   } catch (e) { /* error shown by api() */ }
 });
 
