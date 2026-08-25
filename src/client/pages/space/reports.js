@@ -1494,7 +1494,7 @@ function bindSpilloverRemoveButtons(container, sprint) {
         ],
         warn: 'This rewrites a completed sprint\'s record and cannot be undone from the UI.',
         phrase: key,
-        phraseHint: 'To confirm, type the ticket number',
+        phraseHint: 'To confirm, type the issue key',
         confirmLabel: 'Remove from spillover'
       });
       if (!ok) return;
@@ -1506,7 +1506,7 @@ function bindSpilloverRemoveButtons(container, sprint) {
         if (typeof renderReports === 'function') renderReports();
         else if (typeof renderCurrentView === 'function') renderCurrentView();
       } catch (e) {
-        toast(e.message || 'Could not remove it from spillover', 'error');
+        toast(key + ' could not be removed from spillover — ' + errorReason(e), 'error');
         btn.disabled = false;
         btn.textContent = 'Remove';
       }

@@ -286,19 +286,38 @@ window._addIssueToSprint = function (sprintId) {
 };
 
 window._startSprint = async function (id) {
-  await api('/api/sprints/' + id + '/start', 'POST');
+  // /start returns the started sprint row, so its name is already in hand.
+  var started;
+  try {
+    started = await api('/api/sprints/' + id + '/start', 'POST', null, { silent: true });
+  } catch (e) {
+    toast((sprintName(id) || 'Sprint') + ' could not be started — ' + errorReason(e), 'error');
+    return;
+  }
   await refreshData();
   renderBacklog();
-  toast('Sprint started');
+  toast(((started && started.name) || sprintName(id) || 'Sprint') + ' started');
 };
 
 window._completeSprint = async function (id) {
   var ok = await confirmDialog('Complete this sprint? Incomplete issues will move to the backlog.');
   if (!ok) return;
-  await api('/api/sprints/' + id + '/complete', 'POST');
+  // /complete returns the completed sprint row, including the velocity it just
+  // froze -- so the points total is in hand without computing anything.
+  var done;
+  try {
+    done = await api('/api/sprints/' + id + '/complete', 'POST', null, { silent: true });
+  } catch (e) {
+    toast((sprintName(id) || 'Sprint') + ' could not be completed — ' + errorReason(e), 'error');
+    return;
+  }
   await refreshData();
   renderBacklog();
-  toast('Sprint completed');
+  var label = (done && done.name) || sprintName(id) || 'Sprint';
+  var pts = done && done.velocity != null ? Number(done.velocity) : null;
+  toast(pts != null
+    ? label + ' completed — ' + pts + ' story point' + (pts === 1 ? '' : 's')
+    : label + ' completed');
   if (typeof window._openAchievementsModal === 'function') window._openAchievementsModal(id);
 };
 
@@ -328,7 +347,7 @@ window._deleteSprint = async function (id) {
     renderBacklog();
     toast('Sprint "' + name + '" moved to Deleted Items', 'success');
   } catch (e) {
-    toast(e.message || 'Failed to delete sprint', 'error');
+    toast('"' + name + '" delete failed — ' + errorReason(e), 'error');
   }
 };
 

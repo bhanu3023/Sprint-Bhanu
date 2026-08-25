@@ -509,6 +509,16 @@ function issueLabelFor(issueIdOrKey) {
   return cachedIssueKey(s) || 'that issue';
 }
 
+// A sprint's name from the already-loaded cache, for the messages that only
+// have its id in hand. '' when it is not cached, so callers stay generic.
+function sprintName(sprintId) {
+  if (!sprintId) return '';
+  var sp = ((S.data && S.data.sprints) || []).find(function (s) {
+    return String(s.id) === String(sprintId);
+  });
+  return (sp && sp.name) ? sp.name : '';
+}
+
 // One phrasing for "this issue changed sprint", shared by the drawer's inline
 // Sprint picker and the backlog's drag-and-drop, so the same action does not
 // describe itself two different ways depending on where it was performed.

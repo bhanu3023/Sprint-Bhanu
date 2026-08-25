@@ -17,12 +17,15 @@ async function handleSprintSubmit(e) {
     developer_leaves: Object.assign({}, window._sprintDeveloperLeaves || {})
   };
 
+  // payload.name is what the user just typed, so the message can name the
+  // sprint without looking anything up.
+  var sprintLabel = (payload.name || '').trim() || 'Sprint';
   if (id) {
-    await api('/api/sprints/' + id, 'PUT', payload);
-    toast('Sprint updated');
+    await api('/api/sprints/' + id, 'PUT', payload, { silent: true });
+    toast(sprintLabel + ' updated');
   } else {
-    await api('/api/sprints', 'POST', payload);
-    toast('Sprint created');
+    await api('/api/sprints', 'POST', payload, { silent: true });
+    toast(sprintLabel + ' created');
   }
   closeModal('modal-sprint');
   await refreshData();
