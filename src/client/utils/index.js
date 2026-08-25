@@ -489,6 +489,37 @@ var ISSUE_FIELD_LABELS = {
   parent_id: 'parent', position: 'position', attachment: 'attachment'
 };
 
+// The key a user recognises an issue by ("ENG-12"), read from the cache the
+// view was already rendered from. Returns '' when the issue is not cached, so
+// callers fall back to a generic message rather than printing a raw uuid.
+function cachedIssueKey(issueId) {
+  if (!issueId) return '';
+  var iss = ((S.data && S.data.issues) || []).find(function (i) {
+    return String(i.id) === String(issueId);
+  });
+  return (iss && iss.key) ? iss.key : '';
+}
+
+// openDrawer() accepts either an issue id or an issue key, so a load failure
+// has to cope with both. A key is usable as-is; an id is only useful if the
+// issue is cached, otherwise fall back to a phrase rather than print a uuid.
+function issueLabelFor(issueIdOrKey) {
+  var s = String(issueIdOrKey || '');
+  if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(s)) return s.toUpperCase();
+  return cachedIssueKey(s) || 'that issue';
+}
+
+// One phrasing for "this issue changed sprint", shared by the drawer's inline
+// Sprint picker and the backlog's drag-and-drop, so the same action does not
+// describe itself two different ways depending on where it was performed.
+function issueSprintMoveText(label, sprintId) {
+  if (!sprintId) return label + ' moved to the backlog';
+  var sp = ((S.data && S.data.sprints) || []).find(function (s) {
+    return String(s.id) === String(sprintId);
+  });
+  return label + ' moved to ' + (sp ? sp.name : 'the selected sprint');
+}
+
 function issueFieldLabel(field) {
   if (!field) return 'field';
   return ISSUE_FIELD_LABELS[field] ||

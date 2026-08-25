@@ -806,7 +806,7 @@ window._bulkDelete = async function () {
   // requests and collecting a pile of 403 toasts halfway through.
   var blocked = rows.filter(function (i) { return !canDeleteIssue(i.space_id); });
   if (blocked.length) {
-    toast('Only a space admin can delete tickets. ' + blocked.length + ' of your selected tickets are in spaces you do not administer.', 'error');
+    toast('Only a space admin can delete issues. ' + blocked.length + ' of the selected issues are in spaces you do not administer.', 'error');
     return;
   }
   // One ticket → type its key. Several → "delete all", so nobody has to paste
@@ -816,15 +816,15 @@ window._bulkDelete = async function () {
   var single = ids.length === 1 && rows.length === 1;
   var key = single ? (issueKeyStr(rows[0]) || ids[0]) : null;
   var ok = await typedConfirmDialog({
-    title: single ? 'Delete ' + key + '?' : 'Delete ' + ids.length + ' tickets?',
+    title: single ? 'Delete ' + key + '?' : 'Delete ' + ids.length + ' issues?',
     intro: single
       ? (rows[0] && rows[0].title) || ''
       : (rows.slice(0, 6).map(function (i) { return issueKeyStr(i); }).join(', ') +
          (rows.length > 6 ? ' and ' + (rows.length - 6) + ' more' : '')) || (ids.length + ' selected tickets'),
     note: softDeleteNote(),
     phrase: single ? key : 'delete all',
-    phraseHint: single ? 'To confirm, type the ticket number' : 'To confirm, type',
-    confirmLabel: single ? 'Delete ticket' : 'Delete ' + ids.length + ' tickets'
+    phraseHint: single ? 'To confirm, type the issue key' : 'To confirm, type',
+    confirmLabel: single ? 'Delete issue' : 'Delete ' + ids.length + ' issues'
   });
   if (!ok) return;
   var done = 0, failed = 0;
@@ -835,8 +835,8 @@ window._bulkDelete = async function () {
   S.allWorkSelected.clear();
   await refreshData();
   renderAllWork();
-  if (failed) toast(done + ' moved to Deleted Items, ' + failed + ' failed', 'error');
-  else toast(done + ' ticket' + (done === 1 ? '' : 's') + ' moved to Deleted Items', 'success');
+  if (failed) toast(done + ' of ' + (done + failed) + ' issues moved to Deleted Items — ' + failed + ' failed', 'error');
+  else toast(done + ' issue' + (done === 1 ? '' : 's') + ' moved to Deleted Items', 'success');
 };
 
 window._bulkDeselect = function() {

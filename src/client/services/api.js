@@ -77,7 +77,13 @@ async function api(url, method, body, opts) {
     return await res.json();
   } catch (e) {
     if (e.message && e.message.includes('redirect')) return;
-    if (!opts.silent) toast(e.message || 'API request failed', 'error');
+    // errorReason maps text written for a machine (a bare 500 body, a raw
+    // HTTP statusText) onto something a person can act on, and never yields
+    // an empty string. Messages the API already writes for users pass through
+    // unchanged. Applied here so every call site that does NOT render its own
+    // message still gets readable text; sites that DO render their own pass
+    // {silent:true} so one failure never stacks two error toasts.
+    if (!opts.silent) toast(errorReason(e, 'the request failed'), 'error');
     throw e;
   }
 }

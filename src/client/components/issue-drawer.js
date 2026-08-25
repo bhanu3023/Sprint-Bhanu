@@ -114,19 +114,19 @@ async function openDrawer(issueId) {
   _renderCommentFileList();
   var issue;
   try {
-    issue = await api('/api/issues/' + issueId);
+    issue = await api('/api/issues/' + issueId, 'GET', null, { silent: true });
   } catch (e) {
     // Only drop the cover if THIS request is still the current one -- a
     // slower-to-fail request from an earlier click must never clobber a
     // newer request's still-loading overlay.
     if (S.drawerIssueId === issueId && loadingOverlay) loadingOverlay.setAttribute('hidden', '');
-    toast('Could not load issue', 'error');
+    toast('Could not load ' + issueLabelFor(issueId) + ' — ' + errorReason(e), 'error');
     return;
   }
 
   if (!issue) {
     if (S.drawerIssueId === issueId && loadingOverlay) loadingOverlay.setAttribute('hidden', '');
-    toast('Could not load issue', 'error'); return;
+    toast('Could not load ' + issueLabelFor(issueId) + ' — it no longer exists', 'error'); return;
   }
   // The fetch above is async — if the user hit Back (popstate → _closeIssueDrawer
   // clears drawerIssueId) or opened a different issue while it was in flight,
@@ -709,11 +709,7 @@ function drawerSaveSummary(key, saved) {
     var u = value ? findUser(value) : null;
     return u ? key + ' assigned to ' + u.name : key + ' unassigned';
   }
-  if (field === 'sprint_id') {
-    if (!value) return key + ' moved to the backlog';
-    var sp = (S.data.sprints || []).find(function (s) { return s.id === value; });
-    return key + ' moved to ' + (sp ? sp.name : 'the selected sprint');
-  }
+  if (field === 'sprint_id') return issueSprintMoveText(key, value);
   return key + ' ' + issueFieldLabel(field) + ' updated';
 }
 
@@ -850,7 +846,7 @@ function bindDrawerEdits(issue) {
       toast('Dates set from ' + (plan.sprint.name || 'sprint') + ': ' +
         plan.changes.map(function (c) { return c.label; }).join(', '));
     } else if (!plan.start && !plan.end) {
-      toast((plan.sprint.name || 'That sprint') + ' has no dates set, so the ticket dates were left as they are.', 'warning');
+      toast((plan.sprint.name || 'That sprint') + ' has no dates set, so the issue dates were left as they are.', 'warning');
     }
   };
   $('drawerPoints').oninput     = function () {
@@ -1223,7 +1219,7 @@ function bindDrawerEdits(issue) {
       // Re-checked at click time, not just at render: the drawer stays open
       // across a refreshData(), so the role behind it can change underneath.
       if (!canDeleteIssue(issue.space_id)) {
-        toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
+        toast('Only a space admin can delete issues. Ask a space admin or an org admin.', 'error');
         return;
       }
       var key = issueKeyStr(issue) || issueId;
@@ -1232,12 +1228,12 @@ function bindDrawerEdits(issue) {
         intro: issue.title || '',
         note: softDeleteNote(),
         phrase: key,
-        phraseHint: 'To confirm, type the ticket number',
-        confirmLabel: 'Delete ticket'
+        phraseHint: 'To confirm, type the issue key',
+        confirmLabel: 'Delete issue'
       });
       if (!ok) return;
       try {
-        await api('/api/issues/' + issueId, 'DELETE');
+        await api('/api/issues/' + issueId, 'DELETE', null, { silent: true });
         toast(key + ' moved to Deleted Items', 'success');
         var drawer = document.getElementById('issueDrawer');
         if (drawer) drawer.setAttribute('hidden', '');
@@ -1246,7 +1242,7 @@ function bindDrawerEdits(issue) {
         await refreshData();
         renderCurrentView();
       } catch (err) {
-        toast(err.message || 'Failed to delete ticket', 'error');
+        toast(key + ' delete failed — ' + errorReason(err), 'error');
       }
     };
   }
@@ -1327,7 +1323,8 @@ window._submitSubtask = async function() {
   var parentIssue = S.data.issues.find(function(i){ return i.id === parentId; });
   var spaceId = parentIssue ? parentIssue.space_id : S.currentSpace;
   try {
-    await api('/api/issues', 'POST', {
+    // silent: the catch renders 'Subtask creation failed — <reason>' itself
+    var createdSub = await api('/api/issues', 'POST', {
       space_id: spaceId,
       parent_id: parentId,
       sprint_id: parentIssue ? parentIssue.sprint_id : null,
@@ -1338,12 +1335,12 @@ window._submitSubtask = async function() {
       assignee_id: parentIssue ? parentIssue.assignee_id : null,
       start_date: fmtDateISO(new Date()),
       status: 'To Do'
-    });
-    toast('Subtask created');
+    }, { silent: true });
+    toast(issueKeyStr(createdSub) + ' created as a subtask');
     $('subtaskTitleInput').value = '';
     // Refresh drawer
     var issue = await api('/api/issues/' + parentId);
     renderDrawerSubtasks(issue.subtasks || []);
     await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
+  } catch(e) { toast('Subtask creation failed — ' + errorReason(e), 'error'); }
 };

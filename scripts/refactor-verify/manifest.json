@@ -22,12 +22,14 @@
           "from": 38,
           "to": 566,
           "modified": true,
-          "modifiedReason": "Added errorReason() + RAW_ERROR_REASONS (raw server text -> a clause a person can act on) and issueFieldLabel() + ISSUE_FIELD_LABELS (lower-case field names for use mid-sentence). errorReason never returns empty, which is what let a bare toast(e.message) render an empty or \"undefined\" toast. Payload Too Large maps to \"the request is too large\" rather than \"upload\" because it also fires on an oversized description PUT."
+          "modifiedReason": "Added cachedIssueKey() (issue key from the already-loaded S.data cache), issueLabelFor() (openDrawer takes either an id or a key, so a load failure must cope with both) and issueSprintMoveText() -- one phrasing for \"issue changed sprint\", shared by the drawer picker and the backlog drag so the same action does not describe itself two ways."
         },
         {
           "file": "src/client/services/api.js",
           "from": 567,
-          "to": 649
+          "to": 649,
+          "modified": true,
+          "modifiedReason": "The wrapper toasted e.message raw, so every unhandled failure showed \"Internal server error\" or a bare HTTP statusText. Now routed through errorReason(), which maps machine text to a readable clause and passes user-written API messages through untouched. Fixes the raw text at ~150 call sites at once rather than per site; sites that render their own message pass {silent:true} so one failure never stacks two toasts."
         },
         {
           "file": "src/client/services/recently-viewed.js",
@@ -66,7 +68,9 @@
         {
           "file": "src/client/services/data-helpers.js",
           "from": 1404,
-          "to": 1633
+          "to": 1633,
+          "modified": true,
+          "modifiedReason": "Star toggle names the issue (\"ENG-12 starred\" / \"ENG-12 unstarred\", was \"Issue starred\" / \"Star removed\") and its failure gives a reason instead of \"Could not update star\". The catch was swallowing the error object entirely (catch (_)), so no reason was available to report; it now binds it."
         },
         {
           "file": "src/client/services/theme.js",
@@ -142,12 +146,16 @@
         {
           "file": "src/client/pages/space/backlog.js",
           "from": 5292,
-          "to": 5812
+          "to": 5812,
+          "modified": true,
+          "modifiedReason": "Backlog drag names the issue and where it went, via the shared issueSprintMoveText(): \"ENG-12 moved to Sprint 4\" / \"ENG-12 moved to the backlog\" (was a bare \"Issue moved\"). The failure said \"Failed to move issue - is the server running?\", which guessed at a cause; it now reports the actual reason. Vocabulary ticket->issue."
         },
         {
           "file": "src/client/pages/space/board.js",
           "from": 5813,
-          "to": 5907
+          "to": 5907,
+          "modified": true,
+          "modifiedReason": "Board drag-and-drop names the issue: \"ENG-12 moved to In Progress\" (was \"Issue moved to In Progress\")."
         },
         {
           "file": "src/client/pages/space/calendar.js",
@@ -169,7 +177,7 @@
           "from": 8357,
           "to": 9182,
           "modified": true,
-          "modifiedReason": "_awLoadFilterState now checks a one-shot window._awShowAllOverride flag first and, if set, clears filters instead of restoring the space's saved ones from localStorage -- set by Summary's \"Total Issues\" stat card (badges.js) before navigating. Reading the flag from inside this function (which the allwork tab's async data-refresh path already calls in the correct order) avoids a real race a setTimeout in the caller would have had against that refresh's unpredictable duration."
+          "modifiedReason": "Vocabulary ticket->issue across the bulk-delete permission message, the result message and the confirm dialog. The partial-failure message now states the denominator (\"5 of 7 issues moved to Deleted Items - 2 failed\") instead of two bare counts."
         },
         {
           "file": "src/client/pages/space/settings.js",
@@ -186,7 +194,7 @@
           "from": 10844,
           "to": 12126,
           "modified": true,
-          "modifiedReason": "The four highest-traffic messages in the app -- \"Saved\"/\"Save failed\" on every inline drawer edit -- now name the issue and what changed: \"ENG-12 moved to In Review\", \"ENG-12 priority set to High\", \"ENG-12 assigned to Alex Kumar\", \"ENG-12 unassigned\", \"ENG-12 moved to the backlog\", \"ENG-12 due date updated\", and \"ENG-12 updated -- 3 fields\" when the 800ms debounce coalesces several edits. Failures name the issue and the reason: \"ENG-12 update failed -- you do not have permission\". New drawerSaveSummary() reads only what the call site already had (the field name and value passed to autoSave/saveFieldNow, plus the same S.data the drawer rendered from) -- no new computation, no server change. Both save paths now pass {silent:true} to api(): the wrapper toasts the raw thrown message itself, so one failure was raising TWO error toasts with the technical one on top."
+          "modifiedReason": "Vocabulary ticket->issue (the sprint-date warning, the delete permission message, and the delete dialog's own hint and button, which still said \"ticket\" while its toast said \"issues\"). Delete failure names the issue and the reason. Subtask creation uses the created row's own key (\"ENG-13 created as a subtask\") and its failure no longer toasts a bare e.message, which rendered an empty or \"undefined\" toast when the error carried no message. Drawer load failure names the issue and says why. Sprint-move text delegated to the shared issueSprintMoveText()."
         },
         {
           "file": "src/client/components/drawer-panels.js",
@@ -208,7 +216,9 @@
         {
           "file": "src/client/crud/issue.js",
           "from": 14289,
-          "to": 14518
+          "to": 14518,
+          "modified": true,
+          "modifiedReason": "Create/update messages name the issue: \"ENG-12 created\" on all four create paths (the key is on the POST response already), \"ENG-12 created - opening...\", \"ENG-12 created, attachments failed - <reason>\". \"Failed to create issue: <raw>\" became \"Issue creation failed - <reason>\", and the POST is now {silent:true} so it is one toast rather than the raw one plus mine. The edit path stays a generic \"<KEY> updated\": it saves many fields at once without diffing them, and naming a field would need a server change or a client-side diff. NOTE: that edit branch is currently unreachable -- nothing ever sets #issueId (only clears it), so the modal cannot open on an existing issue."
         },
         {
           "file": "src/client/components/worklog-modal.js",
@@ -807,15 +817,15 @@
   "clientPins": {
     "src/client/bootstrap.js": "c4498c77db1a2d7df7088c5a78756bf7e833f7d3a906df058e5be5885a18e148",
     "src/client/state/index.js": "684e3662494d02adf8453f388680319800b17eeb3ad7d3f44ecbc8be2c7f0da1",
-    "src/client/utils/index.js": "7290b4e9109fc3b79ec3cc2a021b7c090e8b03e160bfdcf4bd34fad6acc25e0c",
-    "src/client/services/api.js": "49e8bbe2ac1f56c7d1066d377b397c223e1b1a7333ffc485ae075b5ffa6bee7c",
+    "src/client/utils/index.js": "fde0d47744e63470236ce14be2239125e5e8075613ccad290e37f426edaeb784",
+    "src/client/services/api.js": "bd16bd5f7ad5010664262450b05cd56f693e67efc8d6aeddf66cc5b2e2fa1431",
     "src/client/services/recently-viewed.js": "a77d0f73f1679cce91bd50dad8e255efe38b4da41e2a414e50375760d3f1288b",
     "src/client/components/toast.js": "057e76122dad9c90a252d17173f1271442ae13e87f65ec7fdb72c4e7b0a8688e",
     "src/client/components/confirm.js": "74ca56323f0cd80a0addddb3b7f610bcb4743a775d53173655bfe7baca4f355d",
     "src/client/components/modal-drawer.js": "61eb4f0bedc7a32ae862fadf1ce7308c926c9aecdffef39741c0a7e624e926e1",
     "src/client/constants.js": "05cb1e906b9cd370173495c95dfe7555c677d865f3b6782cd98f507a134bba5d",
     "src/client/components/badges.js": "bd8d667462e74c8327398beafca48dbbf1e235e8a742a7f136e138dbe269e7d9",
-    "src/client/services/data-helpers.js": "da52fb647c59fb007daf9b45ec1b9ab6ebda3284ed1cb606735e1cc1c6ad5282",
+    "src/client/services/data-helpers.js": "a208317527e04b249c7991d8e0c112d2dc3b9778c4e6a9006e9dbc292a0c0a74",
     "src/client/services/theme.js": "2f28888928a9225b8787269f4a30ecf626e0beb76342739c61cabeef0665ecef",
     "src/client/init.js": "3cbb54725304398a5e780c6d1dde69f3efae185b413a9a1588e683342631f34f",
     "src/client/navigation.js": "8a2f72261aace14bde5518b1c870056d5e805b6fb120f7a547fa26f1413132a7",
@@ -829,19 +839,19 @@
     "src/client/pages/work-log-pivot.js": "daf06dc277a79590e81e14c87ec8b5c0d4f682761b1a7b103363997acab20115",
     "src/client/pages/space/summary.js": "face07962f1dc078bd7755040c5ffb6a7873b69cc98ce3f3c5c5b545294d8128",
     "src/client/pages/space/timeline.js": "80cf2915ffb97e1ea16be538d1d1830b4ec06b6f12be0baf701af6bcb306017c",
-    "src/client/pages/space/backlog.js": "1998b9476ef1691337d9a69019420ca9f089d65c4ba5ecc5f7c173e6a328f66a",
-    "src/client/pages/space/board.js": "e8d6a94e77a3e486a76af695ad5c967da72dadea283c140467c933e1ff905d5b",
+    "src/client/pages/space/backlog.js": "c5d4ccb8a63b56c79a5d3657c40b8d1a77568ccebfa42291f0cf0a233237ce1f",
+    "src/client/pages/space/board.js": "d31805f0fd5ad00ee6d126444583ff2415ebd0091360a51f78eb5a7cc12226f1",
     "src/client/pages/space/calendar.js": "beac6f46d01e8bb1abbaa557740f033c88acc8743e6b9af30cb6e2f05a285ae8",
     "src/client/pages/space/reports.js": "25851498be7ac2d325518823f4156b1193981a94e579332e959faf67eb9d5d07",
     "src/client/pages/space/mbr.js": "392f724e1505319081508ba7b005099085ff1c08a4d1c4f7c3ff92368acc15ad",
-    "src/client/pages/space/all-work.js": "26f7b38ccdb90a6bfdfa07a32ae4a912964ce09fe945e86eeabed1313589b601",
+    "src/client/pages/space/all-work.js": "1306a221746eae181edc61f9becc83b5e1a42e2dc371fb19cc48a5b55e615df4",
     "src/client/pages/space/settings.js": "7cef9f63b3a7c901e0ac07c5212f9c14086b9bcb4bc0740d3cb310316d88d372",
     "src/client/components/space-context-menu.js": "304cd92f3c0f7a7345f3193b4b94ffe81b8531232ac7500e6682d62a8aea417f",
-    "src/client/components/issue-drawer.js": "81274b338be8d859c75959bb29733be831bcddf5c7ba7fb22d1b803e5b7e59c2",
+    "src/client/components/issue-drawer.js": "4842010d72465a98629b03386633f07a586a995b9ff1716ba2a5a9d7992f0627",
     "src/client/components/drawer-panels.js": "0ee1f75e465f5f6a345b90d090b98818c1ce0cc14e75e49601fbf8b9d27c0ef9",
     "src/client/crud/space.js": "a50414a9f359e3016808f8bfff76553752b24d5bf5a8c00da23c48eefdebb7ff",
     "src/client/crud/sprint.js": "7cd1e769623a4f2ad117e63821433a93ad038be59d516af9af78e9c7955def55",
-    "src/client/crud/issue.js": "f1143b1e0083f2537549de2e1f5834d99cbfc01755474a69277f83ce205ee77c",
+    "src/client/crud/issue.js": "cea9549fe3b16d8af00d1a2d8b42a5f2cdc76e304d3b2e4a310967561546fe86",
     "src/client/components/worklog-modal.js": "9fc9cd49b08bc820ffff27b435deeffdafd078eb11a3f13bfe72d704028ab8a6",
     "src/client/components/notifications.js": "1033e30e53454439af931ea027ad657c02c927b5e6185f7524cbe64c8e40102d",
     "src/client/event-bindings.js": "2982c479f1380ff6261b94bde91e9034bd8a75428c91184c60d4b554da357f4f",

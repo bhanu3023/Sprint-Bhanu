@@ -111,7 +111,7 @@ function updateDrawerStarBtn(issueId) {
 async function toggleIssueFavorite(issueId) {
   if (!issueId) return;
   try {
-    var res = await api('/api/issues/' + issueId + '/favorite', 'POST', {});
+    var res = await api('/api/issues/' + issueId + '/favorite', 'POST', {}, { silent: true });
     if (!S.data.issue_favorites) S.data.issue_favorites = [];
     S.data.issue_favorites = S.data.issue_favorites.filter(function (f) { return f.issue_id != issueId; });
     if (res && res.favorited) {
@@ -126,9 +126,10 @@ async function toggleIssueFavorite(issueId) {
     }
     updateDrawerStarBtn(issueId);
     renderSidebar();
-    toast(res && res.favorited ? 'Issue starred' : 'Star removed');
-  } catch (_) {
-    toast('Could not update star', 'error');
+    var starKey = cachedIssueKey(issueId) || 'Issue';
+    toast(res && res.favorited ? starKey + ' starred' : starKey + ' unstarred');
+  } catch (e) {
+    toast((cachedIssueKey(issueId) || 'Issue') + ' star failed — ' + errorReason(e), 'error');
   }
 }
 window.toggleIssueFavorite = toggleIssueFavorite;

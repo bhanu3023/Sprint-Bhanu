@@ -247,16 +247,16 @@ window._dropToSprint = async function (event, sprintId) {
   // Belt-and-braces: completed lanes render without drop handlers, but guard here
   // too so no other path can drop a ticket into closed sprint history.
   if (isSprintClosed(targetSprintId)) {
-    toast('That sprint is completed — move the ticket to an active or planning sprint instead.', 'error');
+    toast('That sprint is completed — move the issue to an active or planning sprint instead.', 'error');
     return;
   }
   try {
-    await api('/api/issues/' + issueId + '/move', 'PUT', { sprint_id: targetSprintId, position: 0 });
+    await api('/api/issues/' + issueId + '/move', 'PUT', { sprint_id: targetSprintId, position: 0 }, { silent: true });
     await refreshData();
     renderBacklog();
-    toast('Issue moved');
+    toast(issueSprintMoveText(cachedIssueKey(issueId) || 'Issue', targetSprintId));
   } catch(e) {
-    toast('Failed to move issue — is the server running?', 'error');
+    toast((cachedIssueKey(issueId) || 'Issue') + ' move failed — ' + errorReason(e), 'error');
   }
 };
 

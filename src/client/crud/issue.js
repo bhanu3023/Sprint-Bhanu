@@ -127,7 +127,11 @@ async function handleIssueSubmit(e) {
   if (id) {
     delete payload.status;
     await api('/api/issues/' + id, 'PUT', payload);
-    toast('Issue updated');
+    // Stays generic about WHAT changed: the modal saves many fields at once
+    // and does not diff them, so naming a field would need a server response
+    // change or a client-side diff. The key itself is already in hand.
+    var editedKey = cachedIssueKey(id);
+    toast((editedKey || 'Issue') + ' updated');
     closeModal('modal-issue');
     await refreshData();
     renderCurrentView();
@@ -135,7 +139,10 @@ async function handleIssueSubmit(e) {
     var submitBtn = $('issueSubmitBtn');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
     try {
-    var created = await api('/api/issues', 'POST', payload);
+    // silent: the catch below renders its own "Issue creation failed — <reason>"
+    // message, so letting api() toast the raw thrown text too stacked two
+    // error toasts on one failure.
+    var created = await api('/api/issues', 'POST', payload, { silent: true });
     // Save custom field values
     if (created && created.id) {
       // Save dynamic custom fields. A native <select multiple> element's
@@ -177,12 +184,12 @@ async function handleIssueSubmit(e) {
         if (!uploadRes.ok) {
           var uploadErr = 'Attachment upload failed';
           try { var ej = await uploadRes.json(); if (ej.error) uploadErr = ej.error; } catch (_) {}
-          toast('Issue created but ' + uploadErr, 'warning');
+          toast(issueKeyStr(created) + ' created, attachments failed — ' + uploadErr, 'warning');
         }
-      } catch(e) { toast('Issue created but attachments failed to upload', 'warning'); }
+      } catch(e) { toast(issueKeyStr(created) + ' created, attachments failed — ' + errorReason(e, 'the upload was interrupted'), 'warning'); }
     }
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save'; }
-    } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Failed to create issue: " + e.message, "error"); return; }
+    } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Issue creation failed — " + errorReason(e), "error"); return; }
     closeModal('modal-issue');
     await refreshData();
     // Captured before anything below navigates: renderCurrentView() ->
@@ -203,7 +210,7 @@ async function handleIssueSubmit(e) {
     // on screen untouched; the toast below is the only feedback.
     if (created && created.id) {
       if (subtaskOfOpenTicket) {
-        toast('Issue created');
+        toast(issueKeyStr(created) + ' created');
       } else if (ticketWasOpen) {
         // Don't yank the user away from whatever they're reading. Offer a way
         // to jump to the new ticket instead of forcing it.
@@ -213,7 +220,7 @@ async function handleIssueSubmit(e) {
           { label: 'Copy link', handler: function () { copyIssueLinkByKey(newKey); }, dismissOnClick: false }
         ]);
       } else if (!parentId) {
-        toast('Issue created — opening in new tab…');
+        toast(issueKeyStr(created) + ' created — opening…');
         // Wait for custom fields to be saved before opening
         setTimeout(async function() {
           await new Promise(r => setTimeout(r, 500));
@@ -221,7 +228,7 @@ async function handleIssueSubmit(e) {
           openIssuePage(created.id);
         }, 300);
       } else {
-        toast('Issue created');
+        toast(issueKeyStr(created) + ' created');
       }
     } else {
       toast('Issue created');
