@@ -82,7 +82,7 @@
           "from": 1978,
           "to": 2393,
           "modified": true,
-          "modifiedReason": "Accessibility: the four avatar <img> tags built here had no alt, and in the topbar profile button the image is the control's only content, so an empty alt would have lost who it is -- each is named from the user. Attribute-only; alt text is invisible. || ALSO in this pass, Class C (attribute-escaping): esc() escapes & < > but not quotes, so a user-controlled value in a quoted HTML attribute can break out of it. Same defect as the title= filename hole fixed in 7d0c4c4. Fixed the profile-edit First Name / Last Name input value attributes, which the user themselves controls and edits inline."
+          "modifiedReason": "Accessibility: the four avatar <img> tags built here had no alt, and in the topbar profile button the image is the control's only content, so an empty alt would have lost who it is -- each is named from the user. Attribute-only; alt text is invisible. || ALSO in this pass, Class C (attribute-escaping): esc() escapes & < > but not quotes, so a user-controlled value in a quoted HTML attribute can break out of it. Same defect as the title= filename hole fixed in 7d0c4c4. Fixed the profile-edit First Name / Last Name input value attributes, which the user themselves controls and edits inline. || LIGHTHOUSE FOLLOW-UP: re-ran Lighthouse against a real authenticated page (ENG-3, standing in for the original ST-60 report target which no longer exists) after the sanitiser/token/Class-C security commits and the compression middleware. Scores moved Perf 82->82 (noise, unchanged), A11y 76->96, BP 88->100, SEO 82->100. Two concrete NEW a11y findings were fixed, both attribute/dynamic-attribute-only, zero pixel change: unsized-images (sidebarLogoImg in index.html gained width=24 height=28, matching its actual CSS-rendered size) and label-content-name-mismatch on notifBtn/topbarProfileBtn. That second one could NOT be fixed with aria-hidden alone -- verified empirically: aria-hidden on the visible child text does not satisfy the axe rule, which checks whether the accessible NAME contains the visible text, not whether that text is exposed to the accessibility tree. The correct fix syncs aria-label dynamically to include the visible text (the unread count / the initials) wherever that text is set, verified with Lighthouse re-run (label-content-name-mismatch score 0 -> 1). One remaining a11y finding, color-contrast, was traced to its root cause (7 of 11 fixed avatar palette colors fail 4.5:1 against hardcoded white text) but NOT fixed -- changing palette colors is a visual change, outside the no-pixel-change scope of this pass, and is recorded as a decision for the user in docs/REFACTOR-2026-08.md section 9."
         },
         {
           "file": "src/client/navigation.js",
@@ -238,7 +238,7 @@
           "from": 15046,
           "to": 15290,
           "modified": true,
-          "modifiedReason": "In this file: CLASS C (attribute-escaping): esc() escapes & < > but not quotes, so a user- or admin-controlled value containing a double quote closes a quoted HTML attribute early and can inject a new one -- including an event handler. Same defect as the title= filename hole fixed in 7d0c4c4, found in the same audit as the sanitiser. Verified exploitable, not theoretical: a display name of `Bob\" onmouseover=\"...\" x=\"` creates a real onmouseover on the rendered avatar that fires on hover. escAttr() already existed (utils/index.js) -- this pass applies it at the call sites that were missing it. My first count (185 sites) was wrong; the accurate, traced figure was 39 confirmed + 61 needing a human read, and each of the 61 was traced by hand rather than pattern-matched: ids, enums, fixed option arrays, numbers, browser-constrained date/color inputs and a querySelector (non-innerHTML) usage were left alone, and the genuinely user- or admin-controlled ones were fixed alongside the confirmed set. data-notif-title, used by client-side notification click handling."
+          "modifiedReason": "In this file: CLASS C (attribute-escaping): esc() escapes & < > but not quotes, so a user- or admin-controlled value containing a double quote closes a quoted HTML attribute early and can inject a new one -- including an event handler. Same defect as the title= filename hole fixed in 7d0c4c4, found in the same audit as the sanitiser. Verified exploitable, not theoretical: a display name of `Bob\" onmouseover=\"...\" x=\"` creates a real onmouseover on the rendered avatar that fires on hover. escAttr() already existed (utils/index.js) -- this pass applies it at the call sites that were missing it. My first count (185 sites) was wrong; the accurate, traced figure was 39 confirmed + 61 needing a human read, and each of the 61 was traced by hand rather than pattern-matched: ids, enums, fixed option arrays, numbers, browser-constrained date/color inputs and a querySelector (non-innerHTML) usage were left alone, and the genuinely user- or admin-controlled ones were fixed alongside the confirmed set. data-notif-title, used by client-side notification click handling. || LIGHTHOUSE FOLLOW-UP: re-ran Lighthouse against a real authenticated page (ENG-3, standing in for the original ST-60 report target which no longer exists) after the sanitiser/token/Class-C security commits and the compression middleware. Scores moved Perf 82->82 (noise, unchanged), A11y 76->96, BP 88->100, SEO 82->100. Two concrete NEW a11y findings were fixed, both attribute/dynamic-attribute-only, zero pixel change: unsized-images (sidebarLogoImg in index.html gained width=24 height=28, matching its actual CSS-rendered size) and label-content-name-mismatch on notifBtn/topbarProfileBtn. That second one could NOT be fixed with aria-hidden alone -- verified empirically: aria-hidden on the visible child text does not satisfy the axe rule, which checks whether the accessible NAME contains the visible text, not whether that text is exposed to the accessibility tree. The correct fix syncs aria-label dynamically to include the visible text (the unread count / the initials) wherever that text is set, verified with Lighthouse re-run (label-content-name-mismatch score 0 -> 1). One remaining a11y finding, color-contrast, was traced to its root cause (7 of 11 fixed avatar palette colors fail 4.5:1 against hardcoded white text) but NOT fixed -- changing palette colors is a visual change, outside the no-pixel-change scope of this pass, and is recorded as a decision for the user in docs/REFACTOR-2026-08.md section 9."
         },
         {
           "file": "src/client/event-bindings.js",
@@ -722,12 +722,6 @@
     }
   ],
   "pristine": {
-    "app.js": {
-      "bytes": 921155,
-      "sha256": "cbcdc7bc17575bd0d117274d962bfd8a1ac1b2af902467d651c5585fedb63336",
-      "crlf": 17793,
-      "lf": 17793
-    },
     "server.js": {
       "bytes": 171150,
       "sha256": "f3c410375bdd5545764f9ce64fc1809f8d3b2745c7689ced50e5389c4f8c97ae",
@@ -832,7 +826,7 @@
     "src/client/components/badges.js": "3966f69768e877af36a8a767a7e55f683072f67fb795857cadae457cbeca6389",
     "src/client/services/data-helpers.js": "68362bea4902e5597fcfcc18e837102a118edf09c936df82f71d3328c9dd0ee5",
     "src/client/services/theme.js": "2f28888928a9225b8787269f4a30ecf626e0beb76342739c61cabeef0665ecef",
-    "src/client/init.js": "e3d7e72839ed8596ee37548cb6cad3f8727cd13a7e3b4e9e802f4f3a920c248a",
+    "src/client/init.js": "191b7b9a913c92161a5469350c680b04882a40b62e1d7387411718156fea4116",
     "src/client/navigation.js": "8a2f72261aace14bde5518b1c870056d5e805b6fb120f7a547fa26f1413132a7",
     "src/client/components/sidebar.js": "bb8f52903dcc946685bc7ca3754ce43f2f0824ed23056fcaf1db648aabe310ee",
     "src/client/components/space-header.js": "0e7ae82772af0db8fdbe494a3f2cfcd44855319d140f650abf289f83ed66aef5",
@@ -858,7 +852,7 @@
     "src/client/crud/sprint.js": "ad121ed7e44d3a69f8ec559429e06d81cf1a784e1d64986d635de31e1ff6c441",
     "src/client/crud/issue.js": "ec4f5f47985e26dbc04e9a7ceb63cb9b925df1e67f319cf6d9872bf02f7bba20",
     "src/client/components/worklog-modal.js": "353fe05ee96f64410a530fb69b808a1216185fc3dffc64f30dae508daa08877d",
-    "src/client/components/notifications.js": "ad401e768a6ef2491c763c4a682003a33c9e2d5159c1b8f222391eac519db486",
+    "src/client/components/notifications.js": "d82a05a05908273a0213a8d82670c779c011a997dc4b09e0953dfc8481985963",
     "src/client/event-bindings.js": "0dab751d3a6db53719c7d24648b6298ae60a757d581362415ff4136c22efe53b",
     "src/client/pages/admin-settings.js": "59837a407fcf2ef2eb89af120a911dfde877f692b4754a0f692754fad2846c0b",
     "src/client/components/global-search.js": "d1dadb7c5764a664ede907d5d4eb41d53bb095f1c8436c311724193396650d1f"

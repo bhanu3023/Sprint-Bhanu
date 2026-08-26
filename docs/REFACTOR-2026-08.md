@@ -761,6 +761,72 @@ landmark, the meta description). These six were NOT fixed, on purpose:
    Changing them is a design decision, not something to fix as a side effect
    of a performance pass.
 
+   **Traced to a concrete source on re-run (below): the user-avatar palette.**
+   `users.color` is assigned from a fixed set of 11 hex values, always paired
+   with hardcoded white initials text (`color:#fff`) in every avatar/badge
+   that renders them — `badges.js`, `init.js`'s topbar profile button, and
+   the drawer's `av2` element all do this. Checked all 11 against white:
+   **7 of 11 fail 4.5:1** (`#10b981` 2.54, `#f59e0b` 2.15, `#ff991f` 2.14,
+   `#ec4899` 3.53, `#ef4444` 3.76, `#8b5cf6` 4.23, `#6366f1` 4.47 — only
+   `#0052cc`, `#174F96`, `#64748b`, `#6b7280` clear the bar). This is a real,
+   systemic gap, not a one-off — a majority of users assigned one of the
+   seven low-contrast colors have unreadable-by-spec initials everywhere
+   their avatar renders. Not fixed here: swapping palette entries or making
+   the initials' text color contrast-aware is a **visual change** — every
+   avatar using one of those 7 colors would look different — which is
+   outside this pass's no-pixel-change scope. Flagged for a decision, not
+   fixed by default, for the same reason the original contrast item was
+   declined rather than silently patched.
+
+**The re-run.** `ST-60` no longer exists, so the audit target was `ENG-3` — an
+issue-drawer page, the same page type as the original report. Run with the
+`lighthouse` CLI against a real authenticated session (a minted session
+token, since the app reads its Bearer token from `localStorage`, which the
+audited page's own `?token=` bootstrap sets before the rest of the page
+loads), Chrome supplied by Playwright's bundled Chromium, headless:
+
+| | Perf | A11y | BP | SEO |
+|---|---|---|---|---|
+| original (`ST-60`) | 82 | 76 | 88 | 82 |
+| re-run (`ENG-3`) | 82 | **96** | **100** | **100** |
+
+Perf is flat — expected; none of the six declined-or-flagged items above are
+performance work, and localhost has no CDN/latency for compression to save
+on. The other three categories moved because `7d0c4c4`'s accessible-name/
+alt/landmark/meta-description fixes are exactly what this run priced in.
+
+Two more concrete a11y findings turned up on the re-run, both fixed, both
+attribute-only or dynamic-attribute-only — same no-pixel-change discipline
+as everything above:
+
+- **`unsized-images`**: `sidebarLogoImg` had no `width`/`height`, risking a
+  layout shift. Added `width="24" height="28"` — the PNG's actual intrinsic
+  ratio at its CSS-forced 28px height (275×315 natural → 24.44 ≈ 24), so the
+  attributes describe the size the browser was already going to render, not
+  a new one.
+- **`label-content-name-mismatch`**: the notification-count badge and the
+  profile-initials span are visible text inside a button that also carries
+  a static `aria-label` ("Notifications" / "Profile"), so a screen reader
+  announces the label but not the count or initials a sighted user sees.
+  **The obvious fix doesn't work** — tried `aria-hidden="true"` on the
+  visible span first, and the finding did not clear. Verified rather than
+  assumed: axe's rule checks whether the *visible* text is reflected in the
+  accessible *name*, and doesn't treat `aria-hidden` as an exemption from
+  that check, because hiding the count from assistive tech while a sighted
+  user still sees it is the same gap the rule exists to catch, not a fix for
+  it. The actual fix syncs `aria-label` itself wherever the visible text is
+  set — `Notifications: 4 unread`, `Profile: JS` — verified against the real
+  running app (not just the static HTML `renderTopbarProfile()` rewrites the
+  button's entire `innerHTML` on every render, so a static-only fix to
+  `index.html` would have been silently discarded at runtime) and confirmed
+  by a second Lighthouse run: `label-content-name-mismatch` 0 → 1.
+
+Verified: `node --check` on both edited files, full 47-page `[1] [2] [2b]`
+capture/compare empty, `[3]` differs on exactly the three lines above across
+all 47 pages and nothing else, `[4]` no new console errors, `catdiff` PASS
+(21 of 42 client parts pinned-modified — `notifications.js` and `init.js`
+were already in that set from earlier passes, this one re-pinned them),
+tests 94/94, flows 8/8, hotjar 138/138.
 
 **Decisions not made, on purpose (each needs a product call before any code
 changes):**

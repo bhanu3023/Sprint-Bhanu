@@ -194,11 +194,19 @@ function renderTopbarProfile(user) {
   if (user.avatar_url) {
     btn.innerHTML = '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
     if (av2) av2.innerHTML = '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    // The <img alt> above already carries the name, so the button's own
+    // aria-label just needs to not contradict it.
+    btn.setAttribute('aria-label', 'Profile');
   } else {
     var ini = initials(user.name);
     btn.style.background = color;
     btn.style.color = '#fff';
-    btn.innerHTML = '<span style="font-size:13px;font-weight:700">' + ini + '</span>';
+    btn.innerHTML = '<span aria-hidden="true" style="font-size:13px;font-weight:700">' + esc(ini) + '</span>';
+    // aria-hidden on the initials span keeps them out of the accessible
+    // name, so the label has to say what they say instead of just "Profile"
+    // -- axe's label-content-name-mismatch rule flags visible text that
+    // isn't reflected in the accessible name at all, aria-hidden or not.
+    btn.setAttribute('aria-label', 'Profile: ' + ini);
     if (av2) { av2.textContent = ini; av2.style.background = color; }
   }
   if (nameEl) nameEl.textContent = user.name;

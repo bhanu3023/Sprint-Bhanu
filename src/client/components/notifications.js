@@ -39,11 +39,19 @@ function renderNotifBadge() {
     if (!notifs[i].is_read) unread++;
   }
   var badge = $('notifBadge');
+  var btn = $('notifBtn');
   if (unread > 0) {
-    badge.textContent = unread > 99 ? '99+' : String(unread);
+    var shown = unread > 99 ? '99+' : String(unread);
+    badge.textContent = shown;
     badge.classList.add('visible'); badge.removeAttribute('hidden');
+    // aria-hidden alone does not satisfy axe's label-content-name-mismatch --
+    // the badge's visible count has to be IN the accessible name, not just
+    // absent from the accessibility tree, so a screen reader user gets the
+    // same "how many" a sighted user sees at a glance.
+    if (btn) btn.setAttribute('aria-label', 'Notifications: ' + shown + ' unread');
   } else {
     badge.classList.remove('visible'); badge.setAttribute('hidden',''); badge.textContent = '';
+    if (btn) btn.setAttribute('aria-label', 'Notifications');
   }
 }
 

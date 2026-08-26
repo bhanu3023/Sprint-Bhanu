@@ -55,7 +55,7 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-logo">
-          <img src="assets/neutara-logo.png" alt="" id="sidebarLogoImg" class="sidebar-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <img src="assets/neutara-logo.png" alt="" id="sidebarLogoImg" class="sidebar-logo-img" width="24" height="28" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
           <svg class="sidebar-logo-svg" style="display:none" width="32" height="32" viewBox="0 0 32 32">
             <rect width="32" height="32" rx="6" fill="#2563eb"/>
             <text x="16" y="22" text-anchor="middle" fill="#fff" font-size="18" font-weight="700" font-family="sans-serif">N</text>
@@ -122,7 +122,7 @@
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
               </svg>
-              <span class="notif-badge" id="notifBadge" hidden>0</span>
+              <span class="notif-badge" id="notifBadge" aria-hidden="true" hidden>0</span>
             </button>
             <!-- Notification Panel -->
             <div id="notifPanel" class="notif-panel" hidden>
@@ -137,7 +137,7 @@
           <!-- Profile avatar + dropdown -->
           <div style="position:relative" id="topbarProfileWrap">
             <button id="topbarProfileBtn" aria-label="Profile" style="width:34px;height:34px;border-radius:50%;border:2px solid transparent;background:#e8eaf0;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:border-color .15s;font-size:13px;font-weight:700;color:#0129AC;overflow:hidden" onmouseover="this.style.borderColor='#0129AC'" onmouseout="this.style.borderColor='transparent'">
-              <span id="topbarProfileAvatar">BS</span>
+              <span id="topbarProfileAvatar" aria-hidden="true">BS</span>
             </button>
             <div id="topbarProfileMenu" hidden style="position:absolute;right:0;top:42px;width:220px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.13);z-index:9999;overflow:hidden">
               <div id="topbarProfileHeader" data-hj-suppress style="padding:14px 16px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px">
