@@ -592,7 +592,7 @@ function bindMentionAutocomplete(el) {
     positionMentionDropdown();
     dropdown.style.display = 'block';
     dropdown.innerHTML = members.map(function(m) {
-      return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
+      return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + escAttr(m.name) + '" ' +
         'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
         'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
         '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
@@ -1108,7 +1108,7 @@ function bindDrawerEdits(issue) {
               var isImg = f.type && f.type.startsWith('image/');
               var url = fileApiUrl(f.url);
               return isImg
-                ? '<div style="margin-top:8px"><img class="desc-inline-img" src="' + esc(url) + '" alt="' + esc(f.name) + '"></div>'
+                ? '<div style="margin-top:8px"><img class="desc-inline-img" src="' + esc(url) + '" alt="' + escAttr(f.name) + '"></div>'
                 : '<div style="margin-top:6px"><a href="' + esc(url) + '" target="_blank">' + esc(f.name) + '</a></div>';
             }).join('');
             commentBody = commentBody + fileRefsHtml;

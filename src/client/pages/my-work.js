@@ -216,7 +216,7 @@ function _ywBuildFilterTh(key, label, issues) {
   var opts = _ywGetFilterOpts(key, issues);
   var panel = opts.map(function (o) {
     var chk = sel.indexOf(o.v) >= 0 ? ' checked' : '';
-    return '<label class="yw-filter-opt"><input type="checkbox" value="' + esc(String(o.v)) + '"' + chk +
+    return '<label class="yw-filter-opt"><input type="checkbox" value="' + escAttr(String(o.v)) + '"' + chk +
       ' onchange="window._ywFilterCheck(\'' + key + '\',this)"> ' + esc(o.l) + '</label>';
   }).join('');
   if (!panel) panel = '<div class="yw-filter-opt" style="color:var(--text3);cursor:default">No options</div>';

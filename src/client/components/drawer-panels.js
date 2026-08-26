@@ -683,7 +683,7 @@ function renderDrawerAttachments(attachments) {
       '<a href="' + esc(fileApiUrl(a.filename)) + '" target="_blank" style="font-size:13px;color:var(--accent);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Click to open">' + esc(a.original_name) + '</a>' +
       '<div style="font-size:11px;color:var(--text3)">' + fmtSize(a.size) + (a.uploader_name ? ' · ' + esc(a.uploader_name) : '') + ' · ' + fmtDateTime(a.created_at) + '</div>' +
       '</div>' +
-      '<a href="' + esc(fileApiUrl(a.filename)) + '" download="' + esc(a.original_name) + '" title="Download" style="color:var(--text3);font-size:15px;text-decoration:none;padding:2px 4px;border-radius:4px;line-height:1" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'">⬇</a>' +
+      '<a href="' + esc(fileApiUrl(a.filename)) + '" download="' + escAttr(a.original_name) + '" title="Download" style="color:var(--text3);font-size:15px;text-decoration:none;padding:2px 4px;border-radius:4px;line-height:1" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'">⬇</a>' +
       '<button title="Rename" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--text3);padding:2px 4px;border-radius:4px" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'" onclick="renameAttachment(\'' + a.id + '\',\'' + esc(a.original_name).replace(/'/g,"&#39;") + '\')">✏</button>' +
       (canDelete ? '<button class="btn btn-sm btn-outline text-danger" style="padding:2px 8px;font-size:11px" onclick="deleteAttachment(\'' + a.id + '\')">✕</button>' : '') +
       '</div>';
@@ -947,10 +947,10 @@ async function renderDrawerCombinationField(issueId, spaceId, cfValues, productT
 
 function buildCombinationComboboxHtml(fieldId, selectedVal) {
   selectedVal = selectedVal || '';
-  return '<div class="combo-box" data-cf-id="' + esc(fieldId) + '" data-value="' + esc(selectedVal) + '">' +
+  return '<div class="combo-box" data-cf-id="' + esc(fieldId) + '" data-value="' + escAttr(selectedVal) + '">' +
     '<div class="combo-input-wrap">' +
       '<svg class="combo-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
-      '<input type="text" class="combo-input" placeholder="Search source e.g. Box, SharePoint" value="' + esc(selectedVal) + '" autocomplete="off" spellcheck="false">' +
+      '<input type="text" class="combo-input" placeholder="Search source e.g. Box, SharePoint" value="' + escAttr(selectedVal) + '" autocomplete="off" spellcheck="false">' +
       '<button type="button" class="combo-clear" title="Clear"' + (selectedVal ? '' : ' hidden') + '>×</button>' +
       '<span class="combo-chevron" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></span>' +
     '</div>' +
@@ -1010,7 +1010,7 @@ function bindCombinationCombobox(el, config) {
     listEl.innerHTML = matches.map(function (o, i) {
       var active = o === selectedVal;
       var hi = i === highlightIdx;
-      return '<button type="button" class="combo-option' + (active ? ' is-selected' : '') + (hi ? ' is-highlighted' : '') + '" data-val="' + esc(o) + '">' + esc(o) + '</button>';
+      return '<button type="button" class="combo-option' + (active ? ' is-selected' : '') + (hi ? ' is-highlighted' : '') + '" data-val="' + escAttr(o) + '">' + esc(o) + '</button>';
     }).join('');
     emptyEl.hidden = matches.length > 0;
     listEl.hidden = matches.length === 0;
@@ -1264,7 +1264,7 @@ function buildProductTypeCheckboxListHtml(selectedTypes, ptOptions) {
     var label = t.l != null ? t.l : getProductTypeLabel(val);
     var checked = selectedTypes.indexOf(val) >= 0;
     return '<label class="pt-combo-check" title="' + escAttr(label) + '">' +
-      '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + esc(val) + '"' + (checked ? ' checked' : '') + '>' +
+      '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + escAttr(val) + '"' + (checked ? ' checked' : '') + '>' +
       '<span class="pt-combo-check-label">' + esc(label) + '</span></label>';
   }).join('');
 }
@@ -1314,7 +1314,7 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
       var checked = selectedCombos.indexOf(c) >= 0;
       // title carries the full value — labels are single-line with an ellipsis.
       return '<label class="pt-combo-check" title="' + escAttr(c) + '">' +
-        '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + esc(c) + '"' + (checked ? ' checked' : '') + '>' +
+        '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + escAttr(c) + '"' + (checked ? ' checked' : '') + '>' +
         '<span class="pt-combo-check-label">' + esc(c) + '</span></label>';
     }).join('');
     html += '</div>';
@@ -1650,7 +1650,7 @@ function getCustomFieldRenderType(field) {
 function buildCFSelectWrapInnerHtml(fid, ftype, opts, val, searchPlaceholder, isCombination) {
   var isMultiSel = ftype === 'multi_select';
   var selected = val ? String(val).split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
-  var displayVal = selected.length ? esc(selected.join(', ')) : '';
+  var displayVal = selected.length ? escAttr(selected.join(', ')) : '';
   var filterPh = searchPlaceholder || (isCombination ? 'Search source e.g. Box…' : 'Search…');
   var comboClass = isCombination ? ' cf-combination-select' : '';
   return '<div class="cf-select-wrap' + comboClass + '" data-cf-id="' + fid + '" data-multi="' + (isMultiSel ? '1' : '0') + '"' + (isCombination ? ' data-combination="1"' : '') + '">' +
@@ -1670,7 +1670,7 @@ function buildCFSelectWrapInnerHtml(fid, ftype, opts, val, searchPlaceholder, is
         var checkboxHtml = isMultiSel
           ? '<input type="checkbox" class="cf-sel-opt-checkbox" style="pointer-events:none;margin-right:8px" tabindex="-1"' + (sel ? ' checked' : '') + '>'
           : '';
-        return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + esc(o) + '">' + checkboxHtml + esc(o) + '</div>';
+        return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + escAttr(o) + '">' + checkboxHtml + esc(o) + '</div>';
       }).join('') +
       '</div>' +
       (isCombination ? '<div class="cf-sel-empty" style="display:none">No combinations match your search</div>' : '') +
@@ -1922,13 +1922,13 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
     var inputHtml = '';
 
     if (ftype === 'text') {
-      inputHtml = '<input type="text" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '" placeholder="—">';
+      inputHtml = '<input type="text" class="input input-sm" data-cf-id="' + fid + '" value="' + escAttr(val) + '" placeholder="—">';
     } else if (ftype === 'textarea') {
       inputHtml = '<textarea class="input input-sm" data-cf-id="' + fid + '" rows="8" placeholder="—">' + esc(val) + '</textarea>';
     } else if (ftype === 'number') {
-      inputHtml = '<input type="number" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '" placeholder="—">';
+      inputHtml = '<input type="number" class="input input-sm" data-cf-id="' + fid + '" value="' + escAttr(val) + '" placeholder="—">';
     } else if (ftype === 'date') {
-      inputHtml = '<input type="date" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '">';
+      inputHtml = '<input type="date" class="input input-sm" data-cf-id="' + fid + '" value="' + escAttr(val) + '">';
     } else if (ftype === 'checkbox') {
       inputHtml = '<input type="checkbox" data-cf-id="' + fid + '" ' + (val === 'true' ? 'checked' : '') + '>';
     } else if (ftype === 'select' || ftype === 'multi_select') {

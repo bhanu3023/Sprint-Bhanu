@@ -718,6 +718,50 @@ unpushed commits add no migration.**
 Decisions that need a person, not a measurement, plus the smaller open items.
 Full detail on the client-side items in `AUDIT-FINDINGS.md`.
 
+**Lighthouse (/?issue=ST-60, Perf 82 / A11y 76 / BP 88 / SEO 82): declined,
+with reasons, so none of these get re-opened from the score alone.** The
+report was a one-time PDF and is not retained in the repo; the reasoning below
+is the record of that review. `7d0c4c4` fixed everything that was attributes-
+only and pixel/behaviour-neutral (accessible names, alt text, the main
+landmark, the meta description). These six were NOT fixed, on purpose:
+
+1. **The paste-blocking false positive.** Lighthouse/axe flag any element that
+   intercepts a `paste` event as blocking assistive input. Six exist in this
+   app — `issue-drawer.js:64,687,1026`, `space-context-menu.js:685,718`,
+   `admin-settings.js:872` — and every one of them is the screenshot-paste
+   feature (pasting an image into a description, comment, or drawer field),
+   not a restriction. None calls `preventDefault()` on a plain-text paste, so
+   normal pasting is untouched. The finding is real as a pattern match and
+   false as a UX judgment; fixing it would mean removing the paste-screenshot
+   feature.
+2. **User-uploaded images (size/format).** Lighthouse wants next-gen formats
+   (WebP/AVIF) and explicit sizing for images. The images in question are
+   user-uploaded attachments and pasted screenshots (`issue_attachments`,
+   `/api/files/:id`) — there is no processing pipeline, and adding one
+   (re-encode on upload, generate a thumbnail set) is a project, not a
+   Lighthouse fix.
+3. **Minification.** `CLAUDE.md`: "No build step. The browser loads plain
+   `<script>` tags." Minifying would require introducing a build step for the
+   sole purpose of shaving bytes, which cuts against the repo's actual
+   constraint — every `.js` file is what ships, so it is also what gets
+   debugged in production.
+4. **Cache lifetimes.** `src/server/express-app.js:133-137` sets
+   `Cache-Control: no-cache, no-store, must-revalidate` on every served `.js`,
+   `.html` and `.css`, deliberately. There is no cache-busting (no content
+   hash in the filename, no build step to add one), so a long cache lifetime
+   here means a stale `app.js`/`utils/index.js` surviving a deploy — worse
+   than the performance hit of re-validating on every load.
+5. **Render-blocking CSS.** `styles.css` loads synchronously in `<head>`,
+   which is the standard blocking-stylesheet pattern Lighthouse always flags.
+   Deferring it would show an unstyled page for a beat (FOUC) on every load;
+   that tradeoff was not made for a Perf-score point.
+6. **Contrast.** Lighthouse's contrast checker runs against the shipped
+   palette (`STATUS_COLORS`, `PRIORITY_COLORS`, muted text tokens) and flags
+   combinations that are a deliberate brand/design choice, not an accident.
+   Changing them is a design decision, not something to fix as a side effect
+   of a performance pass.
+
+
 **Decisions not made, on purpose (each needs a product call before any code
 changes):**
 
@@ -752,11 +796,8 @@ changes):**
   not mistake the allowance for carelessness, and does not silently ban the
   attribute and break the existing content.
 - **The other two classes found in the same audit.** The sanitiser commit closed
-  the five sinks where stored HTML reaches `innerHTML`. Two separate classes came
-  out of the same audit. One is **done** (below); the other, **185
-  quote-sensitive `esc()` interpolations** inside HTML attributes, is still open
-  — the same bug class as the `title=` filename hole fixed in `7d0c4c4`, since
-  `esc()` does not escape quotes.
+  the five sinks where stored HTML reaches `innerHTML`. Two separate classes
+  came out of the same audit; both are now **done** (below).
 
 **Closed: the embedded session token (data repair, no code change).**
 
@@ -792,6 +833,46 @@ Still worth doing, and **not** done here because it was not in scope: strip file
 tokens **server-side on write**. Every client save path strips correctly today,
 but that is five call sites each of which a future path could forget, and the
 server currently stores whatever it is given.
+
+**Closed: Class C, the attribute-escaping gap.** `esc()` escapes `& < >` but not
+quotes, so a user- or admin-controlled value interpolated into a quoted HTML
+attribute lets a quote in that value close the attribute early and add a new
+one — the same defect fixed for `title=` in `7d0c4c4`, found in the same audit
+as the sanitiser.
+
+The figure first reported here, **185 quote-sensitive sites**, was wrong — it
+came from a coarse scan that counted any interpolation whose attribute name
+*looked* sensitive, including `data-cf-id="' + fid + '"`, which cannot carry a
+quote because `fid` is a UUID. Re-traced by hand: **39 confirmed, 61 needing a
+human read**, 100 total across 18 files. The other 356 interpolations sit in
+attributes where a quote does nothing (style, class, data-sort-col, …) or carry
+ids, enums, numbers, or browser-constrained date/color-picker values — left
+alone, and the reason recorded per-file in `scripts/refactor-verify/manifest.json`
+so a future scan doesn't re-flag them.
+
+All 100 fixed with `escAttr()`, which already existed
+(`src/client/utils/index.js`) — this was mechanical application, not new
+infrastructure. Verified exploitable rather than theoretical: a display name of
+`Bob" onmouseover="…" x="` creates a real `onmouseover` on the rendered avatar
+that fires on hover (`badges.js`).
+
+**Found while tracing, not from the pattern scan:** `space/settings.js`'s
+required-issue-type checkbox list rendered its option **value with no escaping
+of any kind** — not even `esc()` — and its **label as raw unescaped text
+content**. That is markup injection via an admin-configured issue type name,
+worse than the missing-`escAttr` pattern this pass otherwise fixes, since it
+needs no quote at all — a type named `<img src=x onerror=...>` would have run
+for anyone viewing that settings screen. Fixed alongside it:
+`escAttr(c.v)` / `esc(c.l)`.
+
+Verified: full 47-page DOM capture before/after — `[1] [2] [2b]` empty (no
+globals lost or added beyond what already existed), all 47 pages
+byte-identical, no new console errors; `catdiff` PASS (21 of 42 client parts
+now declared modified, all 42 pinned); tests 94/94, flows 8/8. Live injection
+proof against both the settings.js bug and the general pattern (using
+`ENG-13`'s real title, which contains a literal `""`) confirms `escAttr` holds
+the original text intact with no attribute breakout, where `esc()` alone would
+have produced a dangling, unclosed attribute.
 
 **Smaller open items:**
 

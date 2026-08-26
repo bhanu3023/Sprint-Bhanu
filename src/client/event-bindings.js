@@ -176,32 +176,32 @@ document.addEventListener('DOMContentLoaded', function () {
         if (f.field_type === 'text') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<input type="text" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
+            '<input type="text" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '"></div>';
         }
         if (f.field_type === 'number') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<input type="number" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
+            '<input type="number" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '"></div>';
         }
         if (f.field_type === 'textarea') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<textarea class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" rows="3"></textarea></div>';
+            '<textarea class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '" rows="3"></textarea></div>';
         }
         if (f.field_type === 'date') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<input type="date" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
+            '<input type="date" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '"></div>';
         }
         if (f.field_type === 'checkbox') {
           return '<div class="form-group">' +
             '<label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
-            '<input type="checkbox" class="cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" value="true">' +
+            '<input type="checkbox" class="cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '" value="true">' +
             esc(f.name) + req + '</label></div>';
         }
         if (f.field_type === 'user') {
           var userOpts = (S.data && S.data.users || []).filter(function (u) { return u.is_active !== false; });
-          var userSelect = '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '">' +
+          var userSelect = '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '">' +
             '<option value="">— Select user —</option>' +
             userOpts.map(function (u) {
               return '<option value="' + esc(u.id) + '">' + esc(u.name) + '</option>';

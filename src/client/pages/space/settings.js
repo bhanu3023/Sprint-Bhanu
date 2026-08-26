@@ -208,7 +208,7 @@ function renderSettingsPeople(space) {
       '<td class="text-muted">' + esc(user.email || '') + '</td>' +
       '<td>' + roleCell + '</td>' +
       '<td class="text-muted text-sm">' + joined + '</td>' +
-      '<td>' + (canManageSpace(space.id) ? '<button class="btn btn-outline btn-sm people-remove-btn" data-member-id="' + rec.id + '" data-user-name="' + esc(user.name) + '">Remove</button>' : '') + '</td>' +
+      '<td>' + (canManageSpace(space.id) ? '<button class="btn btn-outline btn-sm people-remove-btn" data-member-id="' + rec.id + '" data-user-name="' + escAttr(user.name) + '">Remove</button>' : '') + '</td>' +
       '</tr>';
   }
 
@@ -570,8 +570,8 @@ function renderRequiredTypeChoices(selected, spaceId) {
   var all = sel.length === 0;                     // unset shows as "all ticked"
   box.innerHTML = choices.map(function (c) {
     var on = all || sel.indexOf(c.v) >= 0;
-    return '<label><input type="checkbox" class="cf-req-type" value="' + c.v + '"' +
-      (on ? ' checked' : '') + '> ' + c.l + '</label>';
+    return '<label><input type="checkbox" class="cf-req-type" value="' + escAttr(c.v) + '"' +
+      (on ? ' checked' : '') + '> ' + esc(c.l) + '</label>';
   }).join('');
 }
 
@@ -652,13 +652,13 @@ function paintSettingsCustomFields(space) {
       : '<span class="badge badge-muted">Custom</span>';
     var deleteBtn = isLockedBuiltinField(f)
       ? '<span class="text-muted text-sm">Required</span>'
-      : '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '">Remove</button>';
+      : '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + escAttr(f.name) + '">Remove</button>';
     // "Apply to all boards" posts to /api/custom-fields/:id/apply-to-all, which is
     // org-admin-only. A space admin could see and click it and only get a 403, so
     // it is hidden for anyone who is not an org admin.
     var applyBtn = (f.is_builtin || !isOrgAdminUser())
       ? ''
-      : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
+      : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + escAttr(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
     // Everything shown in the row is searchable, plus field_key and the raw
     // option values \u2014 so "slack", "multi_select", "built-in", "required" or an
     // option that got truncated in the Options column all still match.

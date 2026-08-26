@@ -94,11 +94,11 @@ async function renderAdminOrgGeneral(el) {
     '<form id="orgEditForm">' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Organization Name</div><div class="admin-field-desc">Displayed across the workspace</div></div>' +
-    '<input id="orgNameInput" class="input input-sm" style="width:220px" value="' + esc(org.name || '') + '">' +
+    '<input id="orgNameInput" class="input input-sm" style="width:220px" value="' + escAttr(org.name || '') + '">' +
     '</div>' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Slug</div><div class="admin-field-desc">URL identifier for the workspace</div></div>' +
-    '<input id="orgSlugInput" class="input input-sm" style="width:220px" value="' + esc(org.slug || '') + '">' +
+    '<input id="orgSlugInput" class="input input-sm" style="width:220px" value="' + escAttr(org.slug || '') + '">' +
     '</div>' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Plan</div><div class="admin-field-desc">Current subscription tier</div></div>' +
@@ -309,9 +309,9 @@ async function renderAdminUsers(el) {
       '<option value="admin"' + (orgRole === 'admin' ? ' selected' : '') + '>Admin</option>' +
       '<option value="member"' + (orgRole === 'member' ? ' selected' : '') + '>Member</option>' +
       '</select>';
-    var toggleBtn = u.id!==me.id ? '<button class="btn btn-sm um-toggle-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-active="'+u.is_active+'" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:#fff;border:none;background:'+(isActive?'#ef4444':'#22c55e')+'">'+(isActive?'Deactivate':'Activate')+'</button>' : '';
-    var pwdBtn = '<button class="btn btn-sm um-pwd-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#0129AC;cursor:pointer;color:#fff">Reset PW</button>';
-    var delBtn = u.id!==me.id ? '<button class="btn btn-sm um-delete-user-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-email="'+esc(u.email)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#dc2626;cursor:pointer;color:#fff">Delete</button>' : '';
+    var toggleBtn = u.id!==me.id ? '<button class="btn btn-sm um-toggle-btn" data-uid="'+u.id+'" data-uname="'+escAttr(u.name)+'" data-active="'+u.is_active+'" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:#fff;border:none;background:'+(isActive?'#ef4444':'#22c55e')+'">'+(isActive?'Deactivate':'Activate')+'</button>' : '';
+    var pwdBtn = '<button class="btn btn-sm um-pwd-btn" data-uid="'+u.id+'" data-uname="'+escAttr(u.name)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#0129AC;cursor:pointer;color:#fff">Reset PW</button>';
+    var delBtn = u.id!==me.id ? '<button class="btn btn-sm um-delete-user-btn" data-uid="'+u.id+'" data-uname="'+escAttr(u.name)+'" data-email="'+escAttr(u.email)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#dc2626;cursor:pointer;color:#fff">Delete</button>' : '';
     return '<tr data-um-status="' + (isActive ? 'active' : 'inactive') + '" style="border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">' +
       '<td style="padding:14px 16px"><div style="display:flex;align-items:center;gap:12px">' + av + info + '</div></td>' +
       '<td style="padding:14px 16px">' + rolesel + '</td>' +
@@ -333,8 +333,8 @@ async function renderAdminUsers(el) {
       '<td><span class="badge" style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44">✉️ Invited</span></td>' +
       '<td>' + expiresStr + '</td>' +
       '<td style="padding:8px 16px;white-space:nowrap">' +
-      '<button class="btn btn-sm um-resend-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#f59e0b;cursor:pointer;color:#fff;margin-right:4px">↺ Resend</button>' +
-      '<button class="btn btn-sm um-cancel-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#ef4444;cursor:pointer;color:#fff">✕ Delete</button>' +
+      '<button class="btn btn-sm um-resend-invite-btn" data-invite-id="'+inv.id+'" data-email="'+escAttr(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#f59e0b;cursor:pointer;color:#fff;margin-right:4px">↺ Resend</button>' +
+      '<button class="btn btn-sm um-cancel-invite-btn" data-invite-id="'+inv.id+'" data-email="'+escAttr(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#ef4444;cursor:pointer;color:#fff">✕ Delete</button>' +
       '</td>' +
       '</tr>';
   }).join('');
@@ -690,7 +690,7 @@ async function renderAdminEmailSettings(el) {
 
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">SMTP Host</label>' +
-      '<input id="smtpHost" class="input" placeholder="smtp.gmail.com" value="'+(cfg.smtp_host||_smtpProviders[currentProvider].host)+'">' +
+      '<input id="smtpHost" class="input" placeholder="smtp.gmail.com" value="'+escAttr(cfg.smtp_host||_smtpProviders[currentProvider].host)+'">' +
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">Port</label>' +
@@ -698,15 +698,15 @@ async function renderAdminEmailSettings(el) {
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">Email Address</label>' +
-      '<input id="smtpUser" class="input" placeholder="your@email.com" value="'+(cfg.smtp_user||'')+'">' +
+      '<input id="smtpUser" class="input" placeholder="your@email.com" value="'+escAttr(cfg.smtp_user||'')+'">' +
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">Password / App Password</label>' +
-      '<input id="smtpPass" class="input" type="password" placeholder="Password or App Password" value="'+(cfg.smtp_pass||'')+'">' +
+      '<input id="smtpPass" class="input" type="password" placeholder="Password or App Password" value="'+escAttr(cfg.smtp_pass||'')+'">' +
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">From Name (optional)</label>' +
-      '<input id="smtpFrom" class="input" placeholder="Neutara SprintBoard <your@email.com>" value="'+(cfg.smtp_from||'')+'">' +
+      '<input id="smtpFrom" class="input" placeholder="Neutara SprintBoard <your@email.com>" value="'+escAttr(cfg.smtp_from||'')+'">' +
     '</div>' +
     '<div style="display:flex;gap:10px;margin-top:20px">' +
       '<button class="btn btn-primary" id="saveSmtpBtn">Save Settings</button>' +

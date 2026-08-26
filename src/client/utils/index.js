@@ -506,7 +506,7 @@ function commentBodyToEditableHtml(body) {
   }
   var html = highlightMentionsInCommentBody(body);
   html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
-    return '<img class="desc-inline-img" src="' + esc(fileApiUrl(url)) + '" alt="' + esc(fname) + '"><br>';
+    return '<img class="desc-inline-img" src="' + esc(fileApiUrl(url)) + '" alt="' + escAttr(fname) + '"><br>';
   });
   html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
     return '<a href="' + esc(fileApiUrl(url)) + '" target="_blank">' + esc(fname) + '</a>';

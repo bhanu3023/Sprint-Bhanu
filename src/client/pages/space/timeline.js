@@ -81,7 +81,7 @@ function renderTimeline() {
       '<span class="issue-key">' + esc(issueKeyStr(iss)) + '</span> ' +
       '<span class="timeline-issue-title">' + esc(iss.title) + '</span></div>' +
       '<div class="timeline-dates-col" style="width:' + totalWidth + 'px">' +
-      '<div class="timeline-bar" style="left:' + left + 'px;width:' + width + 'px;background:' + color + '" title="' + esc(iss.title) + '"></div>' +
+      '<div class="timeline-bar" style="left:' + left + 'px;width:' + width + 'px;background:' + color + '" title="' + escAttr(iss.title) + '"></div>' +
       '</div></div>';
   }
 

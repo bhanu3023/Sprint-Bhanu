@@ -265,7 +265,7 @@ function _awRenderPanel() {
             '<div class="aw-adv-opts" id="aw-mopts-' + key + '">' +
               fd.opts.map(function(o) {
                 var chk = sel.indexOf(o.v) >= 0 ? ' checked' : '';
-                return '<label class="aw-adv-opt-row"><input type="checkbox" value="' + esc(String(o.v)) + '"' + chk +
+                return '<label class="aw-adv-opt-row"><input type="checkbox" value="' + escAttr(String(o.v)) + '"' + chk +
                   ' onchange="window._awMultiToggle(\'' + key + '\',this)"> ' + esc(o.l) + '</label>';
               }).join('') +
             '</div>' +
@@ -274,7 +274,7 @@ function _awRenderPanel() {
     } else if (fd.kind === 'cftext') {
       var tv = S.awFilters[key] || '';
       valueHtml =
-        '<input type="text" class="input input-sm" style="min-width:160px" value="' + esc(tv) + '" placeholder="Contains…"' +
+        '<input type="text" class="input input-sm" style="min-width:160px" value="' + escAttr(tv) + '" placeholder="Contains…"' +
         ' oninput="window._awSetCFText(\'' + key + '\',this.value)">';
     } else {
       // date / cfdate

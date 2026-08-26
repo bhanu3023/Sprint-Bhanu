@@ -27,7 +27,7 @@ function renderSidebar() {
   if (favIssuesEl) {
     favIssuesEl.innerHTML = favIssues.length
       ? favIssues.map(function (iss) {
-          return '<a class="nav-item starred-issue-item" href="/?issue=' + encodeURIComponent(issueKeyStr(iss)) + '" data-issue-id="' + esc(iss.id) + '" title="' + esc(iss.title) + '">' +
+          return '<a class="nav-item starred-issue-item" href="/?issue=' + encodeURIComponent(issueKeyStr(iss)) + '" data-issue-id="' + esc(iss.id) + '" title="' + escAttr(iss.title) + '">' +
             '<span class="nav-icon" style="color:#fbbf24">\u2605</span>' +
             '<span class="starred-issue-key">' + esc(issueKeyStr(iss)) + '</span>' +
             '<span class="starred-issue-title">' + esc(iss.title) + '</span>' +

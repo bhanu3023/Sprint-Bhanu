@@ -181,7 +181,7 @@ function initUserSearchDropdown(searchInputId, hiddenInputId, dropdownId, member
       dropEl.innerHTML = filtered.map(function(u) {
         var initials = u.name ? u.name.split(' ').map(function(w){ return w[0]; }).slice(0,2).join('').toUpperCase() : '?';
         var bg = u.color || '#6b7280';
-        return '<div class="user-search-option" data-id="' + esc(u.id) + '" data-name="' + esc(u.name) + '">' +
+        return '<div class="user-search-option" data-id="' + esc(u.id) + '" data-name="' + escAttr(u.name) + '">' +
           '<span class="user-search-avatar" style="background:' + bg + '">' + initials + '</span>' +
           esc(u.name) + '</div>';
       }).join('');

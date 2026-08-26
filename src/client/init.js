@@ -325,11 +325,11 @@ function openProfileSettingsModal() {
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
           '<div>' +
             '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">First Name</label>' +
-            '<input id="_profFirstName" value="' + esc(firstName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+            '<input id="_profFirstName" value="' + escAttr(firstName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
           '</div>' +
           '<div>' +
             '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">Last Name</label>' +
-            '<input id="_profLastName" value="' + esc(lastName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+            '<input id="_profLastName" value="' + escAttr(lastName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
           '</div>' +
         '</div>' +
         '<div style="margin-bottom:20px">' +

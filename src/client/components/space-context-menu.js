@@ -462,7 +462,7 @@ function addDescInlineImageChip(tray, url, alt, fp) {
   chip.className = 'desc-image-chip';
   chip.dataset.url = url;
   if (fp) chip.dataset.fp = fp;
-  chip.innerHTML = '<img src="' + esc(fileApiUrl(url)) + '" alt="' + esc(alt || 'Screenshot') + '">' +
+  chip.innerHTML = '<img src="' + esc(fileApiUrl(url)) + '" alt="' + escAttr(alt || 'Screenshot') + '">' +
     '<button type="button" class="desc-image-remove" aria-label="Remove">×</button>';
   tray.appendChild(chip);
 }
@@ -615,7 +615,7 @@ window._openAttachmentPreview = function (idx) {
   var lb = document.createElement('div');
   lb.className = 'image-lightbox';
   lb.innerHTML = '<button type="button" class="image-lightbox-close" aria-label="Close">×</button>' +
-    '<img src="' + url + '" alt="' + esc(file.name || 'Preview') + '">';
+    '<img src="' + url + '" alt="' + escAttr(file.name || 'Preview') + '">';
   function closeLb() {
     document.removeEventListener('keydown', onKey);
     URL.revokeObjectURL(url);
@@ -648,8 +648,8 @@ function _renderAttachmentFileList() {
     imageItems.forEach(function (item) {
       var thumbUrl = URL.createObjectURL(item.file);
       _attachmentThumbUrls.push(thumbUrl);
-      html += '<div class="issue-attachment-thumb" title="' + esc(item.file.name) + '">' +
-        '<img src="' + thumbUrl + '" alt="' + esc(item.file.name) + '" onclick="window._openAttachmentPreview(' + item.idx + ')">' +
+      html += '<div class="issue-attachment-thumb" title="' + escAttr(item.file.name) + '">' +
+        '<img src="' + thumbUrl + '" alt="' + escAttr(item.file.name) + '" onclick="window._openAttachmentPreview(' + item.idx + ')">' +
         '<button type="button" class="issue-attachment-thumb-remove" onclick="event.stopPropagation();_removeAttachmentFile(' + item.idx + ')" title="Remove">×</button>' +
         '</div>';
     });

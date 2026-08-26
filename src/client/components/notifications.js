@@ -202,7 +202,7 @@ function renderNotifPanel() {
     var icon = tIcons[n.type] || '&#128276;';
     var color = tColors[n.type] || '#0129AC';
     var isU = !n.is_read;
-    html += '<div class="notif-item' + (isU ? ' unread' : '') + '" data-notif-id="' + esc(n.id) + '" data-notif-link="' + esc(n.link || '') + '" data-notif-type="' + esc(n.type || '') + '" data-notif-space-id="' + esc(n.space_id || '') + '" data-notif-title="' + esc(n.title || '') + '">' +
+    html += '<div class="notif-item' + (isU ? ' unread' : '') + '" data-notif-id="' + esc(n.id) + '" data-notif-link="' + esc(n.link || '') + '" data-notif-type="' + esc(n.type || '') + '" data-notif-space-id="' + esc(n.space_id || '') + '" data-notif-title="' + escAttr(n.title || '') + '">' +
       '<div class="notif-item-icon" style="background:' + color + '22">' + icon + '</div>' +
       '<div class="notif-item-body">' +
       '<div class="notif-item-title' + (isU ? ' bold' : '') + '">' + esc(n.title || 'Notification') + '</div>' +
