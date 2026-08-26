@@ -69,6 +69,16 @@ app.delete('/api/comments/:id', requireAuth, wrap(async (req, res) => {
   const spaceId = await getCommentIssueSpaceId(q, req.params.id);
   if (!spaceId) return res.status(404).json({ error: 'Not found' });
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'comment.delete'))) return;
+  // Same ownership rule as the PUT route just above, and for the same reason:
+  // ACTION_MIN_ROLE only answers "may this tier touch comments at all" -- a
+  // member should be able to delete their OWN comment, but not anyone else's,
+  // so ownership is row-level and checked here where the row is. The author,
+  // or an org admin, matching worklogs.js:47 and the PUT route's precedent.
+  const existing = (await q('SELECT user_id FROM comments WHERE id=$1', [req.params.id])).rows[0];
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (existing.user_id !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'owner') {
+    return res.status(403).json({ error: 'You can only delete your own comments.' });
+  }
   await q('DELETE FROM comments WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
