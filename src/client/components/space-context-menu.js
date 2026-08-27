@@ -456,6 +456,106 @@ function bindDescImageTray(root) {
   });
 }
 
+// insertDescImageAtCaret leaves a trailing <br> right after every inline image
+// (so the next keystroke lands on a fresh line below it, not beside it -- see
+// that function's own comment). That <br> is invisible, so the very FIRST
+// Backspace pressed right after pasting an image -- before anything else is
+// typed -- silently consumes the <br> with no change on screen at all, and a
+// SECOND press is what actually removes the image. Reported as "Backspace
+// doesn't remove the image": someone presses it once, sees nothing happen,
+// and stops. A real word processor deletes the image on that first press.
+// This intercepts exactly that one caret position -- right after a bare <br>
+// whose immediately preceding sibling is the image -- and removes the image
+// then and there, leaving the (now genuinely blank) line's <br> for a second,
+// separate Backspace to clean up, same as deleting an image followed by an
+// empty line in Word. Every other Backspace/Delete position is untouched;
+// native contenteditable editing already handles those correctly (verified:
+// once text is typed after an image, the browser drops this placeholder <br>
+// on its own, and a lone Backspace right after the image itself already
+// removes it in one press).
+function bindDescBackspaceMerge(root) {
+  if (!root || root._descBackspaceBound) return;
+  root._descBackspaceBound = true;
+
+  function isDescImg(n) { return !!(n && n.nodeType === 1 && n.classList && n.classList.contains('desc-inline-img')); }
+  function nodeBefore(range) {
+    if (range.startContainer.nodeType === 3) {
+      return range.startOffset === 0 ? range.startContainer.previousSibling : null;
+    }
+    return range.startOffset > 0 ? range.startContainer.childNodes[range.startOffset - 1] : null;
+  }
+  function nodeAfter(range) {
+    if (range.startContainer.nodeType === 3) {
+      return range.startOffset === range.startContainer.length ? range.startContainer.nextSibling : null;
+    }
+    return range.startContainer.childNodes[range.startOffset] || null;
+  }
+
+  root.addEventListener('keydown', function (e) {
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+    var range = sel.getRangeAt(0);
+    if (!root.contains(range.startContainer)) return;
+
+    if (e.key === 'Backspace') {
+      var before = nodeBefore(range);
+      // Two DOM shapes reach the exact same "nothing but this image is behind
+      // the caret" state, and browsers do not agree on which one the caret
+      // lands in: right after the placeholder <br> (case A -- the state
+      // insertDescImageAtCaret itself leaves the caret in), or right after
+      // the image directly with that <br> still one further sibling ahead
+      // (case B -- observed after backspacing away real typed text that
+      // followed the image; Chrome collapses the caret between the image and
+      // its <br>, not past the <br>). Both must delete the image in one
+      // press, not two, for the fix to actually hold regardless of how the
+      // caret got there.
+      var img = null;
+      if (before && before.nodeName === 'BR' && isDescImg(before.previousSibling)) {
+        img = before.previousSibling;                 // case A
+      } else if (isDescImg(before)) {
+        img = before;                                  // case B
+      }
+      if (img) {
+        e.preventDefault();
+        var nextAfterImg = img.nextSibling;
+        img.remove();
+        var caret = document.createRange();
+        if (nextAfterImg) {
+          caret.setStartBefore(nextAfterImg);
+        } else {
+          caret.selectNodeContents(root);
+        }
+        caret.collapse(!!nextAfterImg);
+        sel.removeAllRanges();
+        sel.addRange(caret);
+        if (root.id === 'drawerDesc' || root.id === 'drawerFixDesc') markDrawerDescDirty(root.id);
+      }
+    } else {
+      // Delete (forward): symmetric case -- caret sits right before the image
+      // itself, so forward-delete removes it in one press same as Backspace
+      // does when approaching from the other side.
+      var after = nodeAfter(range);
+      if (isDescImg(after)) {
+        e.preventDefault();
+        var next = after.nextSibling;
+        after.remove();
+        var caret2 = document.createRange();
+        if (next) {
+          caret2.setStartBefore(next);
+          caret2.collapse(true);
+        } else {
+          caret2.selectNodeContents(root);
+          caret2.collapse(false);
+        }
+        sel.removeAllRanges();
+        sel.addRange(caret2);
+        if (root.id === 'drawerDesc' || root.id === 'drawerFixDesc') markDrawerDescDirty(root.id);
+      }
+    }
+  });
+}
+
 function addDescInlineImageChip(tray, url, alt, fp) {
   if (!tray) return;
   var chip = document.createElement('div');
@@ -605,6 +705,7 @@ function initDescEditorImageTrays() {
     // Kept as a safety net for any legacy tray that reaches an editor by another
     // path; once normalised there are no chips left for it to act on.
     bindDescImageTray(el);
+    bindDescBackspaceMerge(el);
   });
 }
 
