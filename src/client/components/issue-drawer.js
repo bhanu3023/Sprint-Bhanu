@@ -1158,6 +1158,13 @@ function bindDrawerEdits(issue) {
     if (commentBody) toast('Comment added');
   };
 
+  $('drawerCommentCancel').onclick = function () {
+    var _ci = $('drawerCommentInput');
+    if (_ci) { if (_ci.value !== undefined) _ci.value = ''; else _ci.innerHTML = ''; }
+    _commentFiles = [];
+    _renderCommentFileList();
+  };
+
   $('drawerLogTimeBtn').onclick = function () {
     $('worklogIssueId').value = issueId;
     $('worklogDate').value = fmtDateISO(new Date());
