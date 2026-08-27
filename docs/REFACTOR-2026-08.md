@@ -1,10 +1,13 @@
 # Refactor and hardening, August 2026 — handoff
 
-65 commits on `manmadha`. **`main` has been deployed through `7551307`** — two
-commits, `078f447` (response compression) and `c959f98` (this document), are on
-`manmadha` only and have not been merged or pushed. This document exists so the
-work is legible to whoever touches it next, and so the running total of blind
-spots lives here instead of in conversation history no one can re-read.
+**`main` and `origin/manmadha` are both deployed and current through
+`63147c3`.** Since then, **14 commits sit on `manmadha` only** and have not been
+merged or pushed: one notification-routing fix, twelve making up the toast
+overhaul (§5a), and one closeout that reshapes server sentences into clauses,
+deletes an unreachable branch, and re-baselines the client (§10). This document
+exists so the work is legible to whoever touches it next, and so the running
+total of blind spots lives here instead of in conversation history no one can
+re-read.
 
 **Read this first, then [`AUDIT-FINDINGS.md`](../AUDIT-FINDINGS.md) and
 [`DEAD-CODE-INVENTORY.md`](DEAD-CODE-INVENTORY.md).** Those two record decisions
@@ -20,9 +23,12 @@ its fix (§2 — read that one, it's the case study), five measured indexes, a
 memory-safety cap on the largest endpoint, a credential leak closed, and
 response compression — each verified individually, each against real
 measurement rather than assumption. A verification harness was built alongside
-and extended twice more, and is the reason any of this is trustworthy.
-**Production is deployed and current**, through `7551307`; compression is the
-only functional change on `manmadha` not yet pushed.
+and extended twice more, and is the reason any of this is trustworthy. After all
+of that came the **first deliberate UI change** — a full rewrite of every toast
+message in the app (§5a), which is also where six new blind spots came from,
+including two error paths that would have thrown a `ReferenceError` the moment
+they fired. **Production is deployed and current** through `63147c3`; the toast
+overhaul and its closeout are the 14 commits on `manmadha` not yet pushed.
 
 ---
 
@@ -414,7 +420,7 @@ in `.env` for `dev-login.html`.
 
 | Check | Proves | Does NOT prove |
 |---|---|---|
-| `catdiff [A][B][C][D]` | all 42 client files are byte-identical to the original `app.js`; ranges tile 1..17295 once; un-applying declared moves reproduces pristine line-for-line | nothing about behaviour |
+| `catdiff [A][B][C][D][E]` | all 42 client files are byte-identical to the declared pristine reference; ranges tile 1..17794 once; the concatenation reproduces it byte-for-byte. Since the re-baseline (§10) that reference is the code as reviewed at that commit, **not** the original pre-split `app.js` | nothing about behaviour |
 | `serverdiff [SA][SB][SC][SD][SE]` | declared glue matches byte-for-byte, bodies are RAW-identical, lines tile 1..3204 once, require order preserved, and `[SE]` now proves every one of the 32 parts — pinned digest, byte-for-byte, restored on the next intentional change | `[SA]`/`[SB]` (raw tiling) skip parts flagged `modified` — **currently 21 of 32.** `[SE]` is the check that keeps this from decaying into a decoration: it re-verifies content, not just presence |
 | `libdiff` | all 7 `lib/` files byte-verified by pinned digest | nothing about behaviour; a pin is a claim about *this* content, re-pinned deliberately on every intentional change |
 | `[1] [2]` | `Object.keys(window)` and their typeofs unchanged | misses top-level `const`/`let` — that is what `[2b]` is for |
@@ -432,11 +438,11 @@ blind spot 9.
 
 ---
 
-## 5. All sixteen blind spots
+## 5. All twenty-two blind spots
 
 Checks that passed while verifying nothing, or measurements that would have
-supported the wrong conclusion. **Fourteen were found in existing work or
-existing methodology. Two were introduced by hardening itself** — the
+supported the wrong conclusion. **Nineteen were found in existing work or
+existing methodology. Three were introduced by hardening itself** — the
 distinction matters, because hardening that introduces its own defects is a
 different failure mode from inheriting one.
 
@@ -459,6 +465,13 @@ different failure mode from inheriting one.
 | 15 | **Unthrottled localhost cannot measure a transfer-size change.** Response compression's raw before/after load time on localhost was neutral-to-slightly-worse — a defensible "not worth it, revert" verdict, reached from real numbers, not carelessness. The *same code*, measured under CDP-simulated realistic network conditions, was 63.8% faster on simulated 4G and 32.5% faster on 25Mbps broadband. Same code, opposite conclusions, and the wrong one was the default measurement environment because localhost has no real transfer time to save and disproportionately exposes the CPU cost of compressing instead. **Lesson, stated plainly: transfer-size changes cannot be measured on localhost — network conditions must be simulated before concluding anything.** | **found** |
 | 16 | **A migration that silently skips its precondition, and never retries.** Migration 014 adds a unique index on `spaces.key` — but if a duplicate already exists at boot, it just logs a warning, skips creating the index, and still records itself as applied. `schema_migrations` never forgets that, so the index can stay missing *forever*, even after the duplicate is fixed by hand, because 014 has no path back to running again. This is the exact same class of defect as every other row in this table: a check that returns green (a clean boot, no thrown error) while verifying nothing durable. Found while investigating the AI-key incident (§2), not by inspection — reproduced independently on the local dev database first (space key `DEM`, same shape: one archived space, one active, both claiming it), proving the gap was systemic rather than a one-off. Fixed as migration 021, which resolves the duplicate and creates the index itself if 014 never could. | **found** |
 
+| 17 | **Toast text was rendered as HTML, and silently ate anything that looked like a tag.** All three notification renderers built their output by concatenating the caller's message into `innerHTML`. Real call sites interpolate values a user controls — an uploaded file's name, a custom field's name, a space name or key, a user's display name, an invitee's email — so a file named `<img src=x onerror=…>.png` executed on upload. But the *more instructive* half is the display bug hiding underneath: because the message was parsed as markup, ordinary text containing angle brackets was **thrown away**. A custom field genuinely named `Team & Product <Type>` rendered as `Team & Product ` — characters missing, no error, nothing to report. That is the better argument for `textContent` than the security one: the security hole needed an attacker, the truncation needed only a user with a normal name for something. Fixed at the sink rather than by escaping at ~170 call sites, so a future caller cannot forget. | **found** |
+| 18 | **One failure, two toasts — the useless one on top.** `api()` toasts every non-`silent` failure itself, and call sites with their own `catch` toast again, so a single failed action raised two error toasts: the wrapper's raw text (`Internal server error`, or a bare HTTP `statusText`) stacked above the specific message. This had been true for a long time and was *invisible* while the second message was `Save failed` — two useless toasts read as one clumsy toast. It only became obvious once the second message was worth reading. Fixed by passing `{silent:true}` wherever a call site renders its own message, and by mapping the raw text inside `api()` so the paths that *don't* have their own message still read properly. **The lesson: improving one message exposed a defect in a different layer. Quality work surfaces adjacent defects, and the count of things wrong can go up as a direct result of fixing something.** | **found** |
+| 19 | **`.catch(function () { … })` — the error discarded before anything could show it.** Five sites (both comment handlers, all three All Work inline menus) caught with **no parameter**, so the API's own explanation was fetched, thrown, and dropped in favour of a fixed string. `You can only edit your own comments.` — the exact sentence the permission model exists to produce — was computed by the server, sent over the wire, and then deliberately ignored. Not a missing feature: an actively discarded one, and invisible because a toast still appeared. | **found** |
+| 20 | **Two error paths that would have thrown the moment they fired.** The space "User added" alert referenced `userName` and the org role-change alert referenced `name`; neither identifier existed in its scope. Both would have raised a `ReferenceError` instead of showing anything. They were reachable, ordinary success paths — not obscure branches — and nothing had ever exercised them, so nothing had ever noticed. Found only by reading every message in the app rather than every message that looked suspicious. **A message nobody has watched render is not tested, even when the code around it is.** | **found** |
+| 21 | **A live `FileList` emptied before an async handler read it.** *Introduced by this work.* The attachment-upload confirmation reported `0 attachments uploaded`: it read `files.length` in the response handler, but `files` is the input element's live `FileList` and the handler resets `e.target.value = ''` at the end, which empties it before the response lands. Caught by triggering the message rather than reading the code — the code looks correct, and would pass any review. Fixed by capturing the names synchronously at submit. | **introduced** |
+| 22 | **The suite's DB-drift check cannot tell "tests left rows behind" from "a human edited concurrently."** `RESULT: FAIL / db drift: DETECTED` fired twice in one afternoon with all 94 tests passing, both times because someone was editing real issues in a browser while the suite ran. The check compares a fingerprint before and after and attributes any difference to the suite. It is still worth having — it caught blind spot 14 — but its failure message asserts a cause it has not established, which is the same defect the rest of this table is about, pointed the other way. The discipline that saved it each time: capture twice with identical code to establish a zero noise floor **before** attributing a diff to your own change. That habit caught three separate false alarms across this work (`PTM-19`'s status changing mid-run, leftover scratch sprints in a dropdown, and this). | **found** |
+
 A related one, also introduced: the runtime probe used for dead-code analysis
 reported two known-live controls (`barChart`, `renderAllWork`) as never invoked,
 because wrappers installed after page load and every render fires during load.
@@ -470,6 +483,99 @@ supposed to catch. A green check that has never been shown to go red is decorati
 Where that habit was skipped even once — an unthrottled load-time comparison, a
 teardown that only ran on the happy path — it cost a wrong conclusion, not just a
 near miss.
+
+---
+
+## 5a. The toast overhaul
+
+The first deliberate UI change in this work. Everything before it was
+behaviour-preserving by construction; this one changes what the user reads, on
+purpose, and so needed a different kind of proof.
+
+**Why `[3]` could not prove it.** A toast lives 3.6 seconds. `[3]` captures 47
+idle pages, so it cannot see one. Rigging a held-open toast would have changed
+timing and tested a state that never occurs. So the proof is
+**trigger-and-verify**: for every message changed, perform the real user action
+and read what actually rendered. `[3]` stayed in use as a regression check on
+everything *other* than toast text — and because it cannot see a toast, any
+non-empty `[3]` during this work was by definition **not** the message change,
+which is what made it useful.
+
+That inversion paid for itself. `[3]` came back non-empty three times: twice from
+concurrent edits to real issues, once from leftover scratch sprints in a
+dropdown. None were the code. It also caught the one case where a message *is*
+visible to `[3]`: the invite modal's `onclick="…toast('Copied!')"` is toast text
+authored in an HTML attribute, so it lives in the static DOM. That commit changed
+all 47 pages by exactly 11 bytes, one line each — `'Copied!'` → `'Invite link
+copied'`, a length delta of exactly 11.
+
+**What changed.** 12 commits, one per area, ~170 call sites reviewed:
+
+- Failures say what failed **and why**. `Save failed` → `ENG-12 update failed —
+  you do not have permission`. Server text written for a machine (a bare 500
+  body, a raw HTTP `statusText`) is mapped to plain language on the client; text
+  the API already writes for a user passes through with its detail intact.
+- Successes say **what changed**, not that something did. `Saved` → `ENG-12 moved
+  to In Review`, `ENG-12 assigned to Alex Kumar`, `Sprint 4 completed — 21 story
+  points`, `1h 30m logged on ENG-12`, `qa-report.pdf uploaded`.
+- **Nothing new was computed.** Every identifier used was already at the call
+  site: the field and value passed to the save function, the key on a POST
+  response, the velocity `/complete` already returns and the client was throwing
+  away, the name in the form the user just typed. No server response changed —
+  the entire overhaul is client-only, which `serverdiff` and `libdiff` confirm.
+- A batch reports a count (`ENG-12 updated — 3 fields`) rather than listing
+  fields, so the line cannot grow without bound.
+- The same event reads the same way everywhere. All Work's inline status menu and
+  the drawer's inline status field now produce identical text, from one shared
+  `issueChangeSummary()`.
+
+**Mechanism rule**, for choosing between the two renderers:
+
+> `toast()` for an action that completed in place, on the page the user is
+> already looking at. `popupAlert()` for a message that must outlive a
+> navigation, or that tells the user how to undo or continue.
+
+Under that rule, adding a member (a `popupAlert`) was wrong and is now a toast,
+matching removing one. Deleting a sprint (toast, stays on the backlog) and
+deleting a space (`popupAlert`, navigates to Home and has to say it is
+recoverable) are **not** inconsistent and were left alone.
+
+**Vocabulary: "issue", never "ticket".** Nine toasts and five dialog strings said
+"ticket". The UI, the routes, the schema and `CLAUDE.md` all say *issue*, so this
+was a consistency fix, not a preference — the app was contradicting itself, and
+in one flow contradicting itself twice on the same screen (a permission toast
+saying "issues" above a confirm dialog saying "ticket"). Banned words were swept
+app-wide rather than at the sites the inventory happened to list: `successfully`
+was gone from 3 toasts *and* 7 `popupAlert`s, and every `!` from both.
+
+**Two messages could not be triggered, and both are findings rather than gaps:**
+
+- `crud/issue.js`'s modal-edit branch. Its message could not fire because the
+  branch is **unreachable**: it reads the hidden `#issueId` input, and nothing in
+  the codebase writes to that input except `resetIssueForm()`, which sets it to
+  `''`. Three references total, one modal title path, all of them "Create".
+  Improving a string in dead code is the wrong move, so **the branch was
+  deleted.**
+- `backlog.js`'s "that sprint is completed" guard. Completed lanes render without
+  drop handlers by design, so there is no drop target to reach it. It is
+  belt-and-braces for a path that does not exist, exactly as its own comment
+  says, and was left in place.
+
+Two more needed setup before they were reachable at all and are otherwise
+verified: `moved to <sprint>` (every Engineering sprint was `completed`, and the
+picker only offers planning/active) and the board's status drop (no active
+sprint → no columns rendered).
+
+**Grafted sentences.** Reasons render after a dash, so a server sentence arrives
+with a sentence-initial capital and a full stop and reads bolted on.
+`toReasonClause()` lowers the first letter and strips one trailing period — but
+never touches a domain noun the app capitalises itself (`Sprint`, `Space`,
+`Issue`), an identifier (`space_id`, `ENG-12`), an acronym (`SMTP`), or a
+multi-sentence string, and strips only `.`, never `!`, `?`, `)` or an ellipsis.
+Tested against **all 88** distinct `error:` strings the server can return: 68
+reshaped, 20 left alone, 7 of those because they are multi-sentence. The one
+place a reason is shown standalone rather than after a dash wraps it back with
+`capitaliseFirst()`.
 
 ---
 
@@ -500,8 +606,9 @@ Be honest about these when planning further work.
 - **The container layer.** Docker is not installed on the development machine, so
   no local `docker build` was ever run against this exact tree. The real build
   happens on the server during deploy — which has now happened successfully
-  through `7551307`, so this is no longer purely theoretical, but compression
-  (`078f447`) has not been through a real container build yet.
+  through `63147c3`, so this is no longer purely theoretical. The 14 unpushed
+  commits touch no server file and add no dependency, so a container build is the
+  least of their risks.
 - **The rate limiter's 15-minute release.** Only restart-release was demonstrated.
   Note that once blocked, a correct password also gets 429 until the window expires
   — that is by design, but it means a legitimate user is locked out for 15 minutes.
@@ -509,7 +616,39 @@ Be honest about these when planning further work.
   instance count. Single container today.
 - **Frontend/browser test coverage beyond `flows.js`.** There is no
   component-level frontend test suite. Every frontend claim in this document rests
-  on the DOM-diff harness (`[3]`) plus 8 end-to-end flows — real, but narrow.
+  on the DOM-diff harness (`[3]`) plus 8 end-to-end flows — real, but narrow. The
+  toast overhaul (§5a) is the sharpest example: `[3]` structurally cannot see a
+  3.6-second toast, so every message claim rests on having triggered it by hand
+  once. Nothing stops a future edit from silently regressing one.
+
+- **`confirm()` vs `confirmDialog()` — two destructive-action dialogs out of
+  line.** Out of scope for the toast work and deliberately left alone, recorded
+  here so it is not lost. `_deleteComment` (`drawer-panels.js`) and `_prmDelete`
+  (`roadmap.js`) use the browser's native `confirm()`. Every other destructive
+  action in the app uses either `confirmDialog()` (app-styled, `#confirmYes`) or
+  `typedConfirmDialog()` (type-the-name-to-confirm, used for issues, sprints and
+  spaces). Three consequences: the two native ones look nothing like the rest of
+  the UI, they cannot be styled or themed, and they are the only destructive
+  actions with no typed-confirmation gate — deleting a comment is one
+  mis-click, whereas deleting an issue requires typing its key. It is the same
+  inconsistency class as the toast/popupAlert mismatch that *was* fixed (§5a);
+  it just belongs to the dialog layer. Cheap to fix (`confirmDialog()` is a
+  drop-in returning a promise), but it changes a confirmation flow, so it wants
+  its own commit and its own verification rather than being folded in.
+
+- **The 800ms debounce vs per-field messages — a product question, not a bug.**
+  The drawer coalesces edits made within 800ms into one PUT, so changing three
+  fields quickly yields `ENG-12 updated — 3 fields` rather than three specific
+  messages. That is correct under the stated rule (say the count, don't list
+  fields), but a user who just changed Status expecting `moved to In Review` sees
+  a count instead. What the alternative costs, if it is ever wanted: naming the
+  *last* field plus a count (`ENG-12 moved to In Review, +2 more`) needs no new
+  data — `autoSave` already receives each `(field, value)` pair and could record
+  the most recent one alongside the pending set, so it is a small change inside
+  one function with no server involvement. The real cost is deciding which field
+  "wins" when the batch is heterogeneous, and that is a judgement about what the
+  user was most likely watching, not something the code can derive. Left open
+  deliberately.
 - **Compression under a real container build, and on real production traffic
   patterns.** The CPU/concurrency numbers in §1.8 are from a synthetic
   30-concurrent single-endpoint hammer against a local test database, not
@@ -533,24 +672,30 @@ swap → health check → roll back the container on any failure.
 only acts if the container was actually swapped. DB restore from
 `/opt/backups/<newest>.sql`.
 
-**Current state, and this is the part that changed since the doc was first
-written: production IS deployed and current.** `main` and `origin/main` both
-sit at `7551307` — the AI-key incident and its fix (§2) are live, along with
-every security and data-integrity fix in this document up to that point.
-**`manmadha` is two commits ahead**: `078f447` (response compression) and
-`c959f98` (this document). Neither has been merged to `main` or pushed.
-Compression is the only *functional* change not live; the dry-run proof
-below (clean archive, old-tree overlay, and rollback, all booted and probed)
-is the standing evidence for whether it's ready to push, independent of when
-someone decides to.
+**Current state: production IS deployed and current.** `main` and `origin/main`
+both sit at `63147c3` — the AI-key incident and its fix (§2), response
+compression, and every security and data-integrity fix in this document are live.
+**`manmadha` is 14 commits ahead**, all of them user-facing message work: the
+sprint-notification routing fix (`06ee907`), the twelve-commit toast overhaul
+(`ac09119`..`d9b9e8b`, §5a), and the closeout (`3f4f1be`) that reshapes server
+sentences into clauses, deletes an unreachable branch, and re-baselines the
+client (§10). None has been merged to `main` or pushed.
+
+Unlike compression, these 14 are **client-only** — `serverdiff` and `libdiff`
+confirm zero server and zero `lib/` bytes changed, and no server response
+changed — so their deploy risk profile is different: no migration, no API
+contract change, nothing that can fail differently under a container build than
+it does locally. What they *do* change is what every user reads on almost every
+action, which is exactly the class of change `[3]` cannot see (§5a). Their
+evidence is trigger-and-verify, not DOM equality.
 
 Migrations: **22 total**, run automatically at server boot, all idempotent,
 verified to apply cleanly on a brand-new database and to no-op on re-run. The six
 added since the original refactor (`017`, `017b`, `018`, `019`, `020`, `021`) are
-covered in §1.6 — all have already run successfully in production as part of the
-`7551307` deploy.
+covered in §1.6 — all have already run successfully in production. **The 14
+unpushed commits add no migration.**
 
-**Things to know before pushing `078f447`:**
+**Things to know before pushing:**
 
 1. **Stale files persist on the server.** The deploy extracts the archive *over*
    `/opt/Sprint-Board` without wiping, so a file deleted from git stays on disk and
@@ -573,6 +718,116 @@ covered in §1.6 — all have already run successfully in production as part of 
 Decisions that need a person, not a measurement, plus the smaller open items.
 Full detail on the client-side items in `AUDIT-FINDINGS.md`.
 
+**Lighthouse (/?issue=ST-60, Perf 82 / A11y 76 / BP 88 / SEO 82): declined,
+with reasons, so none of these get re-opened from the score alone.** The
+report was a one-time PDF and is not retained in the repo; the reasoning below
+is the record of that review. `7d0c4c4` fixed everything that was attributes-
+only and pixel/behaviour-neutral (accessible names, alt text, the main
+landmark, the meta description). These six were NOT fixed, on purpose:
+
+1. **The paste-blocking false positive.** Lighthouse/axe flag any element that
+   intercepts a `paste` event as blocking assistive input. Six exist in this
+   app — `issue-drawer.js:64,687,1026`, `space-context-menu.js:685,718`,
+   `admin-settings.js:872` — and every one of them is the screenshot-paste
+   feature (pasting an image into a description, comment, or drawer field),
+   not a restriction. None calls `preventDefault()` on a plain-text paste, so
+   normal pasting is untouched. The finding is real as a pattern match and
+   false as a UX judgment; fixing it would mean removing the paste-screenshot
+   feature.
+2. **User-uploaded images (size/format).** Lighthouse wants next-gen formats
+   (WebP/AVIF) and explicit sizing for images. The images in question are
+   user-uploaded attachments and pasted screenshots (`issue_attachments`,
+   `/api/files/:id`) — there is no processing pipeline, and adding one
+   (re-encode on upload, generate a thumbnail set) is a project, not a
+   Lighthouse fix.
+3. **Minification.** `CLAUDE.md`: "No build step. The browser loads plain
+   `<script>` tags." Minifying would require introducing a build step for the
+   sole purpose of shaving bytes, which cuts against the repo's actual
+   constraint — every `.js` file is what ships, so it is also what gets
+   debugged in production.
+4. **Cache lifetimes.** `src/server/express-app.js:133-137` sets
+   `Cache-Control: no-cache, no-store, must-revalidate` on every served `.js`,
+   `.html` and `.css`, deliberately. There is no cache-busting (no content
+   hash in the filename, no build step to add one), so a long cache lifetime
+   here means a stale `app.js`/`utils/index.js` surviving a deploy — worse
+   than the performance hit of re-validating on every load.
+5. **Render-blocking CSS.** `styles.css` loads synchronously in `<head>`,
+   which is the standard blocking-stylesheet pattern Lighthouse always flags.
+   Deferring it would show an unstyled page for a beat (FOUC) on every load;
+   that tradeoff was not made for a Perf-score point.
+6. **Contrast.** Lighthouse's contrast checker runs against the shipped
+   palette (`STATUS_COLORS`, `PRIORITY_COLORS`, muted text tokens) and flags
+   combinations that are a deliberate brand/design choice, not an accident.
+   Changing them is a design decision, not something to fix as a side effect
+   of a performance pass.
+
+   **Traced to a concrete source on re-run (below): the user-avatar palette.**
+   `users.color` is assigned from a fixed set of 11 hex values, always paired
+   with hardcoded white initials text (`color:#fff`) in every avatar/badge
+   that renders them — `badges.js`, `init.js`'s topbar profile button, and
+   the drawer's `av2` element all do this. Checked all 11 against white:
+   **7 of 11 fail 4.5:1** (`#10b981` 2.54, `#f59e0b` 2.15, `#ff991f` 2.14,
+   `#ec4899` 3.53, `#ef4444` 3.76, `#8b5cf6` 4.23, `#6366f1` 4.47 — only
+   `#0052cc`, `#174F96`, `#64748b`, `#6b7280` clear the bar). This is a real,
+   systemic gap, not a one-off — a majority of users assigned one of the
+   seven low-contrast colors have unreadable-by-spec initials everywhere
+   their avatar renders. Not fixed here: swapping palette entries or making
+   the initials' text color contrast-aware is a **visual change** — every
+   avatar using one of those 7 colors would look different — which is
+   outside this pass's no-pixel-change scope. Flagged for a decision, not
+   fixed by default, for the same reason the original contrast item was
+   declined rather than silently patched.
+
+**The re-run.** `ST-60` no longer exists, so the audit target was `ENG-3` — an
+issue-drawer page, the same page type as the original report. Run with the
+`lighthouse` CLI against a real authenticated session (a minted session
+token, since the app reads its Bearer token from `localStorage`, which the
+audited page's own `?token=` bootstrap sets before the rest of the page
+loads), Chrome supplied by Playwright's bundled Chromium, headless:
+
+| | Perf | A11y | BP | SEO |
+|---|---|---|---|---|
+| original (`ST-60`) | 82 | 76 | 88 | 82 |
+| re-run (`ENG-3`) | 82 | **96** | **100** | **100** |
+
+Perf is flat — expected; none of the six declined-or-flagged items above are
+performance work, and localhost has no CDN/latency for compression to save
+on. The other three categories moved because `7d0c4c4`'s accessible-name/
+alt/landmark/meta-description fixes are exactly what this run priced in.
+
+Two more concrete a11y findings turned up on the re-run, both fixed, both
+attribute-only or dynamic-attribute-only — same no-pixel-change discipline
+as everything above:
+
+- **`unsized-images`**: `sidebarLogoImg` had no `width`/`height`, risking a
+  layout shift. Added `width="24" height="28"` — the PNG's actual intrinsic
+  ratio at its CSS-forced 28px height (275×315 natural → 24.44 ≈ 24), so the
+  attributes describe the size the browser was already going to render, not
+  a new one.
+- **`label-content-name-mismatch`**: the notification-count badge and the
+  profile-initials span are visible text inside a button that also carries
+  a static `aria-label` ("Notifications" / "Profile"), so a screen reader
+  announces the label but not the count or initials a sighted user sees.
+  **The obvious fix doesn't work** — tried `aria-hidden="true"` on the
+  visible span first, and the finding did not clear. Verified rather than
+  assumed: axe's rule checks whether the *visible* text is reflected in the
+  accessible *name*, and doesn't treat `aria-hidden` as an exemption from
+  that check, because hiding the count from assistive tech while a sighted
+  user still sees it is the same gap the rule exists to catch, not a fix for
+  it. The actual fix syncs `aria-label` itself wherever the visible text is
+  set — `Notifications: 4 unread`, `Profile: JS` — verified against the real
+  running app (not just the static HTML `renderTopbarProfile()` rewrites the
+  button's entire `innerHTML` on every render, so a static-only fix to
+  `index.html` would have been silently discarded at runtime) and confirmed
+  by a second Lighthouse run: `label-content-name-mismatch` 0 → 1.
+
+Verified: `node --check` on both edited files, full 47-page `[1] [2] [2b]`
+capture/compare empty, `[3]` differs on exactly the three lines above across
+all 47 pages and nothing else, `[4]` no new console errors, `catdiff` PASS
+(21 of 42 client parts pinned-modified — `notifications.js` and `init.js`
+were already in that set from earlier passes, this one re-pinned them),
+tests 94/94, flows 8/8, hotjar 138/138.
+
 **Decisions not made, on purpose (each needs a product call before any code
 changes):**
 
@@ -590,6 +845,100 @@ changes):**
 - **Per-process rate limiting.** Correct today (single container), wrong the
   day a second instance is added. Needs a shared store (Redis or the database
   itself) if that day comes.
+
+**Planned work, decided and deferred (not open questions — the call was made):**
+
+- **Ban `style` in stored HTML, once the content is migrated.** The comment/
+  description sanitiser (§5b) allows `style` on `img`, `div`, `span` and `p`.
+  That was a knowing trade, not an oversight: 8 stored bodies carry the inline
+  sizing for their images in a `style` attribute, so banning it outright would
+  have made every inline screenshot render at full size. What `style` still
+  permits is CSS redressing — a stored `position:fixed;z-index:9999` overlay
+  covering the app — which is real but far below script execution, and which
+  DOMPurify does not filter by default. The path out, in order: migrate the
+  bodies that use `style` onto classes, confirm no stored body needs it, then
+  drop `style` from `SANITISE_ALLOWED_ATTRS` in `src/client/utils/index.js` and
+  re-run the render-fidelity comparison. Recorded here so a future reader does
+  not mistake the allowance for carelessness, and does not silently ban the
+  attribute and break the existing content.
+- **The other two classes found in the same audit.** The sanitiser commit closed
+  the five sinks where stored HTML reaches `innerHTML`. Two separate classes
+  came out of the same audit; both are now **done** (below).
+
+**Closed: the embedded session token (data repair, no code change).**
+
+A live session token was embedded in stored text as `/api/files/<id>?t=<token>`,
+in content readable by every member of the space — a credential leak, not just
+untidy data.
+
+The first read was that `stripFileAuthTokensFromHtml` had a bug. **It does not.**
+`issue_history` shows the tokenised values were written at 2026-08-20 14:26Z and
+14:40Z, and the two commits that added stripping to those save paths landed at
+15:07Z (`80a95e2`, descriptions) and 15:29Z (`1746ca3`, comment edit). The rows
+predate the fix; nothing was missed. All five call sites strip today, and the one
+conditional (`if (bodyIsRich)` in `issue-drawer.js`) is correct because the
+non-rich branch stores the bare `f.url` with no token in it. `fileApiUrl` only
+ever emits `?t=`, never `&t=`, so the regex has no gap either.
+
+What made this look like a live leak was reading `issues.updated_at`, which bumps
+on *any* field change: the row's description was last written pre-fix, but later
+status and assignee edits moved `updated_at` to Aug 25. `issue_history` is the
+only column that answers "when was this field written".
+
+Repaired: 8 column-values across `issues.description` and
+`issue_history.old_value`/`new_value` (6 rows, 1 distinct token). The exact
+`?t=<token>` substring was removed rather than a pattern, so nothing else could
+be touched; `updated_at` was not bumped and no history row was written for the
+repair, since a history row would re-embed the value being removed. The session
+was deleted, and `GET /api/files/<id>?t=<token>` now returns **401** — verified
+dead, not merely absent from storage. Images still render: the stored `src` is
+now bare and `augmentFileUrlsInHtml` adds a fresh token per render (checked on
+both affected issues).
+
+Still worth doing, and **not** done here because it was not in scope: strip file
+tokens **server-side on write**. Every client save path strips correctly today,
+but that is five call sites each of which a future path could forget, and the
+server currently stores whatever it is given.
+
+**Closed: Class C, the attribute-escaping gap.** `esc()` escapes `& < >` but not
+quotes, so a user- or admin-controlled value interpolated into a quoted HTML
+attribute lets a quote in that value close the attribute early and add a new
+one — the same defect fixed for `title=` in `7d0c4c4`, found in the same audit
+as the sanitiser.
+
+The figure first reported here, **185 quote-sensitive sites**, was wrong — it
+came from a coarse scan that counted any interpolation whose attribute name
+*looked* sensitive, including `data-cf-id="' + fid + '"`, which cannot carry a
+quote because `fid` is a UUID. Re-traced by hand: **39 confirmed, 61 needing a
+human read**, 100 total across 18 files. The other 356 interpolations sit in
+attributes where a quote does nothing (style, class, data-sort-col, …) or carry
+ids, enums, numbers, or browser-constrained date/color-picker values — left
+alone, and the reason recorded per-file in `scripts/refactor-verify/manifest.json`
+so a future scan doesn't re-flag them.
+
+All 100 fixed with `escAttr()`, which already existed
+(`src/client/utils/index.js`) — this was mechanical application, not new
+infrastructure. Verified exploitable rather than theoretical: a display name of
+`Bob" onmouseover="…" x="` creates a real `onmouseover` on the rendered avatar
+that fires on hover (`badges.js`).
+
+**Found while tracing, not from the pattern scan:** `space/settings.js`'s
+required-issue-type checkbox list rendered its option **value with no escaping
+of any kind** — not even `esc()` — and its **label as raw unescaped text
+content**. That is markup injection via an admin-configured issue type name,
+worse than the missing-`escAttr` pattern this pass otherwise fixes, since it
+needs no quote at all — a type named `<img src=x onerror=...>` would have run
+for anyone viewing that settings screen. Fixed alongside it:
+`escAttr(c.v)` / `esc(c.l)`.
+
+Verified: full 47-page DOM capture before/after — `[1] [2] [2b]` empty (no
+globals lost or added beyond what already existed), all 47 pages
+byte-identical, no new console errors; `catdiff` PASS (21 of 42 client parts
+now declared modified, all 42 pinned); tests 94/94, flows 8/8. Live injection
+proof against both the settings.js bug and the general pattern (using
+`ENG-13`'s real title, which contains a literal `""`) confirms `escAttr` holds
+the original text intact with no attribute breakout, where `esc()` alone would
+have produced a dangling, unclosed attribute.
 
 **Smaller open items:**
 
@@ -612,14 +961,47 @@ changes):**
 
 ## 10. The rule that made this work
 
-`catdiff` proves the frontend is byte-identical to what it was before any of this
-started — **42 of 42 files**, and `catdiff` has **zero** occurrences of `modified`.
-Deleting one line inside a client file would require adding that flag, and the
-server tree shows the price: 32/32 byte-verified at the start of this document's
-history, **11/32 raw-byte-verified now** — but **32 of 32 pinned-digest-verified**
-(`[SE]`, added specifically because raw coverage alone was becoming a decaying,
-uninformative number). `lib/` sits at **7 of 7**, added after blind spot 13 showed
-it had no coverage at all.
+`catdiff` proves the frontend is byte-identical to a declared reference —
+**42 of 42 files**, with **zero** occurrences of `modified`.
+
+That number was true against the *original* pre-split `app.js` for most of this
+document's history. The toast overhaul (§5a) changed 26 client files on purpose,
+and `modified:true` climbed to **28 of 42** — two-thirds of the client verified
+only by its own pins, no longer against anything external. That is precisely the
+erosion the server tree had already demonstrated, and it is what `modified:true`
+does by design: it buys a deliberate change at the cost of permanent raw
+coverage, so the number only ever falls.
+
+So the client was **re-baselined**: the current parts became the new pristine,
+every `modified` flag was cleared, and `[A]`/`[B]`/`[C]`/`[D]` cover all 42 again.
+This is a real trade, stated plainly — the client is now byte-verified against
+**the code as reviewed at the re-baseline commit**, not against the original
+`app.js`. What that still buys is the thing that matters day to day: no byte can
+change from here without someone declaring it. What it gives up is the link back
+to the pre-refactor original, which is why the outgoing baseline was verified
+byte-identical to `git show c22c688:app.js` (LF→CRLF) *before* being replaced, and
+kept.
+
+The re-baseline was falsified five ways before being trusted — a changed byte, a
+changed `<script>` order, a corrupted snapshot, a deleted part, an appended line —
+each of which must make `catdiff` go red, and each of which did. The corrupted
+snapshot is caught by a stronger guard than expected: the snapshot's own sha256 is
+pinned in the manifest, so the reference cannot be quietly re-pointed by editing
+it. Re-baselining is now a guarded tool
+(`scripts/refactor-verify/rebaseline-client.js`, refuses to run without
+`--confirm`) rather than something done by hand.
+
+Current coverage:
+
+| Tree | Raw byte-verified | Pinned-digest-verified |
+|---|---|---|
+| client (42 parts) | **42 of 42** — against the re-baseline, not the original `app.js` | 42 of 42 |
+| server (32 parts) | 11 of 32 (`modified:true` on 21) | 32 of 32 (`[SE]`) |
+| `lib/` (7 files) | n/a — never split from anything | 7 of 7 |
+
+The server tree is the untreated control: it shows what the client looked like
+before this, and what it will look like again if `modified:true` is allowed to
+accumulate instead of being periodically reset.
 
 That guarantee was deliberately protected over removing ~300 lines of code that
 nothing calls, over multiple rounds of behavioural fixes, over a production

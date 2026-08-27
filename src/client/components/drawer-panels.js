@@ -320,11 +320,11 @@ window._submitLink = async function() {
       target_id: targetId,
       link_type: linkType
     }, { silent: true });
-    toast('Issue linked', 'success');
+    toast(linkedPairText(S.drawerIssueId, targetId), 'success');
     window._hideLinkDialog();
     await _refreshDrawerLinks();
   } catch(e) {
-    toast(e.message || 'Failed to create link', 'error');
+    toast('Link failed — ' + errorReason(e), 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Link'; }
   }
@@ -337,7 +337,7 @@ window._removeLink = async function(linkId) {
     await api('/api/links/' + linkId, 'DELETE', null, { silent: true });
     toast('Link removed', 'success');
     await _refreshDrawerLinks();
-  } catch(e) { toast(e.message || 'Failed to remove link', 'error'); }
+  } catch(e) { toast('Link removal failed — ' + errorReason(e), 'error'); }
 };
 
 // Store current issue data for tab switching
@@ -363,13 +363,17 @@ function _renderActivityTab(tab, issue) {
     var name = user ? user.name : (cm.user_name || 'Unknown');
     var color = (user && user.color) || cm.user_color || '#6b7280';
     var btnStyle = 'background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:2px 8px;border-radius:4px;display:inline-flex;align-items:center;gap:4px';
-    var actionBtns = '<span style="margin-left:auto;display:inline-flex;gap:4px">' +
+    // Mirrors the server's ownership rule exactly (comments.js PUT/DELETE:
+    // author, or an ORG admin -- not a space site_admin). Showing a button
+    // that always 403s is worse than not showing it.
+    var canModify = cm.user_id === S.currentUser || isOrgAdminUser();
+    var actionBtns = canModify ? ('<span style="margin-left:auto;display:inline-flex;gap:4px">' +
       '<button onclick="window._editComment(\'' + cm.id + '\')" style="' + btnStyle + '" title="Edit"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11l.178-.178z"/></svg>Edit</button>' +
       '<button onclick="window._deleteComment(\'' + cm.id + '\')" style="' + btnStyle + ';color:#dc2626" title="Delete"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>Delete</button>' +
-      '</span>';
+      '</span>') : '';
     var bodyHtml = (function(body) {
       if (/<[a-z][\s\S]*>/i.test(body)) {
-        var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
+        var safe = sanitiseStoredHtml(body);
         // A comment that has been through the rich-edit-and-save cycle below
         // stores its images as real <img src="/api/files/id"> (no token, by
         // design — see _saveComment) rather than the [img:name|url] markup the
@@ -378,11 +382,18 @@ function _renderActivityTab(tab, issue) {
         return augmentFileUrlsInHtml(safe);
       }
       var html = highlightMentionsInCommentBody(body);
+      // fname is an UPLOADED FILENAME -- user-controlled -- and was
+      // interpolated raw into a title="..." attribute and into element text.
+      // A filename containing a double quote broke out of the attribute, and
+      // one containing markup was parsed as markup: the same defect as the
+      // toast renderer (blind spot 17), in a different renderer. escAttr for
+      // the attribute (it escapes quotes, which esc does not), esc for text.
+      // alt is added at the same time so the image has an accessible name.
       html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
-        return '<div style="margin-top:8px"><img src="' + fileApiUrl(url) + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" onclick="window.open(this.src)" title="' + fname + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + fname + '</div></div>';
+        return '<div style="margin-top:8px"><img src="' + fileApiUrl(url) + '" alt="' + escAttr(fname) + '" style="max-width:300px;max-height:200px;border-radius:6px;border:1px solid #dfe1e6;cursor:pointer;display:block" title="' + escAttr(fname) + '"><div style="font-size:11px;color:#6b778c;margin-top:2px">📷 ' + esc(fname) + '</div></div>';
       });
       html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
-        return '<div style="margin-top:6px"><a href="' + fileApiUrl(url) + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + fname + '</a></div>';
+        return '<div style="margin-top:6px"><a href="' + fileApiUrl(url) + '" target="_blank" style="color:#0052cc;text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #dfe1e6;border-radius:4px;font-size:13px;background:#f4f5f7">📎 ' + esc(fname) + '</a></div>';
       });
       return html;
     })(cm.body);
@@ -469,14 +480,14 @@ function _renderActivityTab(tab, issue) {
 
   window._deleteComment = function(id) {
     if (!confirm('Delete this comment?')) return;
-    api('/api/comments/' + id, 'DELETE').then(function() {
+    api('/api/comments/' + id, 'DELETE', null, { silent: true }).then(function() {
       var issueId = S.drawerIssueId;
       if (issueId) {
         api('/api/issues/' + issueId).then(function(fresh) {
           renderDrawerActivity(fresh);
         }).catch(function(){});
       }
-    }).catch(function() { toast('Failed to delete comment', 'error'); });
+    }).catch(function(e) { toast('Comment delete failed — ' + errorReason(e), 'error'); });
   };
 
   window._saveComment = function(id) {
@@ -489,14 +500,14 @@ function _renderActivityTab(tab, issue) {
     // the token verbatim bakes today's token in permanently.
     var newBody = stripFileAuthTokensFromHtml(richEl.innerHTML.trim());
     if (!newBody || newBody === '<br>') return;
-    api('/api/comments/' + id, 'PUT', { body: newBody }).then(function() {
+    api('/api/comments/' + id, 'PUT', { body: newBody }, { silent: true }).then(function() {
       var issueId = S.drawerIssueId;
       if (issueId) {
         api('/api/issues/' + issueId).then(function(fresh) {
           renderDrawerActivity(fresh);
         }).catch(function(){});
       }
-    }).catch(function() { toast('Failed to save comment', 'error'); });
+    }).catch(function(e) { toast('Comment save failed — ' + errorReason(e), 'error'); });
   };
 
   function historyHtml(h) {
@@ -676,7 +687,7 @@ function renderDrawerAttachments(attachments) {
       '<a href="' + esc(fileApiUrl(a.filename)) + '" target="_blank" style="font-size:13px;color:var(--accent);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Click to open">' + esc(a.original_name) + '</a>' +
       '<div style="font-size:11px;color:var(--text3)">' + fmtSize(a.size) + (a.uploader_name ? ' · ' + esc(a.uploader_name) : '') + ' · ' + fmtDateTime(a.created_at) + '</div>' +
       '</div>' +
-      '<a href="' + esc(fileApiUrl(a.filename)) + '" download="' + esc(a.original_name) + '" title="Download" style="color:var(--text3);font-size:15px;text-decoration:none;padding:2px 4px;border-radius:4px;line-height:1" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'">⬇</a>' +
+      '<a href="' + esc(fileApiUrl(a.filename)) + '" download="' + escAttr(a.original_name) + '" title="Download" style="color:var(--text3);font-size:15px;text-decoration:none;padding:2px 4px;border-radius:4px;line-height:1" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'">⬇</a>' +
       '<button title="Rename" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--text3);padding:2px 4px;border-radius:4px" onmouseover="this.style.color=\'var(--accent)\'" onmouseout="this.style.color=\'var(--text3)\'" onclick="renameAttachment(\'' + a.id + '\',\'' + esc(a.original_name).replace(/'/g,"&#39;") + '\')">✏</button>' +
       (canDelete ? '<button class="btn btn-sm btn-outline text-danger" style="padding:2px 8px;font-size:11px" onclick="deleteAttachment(\'' + a.id + '\')">✕</button>' : '') +
       '</div>';
@@ -692,7 +703,7 @@ window.renameAttachment = async function(id, currentName) {
     var issue = await api('/api/issues/' + S.drawerIssueId);
     if (issue) renderDrawerAttachments(issue.attachments || []);
     toast('Attachment renamed');
-  } catch(e) { toast('Rename failed', 'error'); }
+  } catch(e) { toast('Attachment rename failed — ' + errorReason(e), 'error'); }
 };
 
 window.deleteAttachment = async function(id) {
@@ -940,10 +951,10 @@ async function renderDrawerCombinationField(issueId, spaceId, cfValues, productT
 
 function buildCombinationComboboxHtml(fieldId, selectedVal) {
   selectedVal = selectedVal || '';
-  return '<div class="combo-box" data-cf-id="' + esc(fieldId) + '" data-value="' + esc(selectedVal) + '">' +
+  return '<div class="combo-box" data-cf-id="' + esc(fieldId) + '" data-value="' + escAttr(selectedVal) + '">' +
     '<div class="combo-input-wrap">' +
       '<svg class="combo-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
-      '<input type="text" class="combo-input" placeholder="Search source e.g. Box, SharePoint" value="' + esc(selectedVal) + '" autocomplete="off" spellcheck="false">' +
+      '<input type="text" class="combo-input" placeholder="Search source e.g. Box, SharePoint" value="' + escAttr(selectedVal) + '" autocomplete="off" spellcheck="false">' +
       '<button type="button" class="combo-clear" title="Clear"' + (selectedVal ? '' : ' hidden') + '>×</button>' +
       '<span class="combo-chevron" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></span>' +
     '</div>' +
@@ -1003,7 +1014,7 @@ function bindCombinationCombobox(el, config) {
     listEl.innerHTML = matches.map(function (o, i) {
       var active = o === selectedVal;
       var hi = i === highlightIdx;
-      return '<button type="button" class="combo-option' + (active ? ' is-selected' : '') + (hi ? ' is-highlighted' : '') + '" data-val="' + esc(o) + '">' + esc(o) + '</button>';
+      return '<button type="button" class="combo-option' + (active ? ' is-selected' : '') + (hi ? ' is-highlighted' : '') + '" data-val="' + escAttr(o) + '">' + esc(o) + '</button>';
     }).join('');
     emptyEl.hidden = matches.length > 0;
     listEl.hidden = matches.length === 0;
@@ -1257,7 +1268,7 @@ function buildProductTypeCheckboxListHtml(selectedTypes, ptOptions) {
     var label = t.l != null ? t.l : getProductTypeLabel(val);
     var checked = selectedTypes.indexOf(val) >= 0;
     return '<label class="pt-combo-check" title="' + escAttr(label) + '">' +
-      '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + esc(val) + '"' + (checked ? ' checked' : '') + '>' +
+      '<input type="checkbox" class="pt-combo-cb-input pt-type-cb" value="' + escAttr(val) + '"' + (checked ? ' checked' : '') + '>' +
       '<span class="pt-combo-check-label">' + esc(label) + '</span></label>';
   }).join('');
 }
@@ -1307,7 +1318,7 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
       var checked = selectedCombos.indexOf(c) >= 0;
       // title carries the full value — labels are single-line with an ellipsis.
       return '<label class="pt-combo-check" title="' + escAttr(c) + '">' +
-        '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + esc(c) + '"' + (checked ? ' checked' : '') + '>' +
+        '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + escAttr(c) + '"' + (checked ? ' checked' : '') + '>' +
         '<span class="pt-combo-check-label">' + esc(c) + '</span></label>';
     }).join('');
     html += '</div>';
@@ -1643,7 +1654,7 @@ function getCustomFieldRenderType(field) {
 function buildCFSelectWrapInnerHtml(fid, ftype, opts, val, searchPlaceholder, isCombination) {
   var isMultiSel = ftype === 'multi_select';
   var selected = val ? String(val).split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
-  var displayVal = selected.length ? esc(selected.join(', ')) : '';
+  var displayVal = selected.length ? escAttr(selected.join(', ')) : '';
   var filterPh = searchPlaceholder || (isCombination ? 'Search source e.g. Box…' : 'Search…');
   var comboClass = isCombination ? ' cf-combination-select' : '';
   return '<div class="cf-select-wrap' + comboClass + '" data-cf-id="' + fid + '" data-multi="' + (isMultiSel ? '1' : '0') + '"' + (isCombination ? ' data-combination="1"' : '') + '">' +
@@ -1663,7 +1674,7 @@ function buildCFSelectWrapInnerHtml(fid, ftype, opts, val, searchPlaceholder, is
         var checkboxHtml = isMultiSel
           ? '<input type="checkbox" class="cf-sel-opt-checkbox" style="pointer-events:none;margin-right:8px" tabindex="-1"' + (sel ? ' checked' : '') + '>'
           : '';
-        return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + esc(o) + '">' + checkboxHtml + esc(o) + '</div>';
+        return '<div class="cf-sel-opt' + (sel ? ' cf-sel-opt-active' : '') + '" data-val="' + escAttr(o) + '">' + checkboxHtml + esc(o) + '</div>';
       }).join('') +
       '</div>' +
       (isCombination ? '<div class="cf-sel-empty" style="display:none">No combinations match your search</div>' : '') +
@@ -1875,7 +1886,14 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
           .filter(function (f) { return f.space_id != spaceId; })
           .concat(fetched);
       }
-    } catch(e) {}
+    } catch (e) {
+      // Was catch(e) {} followed by rendering nothing, so a failed fetch looked
+      // exactly like a space with no custom fields -- the fields were simply
+      // missing from the drawer with no way to tell why.
+      toast('Could not load custom fields — ' + errorReason(e), 'error');
+      c.innerHTML = '<p class="text-muted text-sm">Custom fields could not be loaded.</p>';
+      return;
+    }
   }
 
   if (!spaceFields.length) { c.innerHTML = ''; return; }
@@ -1908,13 +1926,13 @@ async function renderDrawerCustomFields(cfValues, issueId, spaceId) {
     var inputHtml = '';
 
     if (ftype === 'text') {
-      inputHtml = '<input type="text" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '" placeholder="—">';
+      inputHtml = '<input type="text" class="input input-sm" data-cf-id="' + fid + '" value="' + escAttr(val) + '" placeholder="—">';
     } else if (ftype === 'textarea') {
       inputHtml = '<textarea class="input input-sm" data-cf-id="' + fid + '" rows="8" placeholder="—">' + esc(val) + '</textarea>';
     } else if (ftype === 'number') {
-      inputHtml = '<input type="number" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '" placeholder="—">';
+      inputHtml = '<input type="number" class="input input-sm" data-cf-id="' + fid + '" value="' + escAttr(val) + '" placeholder="—">';
     } else if (ftype === 'date') {
-      inputHtml = '<input type="date" class="input input-sm" data-cf-id="' + fid + '" value="' + esc(val) + '">';
+      inputHtml = '<input type="date" class="input input-sm" data-cf-id="' + fid + '" value="' + escAttr(val) + '">';
     } else if (ftype === 'checkbox') {
       inputHtml = '<input type="checkbox" data-cf-id="' + fid + '" ' + (val === 'true' ? 'checked' : '') + '>';
     } else if (ftype === 'select' || ftype === 'multi_select') {

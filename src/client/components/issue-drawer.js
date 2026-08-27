@@ -114,19 +114,19 @@ async function openDrawer(issueId) {
   _renderCommentFileList();
   var issue;
   try {
-    issue = await api('/api/issues/' + issueId);
+    issue = await api('/api/issues/' + issueId, 'GET', null, { silent: true });
   } catch (e) {
     // Only drop the cover if THIS request is still the current one -- a
     // slower-to-fail request from an earlier click must never clobber a
     // newer request's still-loading overlay.
     if (S.drawerIssueId === issueId && loadingOverlay) loadingOverlay.setAttribute('hidden', '');
-    toast('Could not load issue', 'error');
+    toast('Could not load ' + issueLabelFor(issueId) + ' — ' + errorReason(e), 'error');
     return;
   }
 
   if (!issue) {
     if (S.drawerIssueId === issueId && loadingOverlay) loadingOverlay.setAttribute('hidden', '');
-    toast('Could not load issue', 'error'); return;
+    toast('Could not load ' + issueLabelFor(issueId) + ' — it no longer exists', 'error'); return;
   }
   // The fetch above is async — if the user hit Back (popstate → _closeIssueDrawer
   // clears drawerIssueId) or opened a different issue while it was in flight,
@@ -193,8 +193,13 @@ async function openDrawer(issueId) {
     if (!text) return '';
     var linkStyle = 'color:#0129AC;text-decoration:underline;cursor:pointer';
     if (/<[a-z][\s\S]*>/i.test(text)) {
+      // Sanitise the STORED body first, then let the link fixing and linkify
+      // below add the app's own trusted markup on top. Sanitising the finished
+      // string instead would strip the inline `style` this function itself puts
+      // on every anchor it generates, so links would lose their styling.
+      var clean = sanitiseStoredHtml(text);
       // Fix broken <a href=""> by using the link text as the href
-      var fixed = text.replace(/<a\s[^>]*href=["']["'][^>]*>(https?:\/\/[^<]+)<\/a>/gi, function(m, url) {
+      var fixed = clean.replace(/<a\s[^>]*href=["']["'][^>]*>(https?:\/\/[^<]+)<\/a>/gi, function(m, url) {
         return '<a href="' + url.trim() + '" style="' + linkStyle + '" target="_blank">' + url.trim() + '</a>';
       });
       // Linkify bare URLs not already inside an <a> tag
@@ -210,6 +215,12 @@ async function openDrawer(issueId) {
     }
     var p = text.replace(/\n{3,}/g,'\n\n').replace(/\n/g,'<br>');
     var d = p.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+    // That decode turns stored `&lt;img onerror=...&gt;` back into live markup,
+    // so a payload that was safely escaped at rest got re-armed on render — and
+    // it reached this branch precisely BECAUSE it contained no literal '<'.
+    // Sanitise after the decode and before the linkify, for the same reason as
+    // the branch above: the anchors added below carry app-generated styling.
+    d = sanitiseStoredHtml(d);
     return d.replace(/(https?:\/\/[^\s<"]+)/g,'<a href="$1" style="' + linkStyle + '" target="_blank">$1</a>');
   }
   $('drawerDesc').innerHTML = renderDesc(descText);
@@ -581,7 +592,7 @@ function bindMentionAutocomplete(el) {
     positionMentionDropdown();
     dropdown.style.display = 'block';
     dropdown.innerHTML = members.map(function(m) {
-      return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '" ' +
+      return '<div class="mention-item" data-id="' + esc(m.id) + '" data-name="' + escAttr(m.name) + '" ' +
         'style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;"' +
         'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">' +
         '<div style="width:26px;height:26px;border-radius:50%;background:' + (m.color || '#6b7280') + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' +
@@ -690,6 +701,9 @@ function bindCommentEditImagePaste(el) {
 
 function bindDrawerEdits(issue) {
   var issueId = issue.id;
+  // Captured once per drawer: the key is what the user recognises the issue
+  // by, and it cannot change under an inline edit (key is not editable).
+  var issueKey = issueKeyStr(issue);
   var pending = {};
   var _saveTimer = null;
 
@@ -701,10 +715,15 @@ function bindDrawerEdits(issue) {
       if (!Object.keys(pending).length) return;
       var toSave = Object.assign({}, pending);
       try {
-        await api('/api/issues/' + issueId, 'PUT', toSave);
+        // silent: api() toasts the raw thrown message itself, which for a 500
+        // is the literal "Internal server error" and for a body-less response
+        // is the HTTP statusText. This path renders its own message naming the
+        // issue and the reason, so letting the wrapper toast too stacked two
+        // error toasts for one failure -- the technical one on top.
+        await api('/api/issues/' + issueId, 'PUT', toSave, { silent: true });
         Object.keys(toSave).forEach(function(k) { delete pending[k]; });
         window._drawerPending = pending;
-        var updated = await api('/api/issues/' + issueId);
+        var updated = await api('/api/issues/' + issueId, 'GET', null, { silent: true });
         if (updated) {
           $('drawerUpdated').textContent = fmtDateTime(updated.updated_at);
           var patch = Object.assign({}, toSave);
@@ -712,8 +731,10 @@ function bindDrawerEdits(issue) {
           afterIssueFieldUpdate(issueId, patch);
         }
         refreshData();
-        toast('Saved');
-      } catch(e) { toast('Save failed', 'error'); }
+        toast(issueChangeSummary(issueKey, toSave));
+      } catch(e) {
+        toast(issueKey + ' update failed — ' + errorReason(e), 'error');
+      }
     }, 800);
   }
   // Point the once-bound handlers at THIS drawer's save.
@@ -723,8 +744,9 @@ function bindDrawerEdits(issue) {
     try {
       var payload = {};
       payload[field] = value;
-      await api('/api/issues/' + issueId, 'PUT', payload);
-      var updated = await api('/api/issues/' + issueId);
+      // silent: see autoSave above -- this path renders its own error message.
+      await api('/api/issues/' + issueId, 'PUT', payload, { silent: true });
+      var updated = await api('/api/issues/' + issueId, 'GET', null, { silent: true });
       if (updated) {
         $('drawerUpdated').textContent = fmtDateTime(updated.updated_at);
         var patch = Object.assign({}, payload);
@@ -733,9 +755,9 @@ function bindDrawerEdits(issue) {
         if (window._drawerIssueData) window._drawerIssueData[field] = value;
       }
       refreshData();
-      toast('Saved');
+      toast(issueChangeSummary(issueKey, payload));
     } catch (e) {
-      toast('Save failed', 'error');
+      toast(issueKey + ' ' + issueFieldLabel(field) + ' update failed — ' + errorReason(e), 'error');
       throw e;
     }
   }
@@ -810,7 +832,7 @@ function bindDrawerEdits(issue) {
       toast('Dates set from ' + (plan.sprint.name || 'sprint') + ': ' +
         plan.changes.map(function (c) { return c.label; }).join(', '));
     } else if (!plan.start && !plan.end) {
-      toast((plan.sprint.name || 'That sprint') + ' has no dates set, so the ticket dates were left as they are.', 'warning');
+      toast((plan.sprint.name || 'That sprint') + ' has no dates set, so the issue dates were left as they are.', 'warning');
     }
   };
   $('drawerPoints').oninput     = function () {
@@ -1064,7 +1086,7 @@ function bindDrawerEdits(issue) {
       _commentFiles.forEach(function(f) { fd.append('files', f); });
       var uploadFailed = false;
       try {
-        toast('Uploading attachment…');
+        toast(_commentFiles.length === 1 ? 'Uploading ' + (_commentFiles[0].name || 'file') + '…' : 'Uploading ' + _commentFiles.length + ' files…');
         var uploadRes = await fetch('/api/comments/upload', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + getAuthToken() },
@@ -1072,7 +1094,7 @@ function bindDrawerEdits(issue) {
         });
         var uploadData = await uploadRes.json().catch(function () { return {}; });
         if (!uploadRes.ok) {
-          toast(uploadData.error || 'Attachment upload failed', 'error');
+          toast('Attachment upload failed — ' + errorReason({ message: uploadData.error }, 'the server rejected the upload'), 'error');
           uploadFailed = true;
         } else if (uploadData.files && uploadData.files.length) {
           if (bodyIsRich) {
@@ -1086,7 +1108,7 @@ function bindDrawerEdits(issue) {
               var isImg = f.type && f.type.startsWith('image/');
               var url = fileApiUrl(f.url);
               return isImg
-                ? '<div style="margin-top:8px"><img class="desc-inline-img" src="' + esc(url) + '" alt="' + esc(f.name) + '"></div>'
+                ? '<div style="margin-top:8px"><img class="desc-inline-img" src="' + esc(url) + '" alt="' + escAttr(f.name) + '"></div>'
                 : '<div style="margin-top:6px"><a href="' + esc(url) + '" target="_blank">' + esc(f.name) + '</a></div>';
             }).join('');
             commentBody = commentBody + fileRefsHtml;
@@ -1099,7 +1121,7 @@ function bindDrawerEdits(issue) {
           }
         }
       } catch(e) {
-        toast(friendlyFetchErrorMessage(e, 'Attachment upload failed'), 'error');
+        toast('Attachment upload failed — ' + errorReason(e, 'the upload failed'), 'error');
         uploadFailed = true;
       }
       if (uploadFailed) {
@@ -1190,7 +1212,7 @@ function bindDrawerEdits(issue) {
       // Re-checked at click time, not just at render: the drawer stays open
       // across a refreshData(), so the role behind it can change underneath.
       if (!canDeleteIssue(issue.space_id)) {
-        toast('Only a space admin can delete tickets. Ask a space admin or an org admin.', 'error');
+        toast('Only a space admin can delete issues. Ask a space admin or an org admin.', 'error');
         return;
       }
       var key = issueKeyStr(issue) || issueId;
@@ -1199,12 +1221,12 @@ function bindDrawerEdits(issue) {
         intro: issue.title || '',
         note: softDeleteNote(),
         phrase: key,
-        phraseHint: 'To confirm, type the ticket number',
-        confirmLabel: 'Delete ticket'
+        phraseHint: 'To confirm, type the issue key',
+        confirmLabel: 'Delete issue'
       });
       if (!ok) return;
       try {
-        await api('/api/issues/' + issueId, 'DELETE');
+        await api('/api/issues/' + issueId, 'DELETE', null, { silent: true });
         toast(key + ' moved to Deleted Items', 'success');
         var drawer = document.getElementById('issueDrawer');
         if (drawer) drawer.setAttribute('hidden', '');
@@ -1213,7 +1235,7 @@ function bindDrawerEdits(issue) {
         await refreshData();
         renderCurrentView();
       } catch (err) {
-        toast(err.message || 'Failed to delete ticket', 'error');
+        toast(key + ' delete failed — ' + errorReason(err), 'error');
       }
     };
   }
@@ -1294,7 +1316,8 @@ window._submitSubtask = async function() {
   var parentIssue = S.data.issues.find(function(i){ return i.id === parentId; });
   var spaceId = parentIssue ? parentIssue.space_id : S.currentSpace;
   try {
-    await api('/api/issues', 'POST', {
+    // silent: the catch renders 'Subtask creation failed — <reason>' itself
+    var createdSub = await api('/api/issues', 'POST', {
       space_id: spaceId,
       parent_id: parentId,
       sprint_id: parentIssue ? parentIssue.sprint_id : null,
@@ -1305,12 +1328,12 @@ window._submitSubtask = async function() {
       assignee_id: parentIssue ? parentIssue.assignee_id : null,
       start_date: fmtDateISO(new Date()),
       status: 'To Do'
-    });
-    toast('Subtask created');
+    }, { silent: true });
+    toast(issueKeyStr(createdSub) + ' created as a subtask');
     $('subtaskTitleInput').value = '';
     // Refresh drawer
     var issue = await api('/api/issues/' + parentId);
     renderDrawerSubtasks(issue.subtasks || []);
     await refreshData();
-  } catch(e) { toast(e.message, 'error'); }
+  } catch(e) { toast('Subtask creation failed — ' + errorReason(e), 'error'); }
 };

@@ -39,11 +39,19 @@ function renderNotifBadge() {
     if (!notifs[i].is_read) unread++;
   }
   var badge = $('notifBadge');
+  var btn = $('notifBtn');
   if (unread > 0) {
-    badge.textContent = unread > 99 ? '99+' : String(unread);
+    var shown = unread > 99 ? '99+' : String(unread);
+    badge.textContent = shown;
     badge.classList.add('visible'); badge.removeAttribute('hidden');
+    // aria-hidden alone does not satisfy axe's label-content-name-mismatch --
+    // the badge's visible count has to be IN the accessible name, not just
+    // absent from the accessibility tree, so a screen reader user gets the
+    // same "how many" a sighted user sees at a glance.
+    if (btn) btn.setAttribute('aria-label', 'Notifications: ' + shown + ' unread');
   } else {
     badge.classList.remove('visible'); badge.setAttribute('hidden',''); badge.textContent = '';
+    if (btn) btn.setAttribute('aria-label', 'Notifications');
   }
 }
 
@@ -120,7 +128,7 @@ async function openIssueFromNotifLink(link, title) {
     openIssuePage(fetched.id);
     return true;
   }
-  toast('Could not open linked issue', 'error');
+  toast('Could not open ' + issueLabelFor(issueKey) + ' — it may have been deleted', 'error');
   return false;
 }
 
@@ -134,18 +142,41 @@ async function openNotifTarget(notif) {
     return openIssueFromNotifLink(link, notif.title);
   }
 
-  // Space board route: /space/ENG/board
+  // Space board route: /space/ENG/board -- 'board' is the URL segment, but
+  // the app's own tab for this view is named 'sprint' (Active Sprint); there
+  // is no 'board' case in renderTab()'s switch, so navigating to it left the
+  // content pane blank -- looked exactly like the click did nothing.
   var spaceBoardMatch = link.match(/^\/space\/([^/]+)\/board\/?$/i);
   if (spaceBoardMatch) {
     var sp = getSpaceByKey(decodeURIComponent(spaceBoardMatch[1]));
     if (sp) {
-      navigateToSpace(sp.id, 'board');
+      navigateToSpace(sp.id, 'sprint');
       return true;
     }
   }
 
-  if ((type === 'sprint_started' || type === 'sprint_completed') && spaceId) {
-    navigateToSpace(spaceId, 'board');
+  // Space reports route: /space/ENG/reports -- sprint_completed's real link
+  // target (notification-triggers.md), which the old 'board'-only regex
+  // never matched at all. Reports is site_admin-only (permission-matrix.md);
+  // a plain member sent there gets a permission toast instead of a redirect,
+  // so send them to Backlog & Sprints instead -- the completed sprint's own
+  // issues live there now (spilled back per sprint-lifecycle.md), so it is
+  // still the right place to land, just not the reports view.
+  var spaceReportsMatch = link.match(/^\/space\/([^/]+)\/reports\/?$/i);
+  if (spaceReportsMatch) {
+    var spr = getSpaceByKey(decodeURIComponent(spaceReportsMatch[1]));
+    if (spr) {
+      navigateToSpace(spr.id, canManageSpace(spr.id) ? 'reports' : 'backlog');
+      return true;
+    }
+  }
+
+  if (type === 'sprint_started' && spaceId) {
+    navigateToSpace(spaceId, 'sprint');
+    return true;
+  }
+  if (type === 'sprint_completed' && spaceId) {
+    navigateToSpace(spaceId, canManageSpace(spaceId) ? 'reports' : 'backlog');
     return true;
   }
 
@@ -179,7 +210,7 @@ function renderNotifPanel() {
     var icon = tIcons[n.type] || '&#128276;';
     var color = tColors[n.type] || '#0129AC';
     var isU = !n.is_read;
-    html += '<div class="notif-item' + (isU ? ' unread' : '') + '" data-notif-id="' + esc(n.id) + '" data-notif-link="' + esc(n.link || '') + '" data-notif-type="' + esc(n.type || '') + '" data-notif-space-id="' + esc(n.space_id || '') + '" data-notif-title="' + esc(n.title || '') + '">' +
+    html += '<div class="notif-item' + (isU ? ' unread' : '') + '" data-notif-id="' + esc(n.id) + '" data-notif-link="' + esc(n.link || '') + '" data-notif-type="' + esc(n.type || '') + '" data-notif-space-id="' + esc(n.space_id || '') + '" data-notif-title="' + escAttr(n.title || '') + '">' +
       '<div class="notif-item-icon" style="background:' + color + '22">' + icon + '</div>' +
       '<div class="notif-item-body">' +
       '<div class="notif-item-title' + (isU ? ' bold' : '') + '">' + esc(n.title || 'Notification') + '</div>' +
@@ -208,7 +239,7 @@ window._markNotifRead = async function (id, link, type, spaceId, title) {
   try {
     await openNotifTarget({ link: link, type: type, space_id: spaceId, title: title });
   } catch (_) {
-    toast('Could not open notification', 'error');
+    toast('Could not open that notification — ' + errorReason(e), 'error');
   }
 };
 

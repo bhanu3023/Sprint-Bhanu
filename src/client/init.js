@@ -192,13 +192,21 @@ function renderTopbarProfile(user) {
   if (!btn) return;
 
   if (user.avatar_url) {
-    btn.innerHTML = '<img src="' + esc(user.avatar_url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
-    if (av2) av2.innerHTML = '<img src="' + esc(user.avatar_url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    btn.innerHTML = '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    if (av2) av2.innerHTML = '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    // The <img alt> above already carries the name, so the button's own
+    // aria-label just needs to not contradict it.
+    btn.setAttribute('aria-label', 'Profile');
   } else {
     var ini = initials(user.name);
     btn.style.background = color;
     btn.style.color = '#fff';
-    btn.innerHTML = '<span style="font-size:13px;font-weight:700">' + ini + '</span>';
+    btn.innerHTML = '<span aria-hidden="true" style="font-size:13px;font-weight:700">' + esc(ini) + '</span>';
+    // aria-hidden on the initials span keeps them out of the accessible
+    // name, so the label has to say what they say instead of just "Profile"
+    // -- axe's label-content-name-mismatch rule flags visible text that
+    // isn't reflected in the accessible name at all, aria-hidden or not.
+    btn.setAttribute('aria-label', 'Profile: ' + ini);
     if (av2) { av2.textContent = ini; av2.style.background = color; }
   }
   if (nameEl) nameEl.textContent = user.name;
@@ -291,7 +299,7 @@ function openProfileSettingsModal() {
   var spaceRole = S.currentSpace ? getMySpaceRole(S.currentSpace) : null;
   var currentSpace = S.currentSpace && (S.data.spaces || []).find(function (s) { return s.id === S.currentSpace; });
   var av = user.avatar_url
-    ? '<img src="' + esc(user.avatar_url) + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover">'
+    ? '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover">'
     : '<div style="width:64px;height:64px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">' + initials(user.name) + '</div>';
 
   var overlay = document.createElement('div');
@@ -325,11 +333,11 @@ function openProfileSettingsModal() {
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
           '<div>' +
             '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">First Name</label>' +
-            '<input id="_profFirstName" value="' + esc(firstName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+            '<input id="_profFirstName" value="' + escAttr(firstName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
           '</div>' +
           '<div>' +
             '<label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">Last Name</label>' +
-            '<input id="_profLastName" value="' + esc(lastName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
+            '<input id="_profLastName" value="' + escAttr(lastName) + '" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;color:#0f172a;outline:none;box-sizing:border-box" onfocus="this.style.borderColor=\'#0129AC\'" onblur="this.style.borderColor=\'#e2e8f0\'">' +
           '</div>' +
         '</div>' +
         '<div style="margin-bottom:20px">' +
@@ -359,7 +367,8 @@ function openProfileSettingsModal() {
     var saveBtn = overlay.querySelector('#_profileSaveBtn');
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
-      var updated = await api('/api/users/' + user.id, 'PUT', { name: fullName });
+      // silent: the catch renders its own 'Profile update failed - <why>'
+      var updated = await api('/api/users/' + user.id, 'PUT', { name: fullName }, { silent: true });
       // Update local state
       if (S.currentUserObj) { S.currentUserObj.name = updated.name; }
       if (S.data && S.data.users) {
@@ -368,9 +377,9 @@ function openProfileSettingsModal() {
       }
       renderTopbarProfile(S.currentUserObj);
       close();
-      toast('Profile updated successfully', 'success');
+      toast('Profile updated', 'success');
     } catch(e) {
-      toast('Failed to save: ' + (e.message || 'Unknown error'), 'error');
+      toast('Profile update failed — ' + errorReason(e), 'error');
       saveBtn.disabled = false; saveBtn.textContent = 'Save Changes';
     }
   };
@@ -382,7 +391,7 @@ function renderUserFooter(user) {
   var isAdmin = user.role === 'admin' || user.role === 'owner';
   var color = user.color || '#6366f1';
   var av = user.avatar_url
-    ? '<img src="' + esc(user.avatar_url) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.2)" />'
+    ? '<img src="' + esc(user.avatar_url) + '" alt="' + escAttr(user.name || '') + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.2)" />'
     : '<div style="width:36px;height:36px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;border:2px solid rgba(255,255,255,0.2);flex-shrink:0">' + initials(user.name) + '</div>';
   var roleBadge = orgRoleBadgeHtml(user.role, { compact: true, dark: true });
   footer.innerHTML =

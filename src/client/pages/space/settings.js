@@ -116,12 +116,13 @@ window._updateSpilloverSetting = async function (key, checked) {
     next[box.dataset.key] = box.checked;
   });
   try {
-    var updated = await api('/api/spaces/' + S.currentSpace, 'PUT', { spillover_settings: next });
+    // silent: the catch below renders its own message with the reason
+    var updated = await api('/api/spaces/' + S.currentSpace, 'PUT', { spillover_settings: next }, { silent: true });
     var cached = (S.data.spaces || []).find(function (sp) { return sp.id === S.currentSpace; });
     if (cached) cached.spillover_settings = updated.spillover_settings;
     toast('Spillover setting updated', 'success');
   } catch (e) {
-    toast(e.message || 'Could not update setting', 'error');
+    toast('Spillover setting update failed — ' + errorReason(e), 'error');
     var box = document.querySelector('.spillover-setting-toggle[data-key="' + key + '"]');
     if (box) box.checked = !checked; // revert the visible toggle on failure
   }
@@ -207,7 +208,7 @@ function renderSettingsPeople(space) {
       '<td class="text-muted">' + esc(user.email || '') + '</td>' +
       '<td>' + roleCell + '</td>' +
       '<td class="text-muted text-sm">' + joined + '</td>' +
-      '<td>' + (canManageSpace(space.id) ? '<button class="btn btn-outline btn-sm people-remove-btn" data-member-id="' + rec.id + '" data-user-name="' + esc(user.name) + '">Remove</button>' : '') + '</td>' +
+      '<td>' + (canManageSpace(space.id) ? '<button class="btn btn-outline btn-sm people-remove-btn" data-member-id="' + rec.id + '" data-user-name="' + escAttr(user.name) + '">Remove</button>' : '') + '</td>' +
       '</tr>';
   }
 
@@ -239,7 +240,8 @@ function renderSettingsPeople(space) {
       var newRole = sel.value;
       try {
         await api('/api/space-members/' + memberId, 'PUT', { role: newRole });
-        toast('Role updated');
+        var roleUser = findUser(sel.dataset.userId);
+        toast((roleUser ? roleUser.name : 'Member') + ' set to ' + formatSpaceRoleLabel(newRole));
       } catch (e) { /* error shown by api() */ }
     });
   });
@@ -256,7 +258,7 @@ function renderSettingsPeople(space) {
         await refreshData();
         renderSettingsPeople(getSpace(S.currentSpace));
         renderSidebar();
-        toast('Member removed');
+        toast(userName + ' removed from this space');
       } catch (e) { /* error shown by api() */ }
     });
   });
@@ -295,7 +297,13 @@ function ensureSpaceFieldsLoaded(spaceId) {
       }
       return getSpaceFieldRows(spaceId);
     })
-    .catch(function () { return []; });
+    .catch(function (e) {
+      // Returned [] silently, so every caller behaved as if the space had no
+      // custom fields at all -- required fields stopped being enforced and
+      // pickers came up empty with no explanation.
+      toast('Could not load custom fields for this space — ' + errorReason(e), 'error');
+      return [];
+    });
 }
 
 function isSpaceBuiltinFieldEnabled(spaceId, fieldKey, place) {
@@ -562,8 +570,8 @@ function renderRequiredTypeChoices(selected, spaceId) {
   var all = sel.length === 0;                     // unset shows as "all ticked"
   box.innerHTML = choices.map(function (c) {
     var on = all || sel.indexOf(c.v) >= 0;
-    return '<label><input type="checkbox" class="cf-req-type" value="' + c.v + '"' +
-      (on ? ' checked' : '') + '> ' + c.l + '</label>';
+    return '<label><input type="checkbox" class="cf-req-type" value="' + escAttr(c.v) + '"' +
+      (on ? ' checked' : '') + '> ' + esc(c.l) + '</label>';
   }).join('');
 }
 
@@ -605,8 +613,13 @@ function renderSettingsCustomFields(space) {
       }
       paintSettingsCustomFields(space);
     })
-    .catch(function () {
-      paintSettingsCustomFields(space);
+    .catch(function (e) {
+      // Painted from whatever happened to be cached (often nothing), so a
+      // failed load was indistinguishable from a space with no fields.
+      toast('Could not load custom fields — ' + errorReason(e), 'error');
+      $('settingsTabContent').innerHTML =
+        '<div class="text-muted" style="padding:24px;text-align:center">' +
+        'Custom fields could not be loaded. Refresh to try again.</div>';
     });
 }
 
@@ -639,13 +652,13 @@ function paintSettingsCustomFields(space) {
       : '<span class="badge badge-muted">Custom</span>';
     var deleteBtn = isLockedBuiltinField(f)
       ? '<span class="text-muted text-sm">Required</span>'
-      : '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '">Remove</button>';
+      : '<button class="btn btn-outline btn-sm text-danger cf-delete-btn" data-field-id="' + f.id + '" data-field-name="' + escAttr(f.name) + '">Remove</button>';
     // "Apply to all boards" posts to /api/custom-fields/:id/apply-to-all, which is
     // org-admin-only. A space admin could see and click it and only get a 403, so
     // it is hidden for anyone who is not an org admin.
     var applyBtn = (f.is_builtin || !isOrgAdminUser())
       ? ''
-      : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + esc(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
+      : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + escAttr(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
     // Everything shown in the row is searchable, plus field_key and the raw
     // option values \u2014 so "slack", "multi_select", "built-in", "required" or an
     // option that got truncated in the Options column all still match.
@@ -714,7 +727,7 @@ function paintSettingsCustomFields(space) {
         await api('/api/custom-fields/' + fieldId, 'DELETE');
         await refreshData();
         renderSettingsCustomFields(getSpace(S.currentSpace));
-        toast('Custom field deleted');
+        toast('"' + fieldName + '" deleted');
       } catch (e) { /* error shown by api() */ }
     });
   });

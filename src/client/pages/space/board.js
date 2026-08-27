@@ -91,5 +91,5 @@ window._dropToStatus = async function (event, status) {
   await api('/api/issues/' + issueId, 'PUT', { status: status });
   await refreshData();
   renderSprintBoard();
-  toast('Issue moved to ' + status);
+  toast((cachedIssueKey(issueId) || 'Issue') + ' moved to ' + status);
 };

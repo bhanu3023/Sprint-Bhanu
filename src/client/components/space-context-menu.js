@@ -133,7 +133,13 @@ $('inviteMemberForm').addEventListener('submit', async function (e) {
       renderSettingsPeople(getSpace(S.currentSpace));
     }
     renderSidebar();
-    popupAlert('User Added', 'User has been added to the space successfully.', 'success');
+    // toast, not popupAlert: adding a member finishes in place on the page
+    // the user is already looking at, exactly like removing one -- which was
+    // already a toast. The two halves of the same event now match. popupAlert
+    // is reserved for messages that must outlive a navigation or that tell the
+    // user how to undo or continue (deleting a space, creating an invite).
+    var addedUser = findUser(userId);
+    toast((addedUser ? addedUser.name : 'That user') + ' added to this space');
   } catch (e) { /* error shown by api() */ }
 });
 
@@ -450,13 +456,113 @@ function bindDescImageTray(root) {
   });
 }
 
+// insertDescImageAtCaret leaves a trailing <br> right after every inline image
+// (so the next keystroke lands on a fresh line below it, not beside it -- see
+// that function's own comment). That <br> is invisible, so the very FIRST
+// Backspace pressed right after pasting an image -- before anything else is
+// typed -- silently consumes the <br> with no change on screen at all, and a
+// SECOND press is what actually removes the image. Reported as "Backspace
+// doesn't remove the image": someone presses it once, sees nothing happen,
+// and stops. A real word processor deletes the image on that first press.
+// This intercepts exactly that one caret position -- right after a bare <br>
+// whose immediately preceding sibling is the image -- and removes the image
+// then and there, leaving the (now genuinely blank) line's <br> for a second,
+// separate Backspace to clean up, same as deleting an image followed by an
+// empty line in Word. Every other Backspace/Delete position is untouched;
+// native contenteditable editing already handles those correctly (verified:
+// once text is typed after an image, the browser drops this placeholder <br>
+// on its own, and a lone Backspace right after the image itself already
+// removes it in one press).
+function bindDescBackspaceMerge(root) {
+  if (!root || root._descBackspaceBound) return;
+  root._descBackspaceBound = true;
+
+  function isDescImg(n) { return !!(n && n.nodeType === 1 && n.classList && n.classList.contains('desc-inline-img')); }
+  function nodeBefore(range) {
+    if (range.startContainer.nodeType === 3) {
+      return range.startOffset === 0 ? range.startContainer.previousSibling : null;
+    }
+    return range.startOffset > 0 ? range.startContainer.childNodes[range.startOffset - 1] : null;
+  }
+  function nodeAfter(range) {
+    if (range.startContainer.nodeType === 3) {
+      return range.startOffset === range.startContainer.length ? range.startContainer.nextSibling : null;
+    }
+    return range.startContainer.childNodes[range.startOffset] || null;
+  }
+
+  root.addEventListener('keydown', function (e) {
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+    var range = sel.getRangeAt(0);
+    if (!root.contains(range.startContainer)) return;
+
+    if (e.key === 'Backspace') {
+      var before = nodeBefore(range);
+      // Two DOM shapes reach the exact same "nothing but this image is behind
+      // the caret" state, and browsers do not agree on which one the caret
+      // lands in: right after the placeholder <br> (case A -- the state
+      // insertDescImageAtCaret itself leaves the caret in), or right after
+      // the image directly with that <br> still one further sibling ahead
+      // (case B -- observed after backspacing away real typed text that
+      // followed the image; Chrome collapses the caret between the image and
+      // its <br>, not past the <br>). Both must delete the image in one
+      // press, not two, for the fix to actually hold regardless of how the
+      // caret got there.
+      var img = null;
+      if (before && before.nodeName === 'BR' && isDescImg(before.previousSibling)) {
+        img = before.previousSibling;                 // case A
+      } else if (isDescImg(before)) {
+        img = before;                                  // case B
+      }
+      if (img) {
+        e.preventDefault();
+        var nextAfterImg = img.nextSibling;
+        img.remove();
+        var caret = document.createRange();
+        if (nextAfterImg) {
+          caret.setStartBefore(nextAfterImg);
+        } else {
+          caret.selectNodeContents(root);
+        }
+        caret.collapse(!!nextAfterImg);
+        sel.removeAllRanges();
+        sel.addRange(caret);
+        if (root.id === 'drawerDesc' || root.id === 'drawerFixDesc') markDrawerDescDirty(root.id);
+      }
+    } else {
+      // Delete (forward): symmetric case -- caret sits right before the image
+      // itself, so forward-delete removes it in one press same as Backspace
+      // does when approaching from the other side.
+      var after = nodeAfter(range);
+      if (isDescImg(after)) {
+        e.preventDefault();
+        var next = after.nextSibling;
+        after.remove();
+        var caret2 = document.createRange();
+        if (next) {
+          caret2.setStartBefore(next);
+          caret2.collapse(true);
+        } else {
+          caret2.selectNodeContents(root);
+          caret2.collapse(false);
+        }
+        sel.removeAllRanges();
+        sel.addRange(caret2);
+        if (root.id === 'drawerDesc' || root.id === 'drawerFixDesc') markDrawerDescDirty(root.id);
+      }
+    }
+  });
+}
+
 function addDescInlineImageChip(tray, url, alt, fp) {
   if (!tray) return;
   var chip = document.createElement('div');
   chip.className = 'desc-image-chip';
   chip.dataset.url = url;
   if (fp) chip.dataset.fp = fp;
-  chip.innerHTML = '<img src="' + esc(fileApiUrl(url)) + '" alt="' + esc(alt || 'Screenshot') + '">' +
+  chip.innerHTML = '<img src="' + esc(fileApiUrl(url)) + '" alt="' + escAttr(alt || 'Screenshot') + '">' +
     '<button type="button" class="desc-image-remove" aria-label="Remove">×</button>';
   tray.appendChild(chip);
 }
@@ -576,7 +682,7 @@ async function handleDescImagePaste(editorEl, file, fieldLabel) {
     if (editorEl.id === 'drawerDesc' || editorEl.id === 'drawerFixDesc') markDrawerDescDirty(editorEl.id);
     toast('Screenshot added to ' + fieldLabel, 'success');
   } catch (e) {
-    toast(e.message || 'Could not upload screenshot', 'error');
+    toast('Screenshot upload failed — ' + errorReason(e), 'error');
   }
 }
 
@@ -599,6 +705,7 @@ function initDescEditorImageTrays() {
     // Kept as a safety net for any legacy tray that reaches an editor by another
     // path; once normalised there are no chips left for it to act on.
     bindDescImageTray(el);
+    bindDescBackspaceMerge(el);
   });
 }
 
@@ -609,7 +716,7 @@ window._openAttachmentPreview = function (idx) {
   var lb = document.createElement('div');
   lb.className = 'image-lightbox';
   lb.innerHTML = '<button type="button" class="image-lightbox-close" aria-label="Close">×</button>' +
-    '<img src="' + url + '" alt="' + esc(file.name || 'Preview') + '">';
+    '<img src="' + url + '" alt="' + escAttr(file.name || 'Preview') + '">';
   function closeLb() {
     document.removeEventListener('keydown', onKey);
     URL.revokeObjectURL(url);
@@ -642,8 +749,8 @@ function _renderAttachmentFileList() {
     imageItems.forEach(function (item) {
       var thumbUrl = URL.createObjectURL(item.file);
       _attachmentThumbUrls.push(thumbUrl);
-      html += '<div class="issue-attachment-thumb" title="' + esc(item.file.name) + '">' +
-        '<img src="' + thumbUrl + '" alt="' + esc(item.file.name) + '" onclick="window._openAttachmentPreview(' + item.idx + ')">' +
+      html += '<div class="issue-attachment-thumb" title="' + escAttr(item.file.name) + '">' +
+        '<img src="' + thumbUrl + '" alt="' + escAttr(item.file.name) + '" onclick="window._openAttachmentPreview(' + item.idx + ')">' +
         '<button type="button" class="issue-attachment-thumb-remove" onclick="event.stopPropagation();_removeAttachmentFile(' + item.idx + ')" title="Remove">×</button>' +
         '</div>';
     });
@@ -750,7 +857,7 @@ document.addEventListener('change', function(e) {
     var files = e.target.files;
     for (var i = 0; i < files.length; i++) {
       if (files[i].size > ISSUE_MAX_FILE_BYTES) {
-        toast('File too large (max ' + fmtByteLimit(ISSUE_MAX_FILE_BYTES) + ')', 'error');
+        toast('File too large (max ' + fmtByteLimit(ISSUE_MAX_FILE_BYTES) + '): ' + (files[i].name || 'file'), 'error');
         continue;
       }
       _commentFiles.push(files[i]);
@@ -767,7 +874,11 @@ document.addEventListener('change', function(e) {
     if (!files.length) return;
     var fd = new FormData();
     for (var i = 0; i < files.length; i++) fd.append('files', files[i]);
-    toast('Uploading…');
+    // Captured NOW, not read in the .then below: files is the input's live
+    // FileList and the handler resets e.target.value at the end, which empties
+    // it -- so by the time the response lands, files.length is 0.
+    var upNames = Array.prototype.map.call(files, function (f) { return f.name || 'file'; });
+    toast(upNames.length === 1 ? 'Uploading ' + upNames[0] + '…' : 'Uploading ' + upNames.length + ' files…');
     fetch('/api/issues/' + S.drawerIssueId + '/attachments', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + getAuthToken() },
@@ -775,10 +886,10 @@ document.addEventListener('change', function(e) {
     }).then(async function(r) {
       var data; try { data = await r.json(); } catch (_) { data = {}; }
       if (!r.ok) throw new Error(data.error || 'Upload failed');
-      toast('Attachment uploaded');
+      toast(upNames.length === 1 ? upNames[0] + ' uploaded' : upNames.length + ' attachments uploaded');
       var issue = await api('/api/issues/' + S.drawerIssueId);
       if (issue) renderDrawerAttachments(issue.attachments || []);
-    }).catch(function(e) { toast(friendlyFetchErrorMessage(e, 'Upload failed'), 'error'); });
+    }).catch(function(e) { toast('Upload failed — ' + errorReason(e, 'the upload failed'), 'error'); });
     e.target.value = '';
   }
 });
@@ -845,7 +956,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
       if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
         renderSettingsCustomFields(getSpace(S.currentSpace));
       }
-      toast('Custom field updated');
+      toast('"' + name + '" updated');
     } else if (applyAll) {
       var result = await api('/api/custom-fields/create-for-all', 'POST', { name: name, field_type: type, is_required: required, options: options, show_in: showIn, required_types: requiredTypes });
       await refreshData();
@@ -865,7 +976,7 @@ $('customFieldForm').addEventListener('submit', async function (e) {
       if (S.currentTab === 'space-settings' && _settingsActiveTab === 'customfields') {
         renderSettingsCustomFields(getSpace(S.currentSpace));
       }
-      toast('Custom field created');
+      toast('"' + name + '" created');
     }
   } catch (e) { /* error shown by api() */ }
 });

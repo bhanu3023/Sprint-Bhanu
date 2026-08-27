@@ -94,11 +94,11 @@ async function renderAdminOrgGeneral(el) {
     '<form id="orgEditForm">' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Organization Name</div><div class="admin-field-desc">Displayed across the workspace</div></div>' +
-    '<input id="orgNameInput" class="input input-sm" style="width:220px" value="' + esc(org.name || '') + '">' +
+    '<input id="orgNameInput" class="input input-sm" style="width:220px" value="' + escAttr(org.name || '') + '">' +
     '</div>' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Slug</div><div class="admin-field-desc">URL identifier for the workspace</div></div>' +
-    '<input id="orgSlugInput" class="input input-sm" style="width:220px" value="' + esc(org.slug || '') + '">' +
+    '<input id="orgSlugInput" class="input input-sm" style="width:220px" value="' + escAttr(org.slug || '') + '">' +
     '</div>' +
     '<div class="admin-field-row">' +
     '<div><div class="admin-field-label">Plan</div><div class="admin-field-desc">Current subscription tier</div></div>' +
@@ -121,7 +121,7 @@ async function renderAdminOrgGeneral(el) {
       try {
         var updated = await api('/api/org', 'PUT', { name: name, slug: slug });
         if (S.data) S.data.org = updated;
-        popupAlert('Settings Saved', 'Organization profile updated successfully.', 'success');
+        popupAlert('Settings saved', 'The organization profile has been updated.', 'success');
       } catch(e) {}
     });
   }
@@ -309,9 +309,9 @@ async function renderAdminUsers(el) {
       '<option value="admin"' + (orgRole === 'admin' ? ' selected' : '') + '>Admin</option>' +
       '<option value="member"' + (orgRole === 'member' ? ' selected' : '') + '>Member</option>' +
       '</select>';
-    var toggleBtn = u.id!==me.id ? '<button class="btn btn-sm um-toggle-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-active="'+u.is_active+'" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:#fff;border:none;background:'+(isActive?'#ef4444':'#22c55e')+'">'+(isActive?'Deactivate':'Activate')+'</button>' : '';
-    var pwdBtn = '<button class="btn btn-sm um-pwd-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#0129AC;cursor:pointer;color:#fff">Reset PW</button>';
-    var delBtn = u.id!==me.id ? '<button class="btn btn-sm um-delete-user-btn" data-uid="'+u.id+'" data-uname="'+esc(u.name)+'" data-email="'+esc(u.email)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#dc2626;cursor:pointer;color:#fff">Delete</button>' : '';
+    var toggleBtn = u.id!==me.id ? '<button class="btn btn-sm um-toggle-btn" data-uid="'+u.id+'" data-uname="'+escAttr(u.name)+'" data-active="'+u.is_active+'" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:#fff;border:none;background:'+(isActive?'#ef4444':'#22c55e')+'">'+(isActive?'Deactivate':'Activate')+'</button>' : '';
+    var pwdBtn = '<button class="btn btn-sm um-pwd-btn" data-uid="'+u.id+'" data-uname="'+escAttr(u.name)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#0129AC;cursor:pointer;color:#fff">Reset PW</button>';
+    var delBtn = u.id!==me.id ? '<button class="btn btn-sm um-delete-user-btn" data-uid="'+u.id+'" data-uname="'+escAttr(u.name)+'" data-email="'+escAttr(u.email)+'" style="font-size:12px;padding:5px 12px;border-radius:6px;border:none;background:#dc2626;cursor:pointer;color:#fff">Delete</button>' : '';
     return '<tr data-um-status="' + (isActive ? 'active' : 'inactive') + '" style="border-bottom:1px solid var(--border)" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">' +
       '<td style="padding:14px 16px"><div style="display:flex;align-items:center;gap:12px">' + av + info + '</div></td>' +
       '<td style="padding:14px 16px">' + rolesel + '</td>' +
@@ -333,8 +333,8 @@ async function renderAdminUsers(el) {
       '<td><span class="badge" style="background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44">✉️ Invited</span></td>' +
       '<td>' + expiresStr + '</td>' +
       '<td style="padding:8px 16px;white-space:nowrap">' +
-      '<button class="btn btn-sm um-resend-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#f59e0b;cursor:pointer;color:#fff;margin-right:4px">↺ Resend</button>' +
-      '<button class="btn btn-sm um-cancel-invite-btn" data-invite-id="'+inv.id+'" data-email="'+esc(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#ef4444;cursor:pointer;color:#fff">✕ Delete</button>' +
+      '<button class="btn btn-sm um-resend-invite-btn" data-invite-id="'+inv.id+'" data-email="'+escAttr(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#f59e0b;cursor:pointer;color:#fff;margin-right:4px">↺ Resend</button>' +
+      '<button class="btn btn-sm um-cancel-invite-btn" data-invite-id="'+inv.id+'" data-email="'+escAttr(inv.email)+'" style="font-size:11px;padding:4px 10px;border:none;border-radius:3px;background:#ef4444;cursor:pointer;color:#fff">✕ Delete</button>' +
       '</td>' +
       '</tr>';
   }).join('');
@@ -401,7 +401,8 @@ async function renderAdminUsers(el) {
     sel.addEventListener('change', async function() {
       try {
         await api('/api/users/'+sel.dataset.uid, 'PUT', { role: sel.value });
-        popupAlert('Role Updated', 'User role changed to ' + formatOrgRoleLabel(sel.value) + ' successfully.', 'success');
+        var roleUser = findUser(sel.dataset.uid);
+        popupAlert('Role updated', (roleUser ? roleUser.name : 'That user') + ' is now ' + formatOrgRoleLabel(sel.value) + '.', 'success');
       } catch(e) {}
     });
   });
@@ -500,11 +501,15 @@ async function renderAdminUsers(el) {
         if (data.email_sent) {
           popupAlert('Invitation Resent', 'A new invitation email has been sent to ' + email + '.', 'success');
         } else {
-          popupAlert('Invitation Resent', 'Invite link renewed for ' + email + '. Email not sent: ' + (data.email_reason || 'SMTP not configured') + '<br><small style="word-break:break-all">' + (data.invite_url||'') + '</small>', 'info');
+          // The only popupAlert that renders markup (the <small> wraps a long
+          // invite URL) -- so it opts in with allowHtmlMsg and escapes each
+          // interpolation itself. esc() covers & < >, which is what matters
+          // for values landing in element text rather than an attribute.
+          popupAlert('Invitation Resent', 'Invite link renewed for ' + esc(email) + '. Email not sent: ' + esc(data.email_reason || 'SMTP not configured') + '<br><small style="word-break:break-all">' + esc(data.invite_url||'') + '</small>', 'info', true);
         }
         renderAdminSettings('user-management');
       } catch(e) {
-        popupAlert('Error', 'Could not resend invitation.', 'error');
+        popupAlert('Resend failed', 'The invitation could not be resent.', 'error');
         btn.disabled = false;
         btn.textContent = 'Resend';
       }
@@ -520,7 +525,7 @@ async function renderAdminUsers(el) {
         popupAlert('Invitation Cancelled', 'The invitation to ' + email + ' has been cancelled.', 'warning');
         renderAdminSettings('user-management');
       } catch(e) {
-        popupAlert('Error', 'Could not cancel invitation.', 'error');
+        popupAlert('Cancel failed', 'The invitation could not be cancelled.', 'error');
       }
     });
   });
@@ -685,7 +690,7 @@ async function renderAdminEmailSettings(el) {
 
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">SMTP Host</label>' +
-      '<input id="smtpHost" class="input" placeholder="smtp.gmail.com" value="'+(cfg.smtp_host||_smtpProviders[currentProvider].host)+'">' +
+      '<input id="smtpHost" class="input" placeholder="smtp.gmail.com" value="'+escAttr(cfg.smtp_host||_smtpProviders[currentProvider].host)+'">' +
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">Port</label>' +
@@ -693,15 +698,15 @@ async function renderAdminEmailSettings(el) {
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">Email Address</label>' +
-      '<input id="smtpUser" class="input" placeholder="your@email.com" value="'+(cfg.smtp_user||'')+'">' +
+      '<input id="smtpUser" class="input" placeholder="your@email.com" value="'+escAttr(cfg.smtp_user||'')+'">' +
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">Password / App Password</label>' +
-      '<input id="smtpPass" class="input" type="password" placeholder="Password or App Password" value="'+(cfg.smtp_pass||'')+'">' +
+      '<input id="smtpPass" class="input" type="password" placeholder="Password or App Password" value="'+escAttr(cfg.smtp_pass||'')+'">' +
     '</div>' +
     '<div class="admin-field-row">' +
       '<label class="admin-field-label">From Name (optional)</label>' +
-      '<input id="smtpFrom" class="input" placeholder="Neutara SprintBoard <your@email.com>" value="'+(cfg.smtp_from||'')+'">' +
+      '<input id="smtpFrom" class="input" placeholder="Neutara SprintBoard <your@email.com>" value="'+escAttr(cfg.smtp_from||'')+'">' +
     '</div>' +
     '<div style="display:flex;gap:10px;margin-top:20px">' +
       '<button class="btn btn-primary" id="saveSmtpBtn">Save Settings</button>' +
@@ -735,7 +740,7 @@ async function renderAdminEmailSettings(el) {
         smtp_from: qs('#smtpFrom').value.trim()
       });
       popupAlert('Email Settings Saved', 'SMTP configuration saved. Click "Send Test Email" to verify.', 'success');
-    } catch(e) { popupAlert('Error', 'Could not save settings.', 'error'); }
+    } catch(e) { popupAlert('Email settings not saved', 'The SMTP configuration could not be saved.', 'error'); }
     btn.disabled = false; btn.textContent = 'Save Settings';
   });
 
@@ -745,11 +750,11 @@ async function renderAdminEmailSettings(el) {
     try {
       var r = await api('/api/admin/email-test', 'POST');
       if (r.sent) {
-        popupAlert('Test Email Sent', 'Check your inbox — test email was delivered successfully!', 'success');
+        popupAlert('Test email sent', 'Check your inbox — the test email was delivered.', 'success');
       } else {
         popupAlert('Test Failed', (r.reason || 'Could not send.') + ' Check your credentials and try again.', 'error');
       }
-    } catch(e) { popupAlert('Error', 'Test email failed.', 'error'); }
+    } catch(e) { popupAlert('Test email failed', 'The test email could not be sent.', 'error'); }
     btn.disabled = false; btn.textContent = 'Send Test Email to Me';
   });
 }
@@ -1020,9 +1025,11 @@ function awInlineAssignee(e, issueId, current) {
       })
     );
     _awShowMenu(e, items, function(val) {
-      api('/api/issues/' + issueId, 'PUT', { assignee_id: val || null }).then(function() {
+      api('/api/issues/' + issueId, 'PUT', { assignee_id: val || null }, { silent: true }).then(function() {
         refreshData().then(renderAllWork);
-        toast('Assignee updated');
+        toast(issueChangeSummary(cachedIssueKey(issueId) || 'Issue', { assignee_id: val || null }));
+      }).catch(function (e) {
+        toast((cachedIssueKey(issueId) || 'Issue') + ' assignee update failed — ' + errorReason(e), 'error');
       });
     });
   }
@@ -1117,13 +1124,15 @@ function awInlineStatus(e, issueId, current) {
       var cached = (S.data.issues || []).find(function (iss) { return iss.id === issueId; });
       if (!canTransitionIssueToDone(cached || issueId, current)) return;
     }
-    api('/api/issues/' + issueId, 'PUT', { status: val }).then(function (updated) {
+    api('/api/issues/' + issueId, 'PUT', { status: val }, { silent: true }).then(function (updated) {
       afterIssueFieldUpdate(issueId, {
         status: val,
         updated_at: (updated && updated.updated_at) || new Date().toISOString()
       });
-      toast('Status updated');
-    }).catch(function () { toast('Failed to update status', 'error'); });
+      toast(issueChangeSummary(cachedIssueKey(issueId) || 'Issue', { status: val }));
+    }).catch(function (e) {
+      toast((cachedIssueKey(issueId) || 'Issue') + ' status update failed — ' + errorReason(e), 'error');
+    });
   });
 }
 
@@ -1138,13 +1147,15 @@ function awInlinePriority(e, issueId, current) {
     return { value: p, html: '<span style="font-size:14px;color:#172b4d;flex:1;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">' + cap(p) + '</span>' + check };
   });
   _awShowMenu(e, items, function(val) {
-    api('/api/issues/' + issueId, 'PUT', { priority: val }).then(function (updated) {
+    api('/api/issues/' + issueId, 'PUT', { priority: val }, { silent: true }).then(function (updated) {
       afterIssueFieldUpdate(issueId, {
         priority: val,
         updated_at: (updated && updated.updated_at) || new Date().toISOString()
       });
-      toast('Priority updated');
-    }).catch(function () { toast('Failed to update priority', 'error'); });
+      toast(issueChangeSummary(cachedIssueKey(issueId) || 'Issue', { priority: val }));
+    }).catch(function (e) {
+      toast((cachedIssueKey(issueId) || 'Issue') + ' priority update failed — ' + errorReason(e), 'error');
+    });
   });
 }
 
@@ -1262,10 +1273,10 @@ function copyIssueLinkByKey(issueKey) {
     el.select();
     document.execCommand('copy');
     document.body.removeChild(el);
-    toast('Link copied!');
+    toast('Invite link copied');
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(function() { toast('Link copied!'); }).catch(fallbackCopy);
+    navigator.clipboard.writeText(url).then(function() { toast('Invite link copied'); }).catch(fallbackCopy);
   } else {
     fallbackCopy();
   }

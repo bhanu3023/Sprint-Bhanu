@@ -94,7 +94,7 @@ function mbrBarChart(categories) {
       return '<rect x="' + bx.toFixed(1) + '" y="' + by.toFixed(1) + '" width="' + Math.max(barW - 4, 4).toFixed(1) + '" height="' + bh.toFixed(1) + '" fill="' + b.color + '" rx="2"' + clickAttr + '><title>' + esc(b.title) + '</title></rect>' +
         (b.value > 0 ? '<text x="' + (bx + barW / 2).toFixed(1) + '" y="' + (by - 4).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="700" fill="var(--text)">' + b.value + '</text>' : '');
     }).join('');
-    return barsHtml + '<text x="' + cx.toFixed(1) + '" y="' + (H - pB + 20) + '" text-anchor="middle" font-size="10" fill="var(--text2)" title="' + esc(cat.title || cat.label) + '">' + esc(cat.label) + '</text>';
+    return barsHtml + '<text x="' + cx.toFixed(1) + '" y="' + (H - pB + 20) + '" text-anchor="middle" font-size="10" fill="var(--text2)" title="' + escAttr(cat.title || cat.label) + '">' + esc(cat.label) + '</text>';
   }).join('');
 
   return '<div style="overflow-x:auto"><svg width="' + W + '" viewBox="0 0 ' + W + ' ' + H + '" style="min-width:100%">' +
@@ -262,7 +262,7 @@ function renderMBRComparison(c, data) {
       }).join('')
     : '<tr><td colspan="' + (sprintCols.length + 2) + '" style="padding:16px;color:var(--text3);text-align:center">No developers or QA assigned to these sprints</td></tr>';
   var userHeaderCols = sprintCols.map(function (sp) {
-    return '<th title="' + esc(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
+    return '<th title="' + escAttr(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
   }).join('');
 
   // ── Bug Summary — overall + sprint-wise + by assignee + by reporter ──
@@ -284,7 +284,7 @@ function renderMBRComparison(c, data) {
   function bugUserTableHtml(rows, kind, emptyLabel) {
     var cols = sprints.slice(Math.max(0, sprints.length - 8));
     var headerCols = cols.map(function (sp) {
-      return '<th title="' + esc(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
+      return '<th title="' + escAttr(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
     }).join('');
     var bodyRows = rows.length
       ? rows.map(function (u) {
@@ -632,18 +632,19 @@ window._openAchievementsModal = function (sprintId) {
     var btn = overlay.querySelector('#_achModalSave');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      var updated = await api('/api/sprints/' + sprintId, 'PUT', { achievements: achievements });
+      // silent: the catch renders its own 'Achievements save failed - <why>'
+      var updated = await api('/api/sprints/' + sprintId, 'PUT', { achievements: achievements }, { silent: true });
       var cached = (S.data.sprints || []).find(function (sp) { return sp.id === sprintId; });
       if (cached) cached.achievements = updated.achievements;
       if (_mbrData) {
         var mbrSp = (_mbrData.completed_sprints || []).find(function (sp) { return sp.id === sprintId; });
         if (mbrSp) mbrSp.achievements = updated.achievements;
       }
-      toast('Achievements saved', 'success');
+      toast((sprintName(sprintId) || 'Sprint') + ' achievements saved', 'success');
       close();
       if (_mbrActiveTab === 'achievements') renderMBRAchievements($('mbrTabContent'), _mbrData);
     } catch (e) {
-      toast(e.message || 'Could not save achievements', 'error');
+      toast('Achievements save failed — ' + errorReason(e), 'error');
       btn.disabled = false; btn.textContent = 'Save';
     }
   };
@@ -664,7 +665,7 @@ function renderVelocityReport(c, data, allSprints, sprintSelectorHtml) {
     var pct = Math.round((v / max) * 100);
     var color = v >= avg ? '#10b981' : '#0129ac';
     return '<div class="velocity-bar-group">' +
-      '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + color + '" title="' + esc(sp.name) + ': ' + v + ' pts"></div>' +
+      '<div class="velocity-bar" style="height:' + Math.max(pct, 4) + '%;background:' + color + '" title="' + escAttr(sp.name + ': ' + v + ' pts') + '"></div>' +
       '<span class="velocity-label">' + esc(sp.name) + '</span>' +
       '<span class="velocity-value">' + v + ' pts</span>' +
       '</div>';
@@ -703,7 +704,7 @@ function renderCumulativeReport(c, data, allSprints, sprintSelectorHtml) {
   // Stacked horizontal bar
   var segments = counts.map(function(g) {
     var pct = Math.round((g.count / total) * 100);
-    return '<div title="' + esc(g.label) + ': ' + g.count + '" style="width:' + pct + '%;background:' + g.color + ';height:100%;min-width:' + (g.count ? 2 : 0) + 'px"></div>';
+    return '<div title="' + escAttr(g.label + ': ' + g.count) + '" style="width:' + pct + '%;background:' + g.color + ';height:100%;min-width:' + (g.count ? 2 : 0) + 'px"></div>';
   }).join('');
 
   // Legend + per-status bars
@@ -811,7 +812,7 @@ function renderControlChart(c, data, allSprints, sprintSelectorHtml) {
         avatar +
         '<span style="width:120px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.name) + '</span>' +
         '<div style="flex:1;background:var(--bg3);border-radius:4px;height:18px;overflow:hidden">' +
-        '<div onclick="window._showReportIssues(\'ctrl_asg_' + a.safeKey + '\')" title="' + esc(a.name) + ' — avg ' + a.avg + 'd across ' + a.count + ' issues" style="cursor:pointer;width:' + Math.max(w, 4) + '%;height:100%;background:' + colorFor(a.avg) + '"></div>' +
+        '<div onclick="window._showReportIssues(\'ctrl_asg_' + a.safeKey + '\')" title="' + escAttr(a.name + ' — avg ' + a.avg + 'd across ' + a.count + ' issues') + '" style="cursor:pointer;width:' + Math.max(w, 4) + '%;height:100%;background:' + colorFor(a.avg) + '"></div>' +
         '</div>' +
         '<span style="width:110px;font-size:11px;color:var(--text3);text-align:right;flex-shrink:0">' + a.avg + 'd · ' + a.count + ' issue' + (a.count !== 1 ? 's' : '') + '</span>' +
         '</div>';

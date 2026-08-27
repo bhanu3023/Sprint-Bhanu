@@ -13,6 +13,24 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// Comment images open full-size in a new tab. This used to be an inline
+// onclick="window.open(this.src)" on the generated <img>, which meant the
+// behaviour also depended on that attribute surviving in every STORED comment
+// body that had been through the edit-and-save round trip — and the sanitiser
+// strips event-handler attributes from stored bodies, correctly. Delegation
+// restores the behaviour for both the generated and the legacy stored images
+// without an inline handler and without an allowlist exception for onclick.
+//
+// Scoped to rendered comments, and skipped inside the edit box, where a click
+// on an image is placing the caret rather than asking to view it.
+document.addEventListener('click', function (e) {
+  var img = e.target;
+  if (!img || img.tagName !== 'IMG' || !img.src) return;
+  if (!img.closest('.drawer-comment-item')) return;
+  if (img.closest('[contenteditable="true"]')) return;
+  window.open(img.src, '_blank', 'noopener');
+});
+
 document.addEventListener('DOMContentLoaded', function () {
   initTheme();
   initDescEditorImageTrays();
@@ -158,32 +176,32 @@ document.addEventListener('DOMContentLoaded', function () {
         if (f.field_type === 'text') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<input type="text" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
+            '<input type="text" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '"></div>';
         }
         if (f.field_type === 'number') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<input type="number" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
+            '<input type="number" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '"></div>';
         }
         if (f.field_type === 'textarea') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<textarea class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" rows="3"></textarea></div>';
+            '<textarea class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '" rows="3"></textarea></div>';
         }
         if (f.field_type === 'date') {
           return '<div class="form-group">' +
             '<label class="form-label">' + esc(f.name) + req + '</label>' +
-            '<input type="date" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '"></div>';
+            '<input type="date" class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '"></div>';
         }
         if (f.field_type === 'checkbox') {
           return '<div class="form-group">' +
             '<label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">' +
-            '<input type="checkbox" class="cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '" value="true">' +
+            '<input type="checkbox" class="cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '" value="true">' +
             esc(f.name) + req + '</label></div>';
         }
         if (f.field_type === 'user') {
           var userOpts = (S.data && S.data.users || []).filter(function (u) { return u.is_active !== false; });
-          var userSelect = '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + esc(f.name) + '">' +
+          var userSelect = '<select class="input cf-field" data-cf-id="' + f.id + '" data-cf-name="' + escAttr(f.name) + '">' +
             '<option value="">— Select user —</option>' +
             userOpts.map(function (u) {
               return '<option value="' + esc(u.id) + '">' + esc(u.name) + '</option>';
@@ -523,7 +541,7 @@ document.addEventListener('DOMContentLoaded', function () {
         $('inviteUserSubmitBtn').setAttribute('hidden', '');
         $('inviteLinkResult').removeAttribute('hidden');
         $('inviteLinkUrl').value = r.invite_url;
-        popupAlert('Invite Created!', 'Share the invite link with the user. It expires in 7 days.', 'success');
+        popupAlert('Invite created', 'Share the invite link with the user. It expires in 7 days.', 'success');
       } catch (e) {}
     });
   }
@@ -540,7 +558,7 @@ document.addEventListener('DOMContentLoaded', function () {
       try {
         await api('/api/users/' + uid + '/change-password', 'PUT', { new_password: np });
         closeModal('modal-reset-pw');
-        popupAlert('Password Reset', 'Password has been updated successfully.', 'success');
+        popupAlert('Password reset', 'That user can now sign in with the new password.', 'success');
       } catch (e) {}
     });
   }

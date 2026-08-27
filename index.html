@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <base href="/">
   <title>SprintBoard — Neutara Technologies</title>
+  <meta name="description" content="SprintBoard — sprint and issue tracking for Neutara Technologies: boards, backlogs, sprints, work logs and reports.">
   <link rel="icon" type="image/png" href="assets/neutara-logo.png">
   <link rel="apple-touch-icon" href="assets/neutara-logo.png">
   <link rel="stylesheet" href="styles.css">
@@ -31,7 +32,7 @@
     <div class="loading-content">
       <div class="logo-spinner-wrap" style="position:relative;width:80px;height:80px;display:flex;align-items:center;justify-content:center">
         <svg style="position:absolute;top:0;left:0;width:80px;height:80px;animation:spin 1.2s linear infinite" viewBox="0 0 80 80"><circle cx="40" cy="40" r="36" fill="none" stroke="#174F96" stroke-width="4" stroke-dasharray="180 40" stroke-linecap="round"/></svg>
-        <img src="assets/neutara-logo.png" style="width:48px;height:48px;object-fit:contain;border-radius:8px">
+        <img src="assets/neutara-logo.png" alt="Neutara Technologies" style="width:48px;height:48px;object-fit:contain;border-radius:8px">
       </div>
       <p id="loadingMsg" class="loading-msg" style="display:none">Initializing workspace...</p>
     </div>
@@ -54,7 +55,7 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-logo">
-          <img src="assets/neutara-logo.png" id="sidebarLogoImg" class="sidebar-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <img src="assets/neutara-logo.png" alt="" id="sidebarLogoImg" class="sidebar-logo-img" width="24" height="28" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
           <svg class="sidebar-logo-svg" style="display:none" width="32" height="32" viewBox="0 0 32 32">
             <rect width="32" height="32" rx="6" fill="#2563eb"/>
             <text x="16" y="22" text-anchor="middle" fill="#fff" font-size="18" font-weight="700" font-family="sans-serif">N</text>
@@ -111,7 +112,7 @@
         </div>
         <div class="topbar-search-wrap" id="globalSearchWrap">
           <svg class="topbar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="globalSearchInput" class="topbar-search-input" placeholder="Search issues, keys…" autocomplete="off">
+          <input type="text" id="globalSearchInput" class="topbar-search-input" placeholder="Search issues, keys…" autocomplete="off" aria-label="Search issues, keys">
           <div id="globalSearchDrop" data-hj-suppress class="gs-drop" hidden></div>
         </div>
         <div class="topbar-right">
@@ -121,7 +122,7 @@
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
               </svg>
-              <span class="notif-badge" id="notifBadge" hidden>0</span>
+              <span class="notif-badge" id="notifBadge" aria-hidden="true" hidden>0</span>
             </button>
             <!-- Notification Panel -->
             <div id="notifPanel" class="notif-panel" hidden>
@@ -136,7 +137,7 @@
           <!-- Profile avatar + dropdown -->
           <div style="position:relative" id="topbarProfileWrap">
             <button id="topbarProfileBtn" aria-label="Profile" style="width:34px;height:34px;border-radius:50%;border:2px solid transparent;background:#e8eaf0;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:border-color .15s;font-size:13px;font-weight:700;color:#0129AC;overflow:hidden" onmouseover="this.style.borderColor='#0129AC'" onmouseout="this.style.borderColor='transparent'">
-              <span id="topbarProfileAvatar">BS</span>
+              <span id="topbarProfileAvatar" aria-hidden="true">BS</span>
             </button>
             <div id="topbarProfileMenu" hidden style="position:absolute;right:0;top:42px;width:220px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.13);z-index:9999;overflow:hidden">
               <div id="topbarProfileHeader" data-hj-suppress style="padding:14px 16px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px">
@@ -177,7 +178,7 @@
       </div>
 
       <!-- Views Container -->
-      <div class="views-container">
+      <div class="views-container" role="main">
 
         <!-- Home View -->
         <div class="view" id="view-home">
@@ -233,7 +234,7 @@
                 <span id="spacesViewCount" class="yw-badge"></span>
               </div>
               <div class="spaces-view-actions">
-                <input type="text" id="spacesViewSearch" class="input input-sm" placeholder="Search spaces…" oninput="window._filterSpacesView(this.value)" style="width:220px">
+                <input type="text" id="spacesViewSearch" class="input input-sm" placeholder="Search spaces…" oninput="window._filterSpacesView(this.value)" style="width:220px" aria-label="Search spaces">
                 <button class="btn btn-primary btn-sm" id="spacesViewCreateBtn">+ Create Space</button>
               </div>
             </div>
@@ -248,7 +249,7 @@
               <h1 class="yw-title">My Work</h1>
               <div class="yw-title-search-wrap">
                 <svg class="yw-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="ywSearch" class="yw-search-input" placeholder="Search title or key…" autocomplete="off">
+                <input type="text" id="ywSearch" class="yw-search-input" placeholder="Search title or key…" autocomplete="off" aria-label="Search title or key">
               </div>
             </div>
             <div class="yw-tabs">
@@ -275,8 +276,8 @@
         <div class="view" id="view-global-reports" hidden>
           <div class="view-toolbar" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <h1 class="view-title" style="margin:0">Reports</h1>
-            <select id="globalReportSpace" class="input input-sm" style="min-width:160px" onchange="window._loadGlobalReport()"></select>
-            <select id="globalReportType" class="input input-sm" onchange="window._loadGlobalReport()">
+            <select id="globalReportSpace" class="input input-sm" style="min-width:160px" onchange="window._loadGlobalReport()" aria-label="Space"></select>
+            <select id="globalReportType" class="input input-sm" onchange="window._loadGlobalReport()" aria-label="Report type">
               <option value="burndown">Burn Chart</option>
               <option value="velocity">Velocity</option>
               <option value="cumulative">Cumulative Flow</option>
@@ -316,11 +317,11 @@
               <!-- Date range -->
               <div class="wlr-filter-group">
                 <label class="wlr-filter-label">From</label>
-                <input type="date" class="input input-sm" id="wlrFrom">
+                <input type="date" class="input input-sm" id="wlrFrom" aria-label="From date">
               </div>
               <div class="wlr-filter-group">
                 <label class="wlr-filter-label">To</label>
-                <input type="date" class="input input-sm" id="wlrTo">
+                <input type="date" class="input input-sm" id="wlrTo" aria-label="To date">
               </div>
               <!-- User multi-select -->
               <div class="wlr-filter-group">
@@ -338,7 +339,7 @@
               <!-- Billable -->
               <div class="wlr-filter-group">
                 <label class="wlr-filter-label">Billable</label>
-                <select class="input input-sm" id="wlrBillable">
+                <select class="input input-sm" id="wlrBillable" aria-label="Billable">
                   <option value="">All</option>
                   <option value="1">Billable only</option>
                   <option value="0">Non-billable only</option>
@@ -439,28 +440,28 @@
                 <span id="prmNavLabel" class="prm-nav-label">2026</span>
                 <button class="prm-nav-arrow" onclick="window._prmNavNext()" title="Next">&#8250;</button>
               </div>
-              <select id="prmZoomSelect" class="input input-sm" onchange="window._prmSetZoom(this.value)">
+              <select id="prmZoomSelect" class="input input-sm" onchange="window._prmSetZoom(this.value)" aria-label="Zoom">
                 <option value="quarter">Quarter</option>
                 <option value="month">Month</option>
                 <option value="week">Week</option>
               </select>
-              <select id="prmFilterSpace" class="input input-sm" onchange="window._prmLoad()">
+              <select id="prmFilterSpace" class="input input-sm" onchange="window._prmLoad()" aria-label="Filter by space">
                 <option value="">All Spaces</option>
               </select>
-              <select id="prmGroupBy" class="input input-sm" onchange="window._prmRender()">
+              <select id="prmGroupBy" class="input input-sm" onchange="window._prmRender()" aria-label="Group by">
                 <option value="status">Group by Status</option>
                 <option value="space">Group by Space</option>
                 <option value="priority">Group by Priority</option>
                 <option value="assigned">Group by Assignee</option>
               </select>
-              <select id="prmFilterStatus" class="input input-sm" onchange="window._prmRender()">
+              <select id="prmFilterStatus" class="input input-sm" onchange="window._prmRender()" aria-label="Filter by status">
                 <option value="">All Statuses</option>
                 <option value="planned">Planned</option>
                 <option value="in_progress">In Progress</option>
                 <option value="on_hold">On Hold</option>
                 <option value="completed">Completed</option>
               </select>
-              <select id="prmFilterPriority" class="input input-sm" onchange="window._prmRender()">
+              <select id="prmFilterPriority" class="input input-sm" onchange="window._prmRender()" aria-label="Filter by priority">
                 <option value="">All Priorities</option>
                 <option value="critical">Critical</option>
                 <option value="high">High</option>
@@ -526,7 +527,7 @@
         <div class="view" id="view-backlog" hidden>
           <div class="view-toolbar" style="position:sticky;top:-24px;z-index:50;background:var(--bg);padding-top:4px;padding-bottom:8px;margin-bottom:8px;box-shadow:0 2px 6px rgba(0,0,0,0.08)">
             <div class="toolbar-group" style="position:relative">
-              <input type="text" class="input input-sm" id="backlogSearch" placeholder="Search backlog...">
+              <input type="text" class="input input-sm" id="backlogSearch" placeholder="Search backlog..." aria-label="Search backlog">
               <button class="btn btn-outline btn-sm" id="backlogFilterBtn">Filters <span id="backlogFilterCount" style="display:none;background:var(--accent);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px">0</span></button>
               <div id="backlogFilterPanel" style="display:none;position:absolute;top:36px;left:0;z-index:200;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;min-width:300px;box-shadow:0 4px 16px rgba(0,0,0,0.15)">
                 <div style="margin-bottom:10px">
@@ -561,7 +562,7 @@
                 </div>
                 <div style="margin-bottom:12px">
                   <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Assignee</label>
-                  <select id="bfAssignee" class="input input-sm" style="width:100%"><option value="">All</option></select>
+                  <select id="bfAssignee" class="input input-sm" style="width:100%" aria-label="Assignee"><option value="">All</option></select>
                 </div>
                 <div style="display:flex;gap:8px">
                   <button class="btn btn-primary btn-sm" id="bfApplyBtn" style="flex:1">Apply</button>
@@ -585,7 +586,7 @@
         <!-- Space: Reports -->
         <div class="view" id="view-reports" hidden>
           <div class="view-toolbar">
-            <select id="reportSelector" class="input">
+            <select id="reportSelector" class="input" aria-label="Report">
               <option value="sprint-summary">Sprint Summary</option>
               <option value="story-summary">Story Summary</option>
               <option value="burndown">Burn Chart</option>
@@ -617,7 +618,7 @@
         <div class="view" id="view-allwork" hidden>
           <!-- Filter bar -->
           <div class="aw-filter-bar">
-            <input type="text" class="input input-sm" id="allWorkSearch" placeholder="🔍 Search title, key..." style="width:200px" oninput="renderAllWork()"><span id="awTicketCount" style="font-size:13px;font-weight:600;color:var(--text2);border:1px solid var(--border);border-radius:12px;padding:2px 12px;margin-left:8px;white-space:nowrap;align-self:center;"></span>
+            <input type="text" class="input input-sm" id="allWorkSearch" placeholder="🔍 Search title, key..." style="width:200px" oninput="renderAllWork()" aria-label="Search title, key"><span id="awTicketCount" style="font-size:13px;font-weight:600;color:var(--text2);border:1px solid var(--border);border-radius:12px;padding:2px 12px;margin-left:8px;white-space:nowrap;align-self:center;"></span>
             <button class="aw-filter-toggle-btn" id="awFilterBtn" onclick="window._awToggleFilterPanel()">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right:5px"><path d="M1 3h14v1.5L9 10v5l-2-1V10L1 4.5V3z"/></svg>Filter
             </button>
@@ -643,7 +644,7 @@
                 <button class="aw-add-filter-btn" id="awAddFilterBtn" onclick="window._awToggleAddDrop()">+ Add filters</button>
                 <div class="aw-add-drop" id="awAddDrop" style="display:none">
                   <div class="aw-add-drop-search-wrap">
-                    <input class="aw-add-drop-search" id="awAddDropSearch" type="text" placeholder="Search more filters" oninput="window._awFilterAddOpts(this.value)">
+                    <input class="aw-add-drop-search" id="awAddDropSearch" type="text" placeholder="Search more filters" oninput="window._awFilterAddOpts(this.value)" aria-label="Search more filters">
                   </div>
                   <div class="aw-add-drop-list" id="awAddDropList"></div>
                 </div>
@@ -724,7 +725,7 @@
                   <span class="drawer-detail-label">Description</span>
                   <div id="drawerDescEditor" class="jira-editor-wrap">
                     <div id="drawerDescToolbar" class="jira-editor-toolbar">
-                      <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerDesc');this.value=''" title="Text style">
+                      <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerDesc');this.value=''" title="Text style" aria-label="Text style">
                         <option value="">Normal text</option>
                         <option value="h1">Heading 1</option>
                         <option value="h2">Heading 2</option>
@@ -761,7 +762,7 @@
                   <span class="drawer-detail-label">Fix Description</span>
                   <div id="drawerFixDescEditor" class="jira-editor-wrap">
                     <div id="drawerFixDescToolbar" class="jira-editor-toolbar">
-                      <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerFixDesc');this.value=''" title="Text style">
+                      <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerFixDesc');this.value=''" title="Text style" aria-label="Text style">
                         <option value="">Normal text</option>
                         <option value="h1">Heading 1</option>
                         <option value="h2">Heading 2</option>
@@ -842,7 +843,7 @@
                     <!-- Jira-style rich comment editor -->
                     <div class="jira-comment-editor-wrap" id="drawerCommentEditorWrap">
                       <div class="jira-comment-toolbar" id="drawerCommentToolbar">
-                        <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerCommentInput');this.value=''" title="Text style">
+                        <select class="jira-tb-select" onchange="richFormatBlock(this.value,'drawerCommentInput');this.value=''" title="Text style" aria-label="Text style">
                           <option value="">Normal text</option>
                           <option value="h1">Heading 1</option>
                           <option value="h2">Heading 2</option>
@@ -893,18 +894,18 @@
               <h4 class="drawer-sidebar-heading drawer-sidebar-heading-highlight">Details</h4>
               <table class="drawer-fields-table">
                 <tbody>
-                  <tr data-builtin-field="status" data-builtin-locked="true"><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
-                  <tr data-builtin-field="priority"><td class="dfl">Priority</td><td class="dfv"><!-- Options rebuilt from the issue's space Priority custom field (renderDrawerIssue in app.js) --><select id="drawerPriority" class="drawer-select" size="1"></select></td></tr>
-                  <tr data-builtin-field="assignee"><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1"></select></td></tr>
-                  <tr data-builtin-field="reporter"><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1"></select></td></tr>
-                  <tr data-builtin-field="sprint"><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select"></select></td></tr>
-                  <tr data-builtin-field="story_points"><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—"></td></tr>
+                  <tr data-builtin-field="status" data-builtin-locked="true"><td class="dfl">Status</td><td class="dfv"><select id="drawerStatus" class="drawer-select" size="1" style="display:none" aria-label="Status"><option value="To Do">To Do</option><option value="In Progress">In Progress</option><option value="In Review">In Review</option><option value="Done">Done</option><option value="Blocked">Blocked</option></select><button id="drawerStatusBtn" onclick="toggleStatusDropdown()" style="border:none;border-radius:3px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;background:#dfe1e6;color:#42526e"><span id="drawerStatusLabel">To Do</span><span>&#9662;</span></button></td></tr>
+                  <tr data-builtin-field="priority"><td class="dfl">Priority</td><td class="dfv"><!-- Options rebuilt from the issue's space Priority custom field (renderDrawerIssue in app.js) --><select id="drawerPriority" class="drawer-select" size="1" aria-label="Priority"></select></td></tr>
+                  <tr data-builtin-field="assignee"><td class="dfl">Assignee</td><td class="dfv"><select id="drawerAssignee" class="drawer-select" size="1" aria-label="Assignee"></select></td></tr>
+                  <tr data-builtin-field="reporter"><td class="dfl">Reporter</td><td class="dfv"><select id="drawerReporter" class="drawer-select" size="1" aria-label="Reporter"></select></td></tr>
+                  <tr data-builtin-field="sprint"><td class="dfl">Sprint</td><td class="dfv"><select id="drawerSprint" class="drawer-select" aria-label="Sprint"></select></td></tr>
+                  <tr data-builtin-field="story_points"><td class="dfl">Story Points</td><td class="dfv"><input type="number" id="drawerPoints" class="drawer-input" min="0" step="1" placeholder="—" aria-label="Story points"></td></tr>
                   <!-- Options are rebuilt from the issue's own space's custom_fields.options every
                        time the drawer renders (buildBuiltinSelectOptionsHtml in app.js) -- never
                        hardcoded here, since a space admin can add/remove Team or Product Type
                        options at any time. -->
-                  <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select"><option value="">— None —</option></select></td></tr>
-                  <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select"><option value="">— None —</option></select></td></tr>
+                  <tr data-builtin-field="team"><td class="dfl">Team</td><td class="dfv"><select id="drawerTeam" class="drawer-select" aria-label="Team"><option value="">— None —</option></select></td></tr>
+                  <tr id="drawerProductTypeRow" data-builtin-field="product_type"><td class="dfl">Product Type</td><td class="dfv"><select id="drawerProductType" class="drawer-select" aria-label="Product Type"><option value="">— None —</option></select></td></tr>
                   <tr id="drawerCombinationRow" hidden data-builtin-field="combination">
                     <td class="dfv pt-combo-cell" colspan="2"><div id="drawerCombinationField"></div></td>
                   </tr>
@@ -917,8 +918,8 @@
               <h4 class="drawer-sidebar-heading">Dates</h4>
               <table class="drawer-fields-table">
                 <tbody>
-                  <tr data-builtin-field="start_date"><td class="dfl">Start Date</td><td class="dfv"><input type="date" id="drawerStartDate" class="drawer-input"></td></tr>
-                  <tr data-builtin-field="due_date"><td class="dfl">Due Date</td><td class="dfv"><input type="date" id="drawerDueDate" class="drawer-input"></td></tr>
+                  <tr data-builtin-field="start_date"><td class="dfl">Start Date</td><td class="dfv"><input type="date" id="drawerStartDate" class="drawer-input" aria-label="Start date"></td></tr>
+                  <tr data-builtin-field="due_date"><td class="dfl">Due Date</td><td class="dfv"><input type="date" id="drawerDueDate" class="drawer-input" aria-label="Due date"></td></tr>
                 </tbody>
               </table>
             </div>
@@ -1103,7 +1104,7 @@
             <div class="form-group" data-builtin-field="assignee">
               <label class="form-label">Assignee</label>
               <div class="user-search-wrap" id="assigneeWrap">
-                <input type="text" id="issueAssigneeSearch" class="input" placeholder="Search assignee…" autocomplete="off">
+                <input type="text" id="issueAssigneeSearch" class="input" placeholder="Search assignee…" autocomplete="off" aria-label="Search assignee">
                 <input type="hidden" id="issueAssignee">
                 <div class="user-search-dropdown" id="assigneeDropdown" style="display:none"></div>
               </div>
@@ -1111,7 +1112,7 @@
             <div class="form-group" data-builtin-field="reporter">
               <label class="form-label">Reporter</label>
               <div class="user-search-wrap" id="reporterWrap">
-                <input type="text" id="issueReporterSearch" class="input" placeholder="Search reporter…" autocomplete="off">
+                <input type="text" id="issueReporterSearch" class="input" placeholder="Search reporter…" autocomplete="off" aria-label="Search reporter">
                 <input type="hidden" id="issueReporter">
                 <div class="user-search-dropdown" id="reporterDropdown" style="display:none"></div>
               </div>
@@ -1363,11 +1364,11 @@
         <form id="inviteUserForm">
           <div class="form-group">
             <label class="form-label">Email Address</label>
-            <input type="email" id="inviteUserEmail" class="input" placeholder="user@example.com" required>
+            <input type="email" id="inviteUserEmail" class="input" placeholder="user@example.com" required aria-label="Email address">
           </div>
           <div class="form-group">
             <label class="form-label">Role</label>
-            <select id="inviteUserRole" class="input">
+            <select id="inviteUserRole" class="input" aria-label="Role">
               <option value="member">Member</option>
               <option value="admin">Admin</option>
             </select>
@@ -1375,8 +1376,8 @@
           <div id="inviteLinkResult" hidden style="margin-top:16px">
             <label class="form-label">Share this invite link:</label>
             <div style="display:flex;gap:8px">
-              <input type="text" id="inviteLinkUrl" class="input" readonly style="flex:1">
-              <button type="button" class="btn btn-outline" onclick="navigator.clipboard.writeText(document.getElementById('inviteLinkUrl').value);window.toast&&toast('Copied!')">Copy</button>
+              <input type="text" id="inviteLinkUrl" class="input" readonly style="flex:1" aria-label="Invite link">
+              <button type="button" class="btn btn-outline" onclick="navigator.clipboard.writeText(document.getElementById('inviteLinkUrl').value);window.toast&&toast('Invite link copied')">Copy</button>
             </div>
             <p style="margin-top:8px;font-size:12px;color:var(--muted)">Link expires in 7 days. User must set their own password.</p>
           </div>
@@ -1402,11 +1403,11 @@
           <input type="hidden" id="resetPwUserId">
           <div class="form-group">
             <label class="form-label">New Password</label>
-            <input type="password" id="resetPwNew" class="input" placeholder="Min 6 characters" required minlength="6">
+            <input type="password" id="resetPwNew" class="input" placeholder="Min 6 characters" required minlength="6" aria-label="New password">
           </div>
           <div class="form-group">
             <label class="form-label">Confirm Password</label>
-            <input type="password" id="resetPwConfirm" class="input" placeholder="Repeat password" required>
+            <input type="password" id="resetPwConfirm" class="input" placeholder="Repeat password" required aria-label="Confirm new password">
           </div>
         </form>
       </div>
@@ -1425,6 +1426,9 @@
   <script src="/config.js"></script>
   <script src="/hotjar.js"></script>
   <script src="combination-options.js"></script>
+  <!-- Unmanaged, and must stay ahead of the managed block: utils/index.js calls
+       DOMPurify at module scope. Vendored because there is no build step. -->
+  <script src="src/client/vendor/purify.min.js"></script>
   <script src="src/client/bootstrap.js"></script>
   <script src="src/client/state/index.js"></script>
   <script src="src/client/utils/index.js"></script>

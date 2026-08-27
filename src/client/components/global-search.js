@@ -326,11 +326,11 @@ async function renderDeletedTickets(el, opts) {
       try {
         var out = await api('/api/bin/' + btn.dataset.type + '/' + btn.dataset.id + '/restore', 'POST', null, { silent: true });
         var n = out && out.restored_issues;
-        toast(btn.dataset.key + ' restored' + (n ? ' with ' + n + ' ticket' + (n === 1 ? '' : 's') : ''), 'success');
+        toast(btn.dataset.key + ' restored' + (n ? ' with ' + n + ' issue' + (n === 1 ? '' : 's') : ''), 'success');
         await refreshData();
         renderDeletedTickets(el, opts);
       } catch (e) {
-        toast(e.message || 'Failed to restore', 'error');
+        toast('Restore failed — ' + errorReason(e), 'error');
         btn.disabled = false; btn.textContent = 'Restore';
       }
     });
@@ -350,7 +350,7 @@ async function renderDeletedTickets(el, opts) {
         details: purgeDetails(item),
         warn: 'This cannot be undone. There is no second bin.',
         phrase: key,
-        phraseHint: isSprint ? 'To confirm, type the sprint name' : 'To confirm, type the ticket number',
+        phraseHint: isSprint ? 'To confirm, type the sprint name' : 'To confirm, type the issue key',
         confirmLabel: 'Delete forever'
       });
       if (!ok) return;
@@ -361,7 +361,7 @@ async function renderDeletedTickets(el, opts) {
         await refreshData();
         renderDeletedTickets(el, opts);
       } catch (e) {
-        toast(e.message || 'Failed to permanently delete item', 'error');
+        toast('Permanent delete failed — ' + errorReason(e), 'error');
         btn.disabled = false; btn.textContent = 'Delete forever';
       }
     });
@@ -382,7 +382,9 @@ async function renderDeletedTickets(el, opts) {
       } catch (e) { failed++; }
     }
     await refreshData();
-    toast(failed ? done + ' restored, ' + failed + ' failed' : done + ' item(s) restored', failed ? 'error' : 'success');
+    toast(failed
+      ? done + ' of ' + (done + failed) + ' items restored — ' + failed + ' failed'
+      : done + ' item' + (done === 1 ? '' : 's') + ' restored', failed ? 'error' : 'success');
     renderDeletedTickets(el, opts);
   });
 
@@ -432,7 +434,7 @@ async function renderDeletedTickets(el, opts) {
       await refreshData();
       renderDeletedTickets(el, opts);
     } catch (e) {
-      toast(e.message || 'Failed to permanently delete items', 'error');
+      toast('Permanent delete failed — ' + errorReason(e), 'error');
       syncSel();
     }
   });

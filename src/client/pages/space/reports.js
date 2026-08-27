@@ -1135,7 +1135,7 @@ function renderBugSummaryReport(c, data, sprint, allSprints, sprintSelectorHtml)
         return '<div style="width:140px;text-align:center">' +
           '<div style="display:flex;justify-content:center">' + donut + '</div>' +
           '<div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px">' +
-          avatar + '<span style="font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px" title="' + esc(d.name) + '">' + esc(d.name) + '</span>' +
+          avatar + '<span style="font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px" title="' + escAttr(d.name) + '">' + esc(d.name) + '</span>' +
           '</div>' +
           '<div style="display:flex;justify-content:center;gap:8px;margin-top:6px;font-size:11px">' +
           (d.openCount ? '<span onclick="window._showReportIssues(\'bs_dev_' + d.safeKey + '_open\')" title="Click to view issues" style="cursor:pointer;color:#dc2626;font-weight:700">' + d.openCount + ' open</span>' : '<span style="color:var(--text3)">0 open</span>') +
@@ -1436,7 +1436,7 @@ function renderSpilloverReport(c, data, allSprints, sprintSelectorHtml) {
           avatar +
           '<span style="width:120px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(d.name) + '</span>' +
           '<div style="flex:1;background:var(--bg3);border-radius:4px;height:18px;overflow:hidden">' +
-          '<div onclick="window._showReportIssues(\'sp_dev_' + d.safeKey + '\')" title="' + esc(d.name) + ' — ' + d.count + ' spilled" style="cursor:pointer;width:' + Math.max(w, 4) + '%;height:100%;background:#dc2626"></div>' +
+          '<div onclick="window._showReportIssues(\'sp_dev_' + d.safeKey + '\')" title="' + escAttr(d.name + ' — ' + d.count + ' spilled') + '" style="cursor:pointer;width:' + Math.max(w, 4) + '%;height:100%;background:#dc2626"></div>' +
           '</div>' +
           '<span style="width:90px;font-size:11px;color:var(--text3);text-align:right;flex-shrink:0">' + d.count + ' spilled</span>' +
           '</div>';
@@ -1494,7 +1494,7 @@ function bindSpilloverRemoveButtons(container, sprint) {
         ],
         warn: 'This rewrites a completed sprint\'s record and cannot be undone from the UI.',
         phrase: key,
-        phraseHint: 'To confirm, type the ticket number',
+        phraseHint: 'To confirm, type the issue key',
         confirmLabel: 'Remove from spillover'
       });
       if (!ok) return;
@@ -1506,7 +1506,7 @@ function bindSpilloverRemoveButtons(container, sprint) {
         if (typeof renderReports === 'function') renderReports();
         else if (typeof renderCurrentView === 'function') renderCurrentView();
       } catch (e) {
-        toast(e.message || 'Could not remove it from spillover', 'error');
+        toast(key + ' could not be removed from spillover — ' + errorReason(e), 'error');
         btn.disabled = false;
         btn.textContent = 'Remove';
       }

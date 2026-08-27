@@ -62,8 +62,7 @@ they are an org admin, who bypasses the space check entirely.
 | `issue.delete`, `issue.bulk` | **site_admin** |
 | `sprint.read` | member |
 | `sprint.manage` (create / start / complete / delete) | **site_admin** |
-| `comment.create`, `comment.update` | member (+ ownership, below) |
-| `comment.delete` | **site_admin** |
+| `comment.create`, `comment.update`, `comment.delete` | member (+ ownership, below) |
 | `worklog.read`, `worklog.create` | member (+ ownership, below) |
 | `attachment.read`, `attachment.upload` | member |
 | `custom_field.read` | member |
@@ -79,25 +78,34 @@ An action absent from this table is **denied** (`if (!minRole) return false`).
 
 ### Stricter than the old doc, and intended
 
-These were previously documented as "own only" for members. They are
+This was previously documented as "own only" for members. It is
 site_admin-level, and that is the intended behaviour, not a regression:
 
 - **`issue.delete`** — a member cannot soft-delete even their own issue.
-- **`comment.delete`** — a member cannot delete even their own comment.
+
+`comment.delete` **used to be site_admin-level here too, deliberately.** That
+was reversed: a member can now delete their own comment, the same as editing
+one. Restricting delete to site_admin while allowing edit at member-plus-
+ownership was an asymmetry with no stated reason, and once questioned there
+wasn't a good one — a member who can edit their own comment into an empty
+string has never needed admin help to remove it in substance, so gating the
+literal delete behind a role the edit path didn't require was inconsistent
+rather than deliberately stricter.
 
 ### Row-level ownership, on top of the tier check
 
-Two resources add an ownership check *after* the tier check passes. The tier
-check runs first deliberately, so a non-member gets a membership error rather
-than one that confirms the row exists.
+Three resources add an ownership check *after* the tier check passes. The
+tier check runs first deliberately, so a non-member gets a membership error
+rather than one that confirms the row exists.
 
 | Resource | Rule | Where |
 |---|---|---|
-| Comment edit | author, **or org admin** | `src/server/routes/comments.js` |
+| Comment edit / delete | author, **or org admin** | `src/server/routes/comments.js` |
 | Worklog edit / delete | author, **or org admin** | `src/server/routes/worklogs.js:47` |
 
-Note the elevated role for both is **org** admin, not space admin. A space
-site_admin who did not write the comment cannot edit it.
+Note the elevated role for all of these is **org** admin, not space admin. A
+space site_admin who did not write the comment cannot edit or delete it —
+only the author or an org admin can.
 
 ## Org-level actions (`users.role`)
 

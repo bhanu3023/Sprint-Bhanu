@@ -155,16 +155,16 @@ async function handleSpaceSubmit(e) {
       await refreshData();
       renderSidebar();
       if (S.currentSpace) { var sp = getSpace(S.currentSpace); if (sp) renderSpaceHeader(sp); }
-      popupAlert('Space Updated', '"' + spaceName + '" has been updated successfully.', 'success');
+      popupAlert('Space updated', '"' + spaceName + '" has been saved.', 'success');
     } else {
       var newSpace = await api('/api/spaces', 'POST', payload);
       closeModal('modal-space');
       await refreshData();
       renderSidebar();
-      popupAlert('Space Created', '"' + spaceName + '" space has been created successfully.', 'success');
+      popupAlert('Space created', '"' + spaceName + '" is ready to use.', 'success');
       if (newSpace && newSpace.id) navigateToSpace(newSpace.id, 'summary');
     }
   } catch (err) {
-    popupAlert('Error', err.message || 'Could not save space. Please try again.', 'error');
+    popupAlert('Space save failed', errorReason(err, 'the space could not be saved'), 'error');
   }
 }

@@ -20,13 +20,103 @@ const esc = (str) => {
 // containing a quote silently terminates the attribute.
 const escAttr = (str) => esc(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+// ═══════════════════════════════════════════════════════════
+// STORED-HTML SANITISER
+// ═══════════════════════════════════════════════════════════
+// Comment bodies, descriptions and fix_descriptions are stored as HTML and
+// rendered through innerHTML. Until this landed, the only filtering was a
+// `<script>` regex strip, so a stored `<img src=x onerror=...>` executed for
+// every viewer who opened the issue — one user writing, everyone else running.
+//
+// The allowlist below was derived by applying candidate policies to the bodies
+// actually in the database and diffing the render, not by picking a tidy set.
+// That matters: the first candidate stripped img@style, class, data-url,
+// data-fp, contenteditable and <button>, which would have silently broken the
+// description image tray and made every inline screenshot render at full size.
+// Those entries are here because real content needs them.
+//
+// `style` is allowed knowingly. It permits CSS redressing (a stored
+// position:fixed overlay), which is far below script execution and which
+// existing content depends on for image sizing. The path out is to migrate the
+// bodies that use it to classes and then drop it — see the planned-work note in
+// docs/REFACTOR-2026-08.md §9.
+var SANITISE_ALLOWED_TAGS = [
+  'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'p', 'br', 'div', 'span',
+  'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'code', 'pre',
+  'a', 'img', 'button'
+];
+
+// Per TAG, deliberately. DOMPurify's own ALLOWED_ATTR is a global set, which
+// would allow href on <div> and src on <span>; harmless in practice but looser
+// than the reviewed policy. The hook below narrows it back to exactly this
+// table, so what ships is what was approved.
+var SANITISE_ALLOWED_ATTRS = {
+  a: ['href', 'target', 'rel'],
+  img: ['src', 'alt', 'title', 'class', 'width', 'height', 'style', 'data-url', 'data-fp'],
+  div: ['style', 'class', 'contenteditable', 'data-url', 'data-fp'],
+  span: ['style', 'class'],
+  p: ['style', 'class'],
+  code: ['class'],
+  pre: ['class'],
+  button: ['class', 'type', 'aria-label']
+};
+
+// The union, so DOMPurify still runs its own URI validation on href/src before
+// the per-tag hook ever sees them. Dropping an attribute from here drops it
+// everywhere regardless of the table above.
+var SANITISE_ATTR_UNION = (function () {
+  var seen = {};
+  Object.keys(SANITISE_ALLOWED_ATTRS).forEach(function (tag) {
+    SANITISE_ALLOWED_ATTRS[tag].forEach(function (a) { seen[a] = true; });
+  });
+  return Object.keys(seen);
+})();
+
+if (typeof DOMPurify !== 'undefined') {
+  DOMPurify.addHook('uponSanitizeAttribute', function (node, data) {
+    var tag = (node.tagName || '').toLowerCase();
+    var allowed = SANITISE_ALLOWED_ATTRS[tag];
+    if (!allowed || allowed.indexOf(data.attrName) === -1) data.keepAttr = false;
+  });
+}
+
+// Sanitise a stored, user-written HTML body for rendering. Call this on the
+// STORED string, before the app wraps its own trusted markup around it — not on
+// the finished HTML, or the app's own generated attributes get stripped too.
+function sanitiseStoredHtml(html) {
+  if (!html) return '';
+  var s = String(html);
+  if (typeof DOMPurify === 'undefined') {
+    // Fail closed. A missing vendor file must not silently revert five sinks to
+    // rendering raw attacker HTML; showing text is a visible bug, executing is
+    // not.
+    return esc(s);
+  }
+  return DOMPurify.sanitize(s, {
+    ALLOWED_TAGS: SANITISE_ALLOWED_TAGS,
+    ALLOWED_ATTR: SANITISE_ATTR_UNION,
+    ALLOW_DATA_ATTR: false,   // only data-url/data-fp, via the table above
+    ALLOW_ARIA_ATTR: false,   // only button@aria-label, via the table above
+    KEEP_CONTENT: true        // an unlisted tag is unwrapped, its text survives
+  });
+}
+
+
+// Extract plain text from a stored HTML body WITHOUT loading or executing it.
+//
+// This used to assign innerHTML to a detached div and read textContent back,
+// which LOOKS safe because only text comes out. It is not: `<img src=x
+// onerror=...>` fires from a detached div — verified in Chrome, not assumed.
+// That made this function a live XSS sink at both its call sites (the History
+// tab, which has real markup in it, and htmlFieldIsEmpty below, which fires on
+// an emptiness *check*). A DOMParser document has no browsing context, so
+// nothing inside it loads or runs.
 function stripHtmlForDisplay(html) {
   if (!html) return '';
   var s = String(html);
   if (!/<[a-z][\s\S]*>/i.test(s)) return s;
-  var d = document.createElement('div');
-  d.innerHTML = s;
-  return (d.textContent || d.innerText || '').replace(/\s+/g, ' ').trim();
+  var doc = new DOMParser().parseFromString(s, 'text/html');
+  return ((doc.body && doc.body.textContent) || '').replace(/\s+/g, ' ').trim();
 }
 
 function truncateForHistory(text, max) {
@@ -406,7 +496,7 @@ function highlightMentionsInCommentBody(body) {
 function commentBodyToEditableHtml(body) {
   if (!body) return '';
   if (/<[a-z][\s\S]*>/i.test(body)) {
-    var safe = body.replace(/<script[\s\S]*?<\/script>/gi, '');
+    var safe = sanitiseStoredHtml(body);
     // Images in a stored HTML body are bare /api/files/<id> src's (no token --
     // see _saveComment's stripFileAuthTokensFromHtml). bodyHtml()'s read-only
     // render calls augmentFileUrlsInHtml for the same reason; without it here
@@ -416,7 +506,7 @@ function commentBodyToEditableHtml(body) {
   }
   var html = highlightMentionsInCommentBody(body);
   html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
-    return '<img class="desc-inline-img" src="' + esc(fileApiUrl(url)) + '" alt="' + esc(fname) + '"><br>';
+    return '<img class="desc-inline-img" src="' + esc(fileApiUrl(url)) + '" alt="' + escAttr(fname) + '"><br>';
   });
   html = html.replace(/\[file:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {
     return '<a href="' + esc(fileApiUrl(url)) + '" target="_blank">' + esc(fname) + '</a>';
@@ -445,6 +535,194 @@ function diffCombinationFieldChange(oldValue, newValue) {
   if (ptChanged) return 'product type';
   if (comboChanged) return 'combination';
   return null;
+}
+
+// Server text that is written for a machine, not a person, mapped to a clause
+// that reads inside "<what> failed — <reason>". Anything not listed passes
+// through unchanged: most API errors already carry a sentence meant for the
+// user (permissions, validation, lifecycle guards) and rewriting those would
+// lose detail. Keys are matched exactly against the thrown message, which is
+// `err.error` from the JSON body or the raw HTTP statusText (services/api.js).
+var RAW_ERROR_REASONS = {
+  'Internal server error': 'something went wrong on the server',
+  'Unauthorized': 'your session has expired — sign in again',
+  'Forbidden': 'you do not have permission',
+  'Not Found': 'it no longer exists',
+  'Payload Too Large': 'the request is too large',
+  'Unsupported Media Type': 'that file type is not accepted',
+  'Too Many Requests': 'too many requests — wait a moment and retry',
+  'Bad Gateway': 'the server is unreachable',
+  'Service Unavailable': 'the server is unavailable',
+  'Gateway Timeout': 'the server took too long to respond',
+  'Request Timeout': 'the request timed out'
+};
+
+// Domain nouns this app capitalises as labels in its own UI. Lower-casing
+// these would read as a typo ("sprint is not active" where every screen says
+// Sprint), so they are left alone even at the start of a clause.
+var MESSAGE_PROPER_FIRST_WORDS = {
+  Space: 1, Spaces: 1, Sprint: 1, Sprints: 1, Issue: 1, Issues: 1,
+  Backlog: 1, Board: 1, Roadmap: 1, Microsoft: 1
+};
+
+// True when the first word must keep its capital: a domain noun above, an
+// identifier (space_id, ENG-12, site_admin), an acronym (SMTP, API), or
+// anything with a second capital in it.
+function isProperFirstWord(word) {
+  var bare = String(word || '').replace(/[^A-Za-z0-9_'’-]/g, '');
+  if (!bare) return true;
+  if (MESSAGE_PROPER_FIRST_WORDS[bare]) return true;
+  if (/[0-9_]/.test(bare)) return true;
+  if (/^[A-Z]{2,}$/.test(bare)) return true;
+  if (/^[A-Z].*[A-Z]/.test(bare)) return true;
+  return false;
+}
+
+// A reason is rendered after a dash -- "ENG-12 update failed — <reason>" -- but
+// the server writes its messages as standalone sentences, so they arrive with a
+// sentence-initial capital and a full stop and read grafted on. This lowers the
+// first letter and drops one trailing period, but only where that is safe:
+//   * never an identifier, acronym or domain noun (ENG-12, SMTP, Sprint)
+//   * never a multi-sentence string -- mangling the first of two sentences is
+//     worse than leaving both intact, so those pass through untouched
+//   * exactly one trailing '.', never '!', '?', ')' or an ellipsis
+function toReasonClause(msg) {
+  var s = String(msg);
+  if (/[.!?]\s+[A-Za-z]/.test(s)) return s;
+  if (!isProperFirstWord(s.split(/\s+/)[0])) s = s.charAt(0).toLowerCase() + s.slice(1);
+  if (/[^.]\.$/.test(s)) s = s.slice(0, -1);
+  return s;
+}
+
+// The inverse, for the one place a reason is shown on its own rather than after
+// a dash (services/api.js's catch-all toast).
+function capitaliseFirst(msg) {
+  var s = String(msg);
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+// Never returns '' — a bare `toast(e.message)` renders an empty or
+// "undefined" toast when the error carries no message.
+function errorReason(e, fallback) {
+  // A raw fetch() that never got a response throws TypeError with a
+  // browser-internal message ("Failed to fetch"). api() already converts
+  // those before throwing, but the upload handlers call fetch() directly,
+  // so handle it here too rather than at each of them.
+  if (e instanceof TypeError && typeof friendlyFetchErrorMessage === 'function') {
+    return friendlyFetchErrorMessage(e, fallback || 'reason unknown');
+  }
+  var m = (e && e.message != null) ? String(e.message).trim() : '';
+  if (!m || m === 'undefined' || m === 'null') return fallback || 'reason unknown';
+  // A mapped reason is already written as a clause; anything passed through is
+  // the server's own sentence and needs reshaping to sit after a dash.
+  if (RAW_ERROR_REASONS[m]) return RAW_ERROR_REASONS[m];
+  return toReasonClause(m);
+}
+
+// Lower-case field names, for use mid-sentence ("ENG-12 due date updated").
+// The History tab keeps its own Title-Case map because it renders the field as
+// a standalone label ("Updated Due Date from … to …") rather than in a clause.
+var ISSUE_FIELD_LABELS = {
+  title: 'title', status: 'status', priority: 'priority',
+  assignee_id: 'assignee', reporter_id: 'reporter', sprint_id: 'sprint',
+  labels: 'labels', story_points: 'story points', type: 'type',
+  start_date: 'start date', due_date: 'due date',
+  description: 'description', fix_description: 'fix description',
+  team: 'team', product_type: 'product type',
+  original_estimate: 'original estimate', time_spent: 'time spent',
+  parent_id: 'parent', position: 'position', attachment: 'attachment'
+};
+
+// The key a user recognises an issue by ("ENG-12"), read from the cache the
+// view was already rendered from. Returns '' when the issue is not cached, so
+// callers fall back to a generic message rather than printing a raw uuid.
+function cachedIssueKey(issueId) {
+  if (!issueId) return '';
+  var iss = ((S.data && S.data.issues) || []).find(function (i) {
+    return String(i.id) === String(issueId);
+  });
+  return (iss && iss.key) ? iss.key : '';
+}
+
+// openDrawer() accepts either an issue id or an issue key, so a load failure
+// has to cope with both. A key is usable as-is; an id is only useful if the
+// issue is cached, otherwise fall back to a phrase rather than print a uuid.
+function issueLabelFor(issueIdOrKey) {
+  var s = String(issueIdOrKey || '');
+  if (/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(s)) return s.toUpperCase();
+  return cachedIssueKey(s) || 'that issue';
+}
+
+// "ENG-12 linked to ENG-15" -- both ends are in hand at the call site (the
+// open drawer's issue and the target picked in the dialog), so the message can
+// say what was linked to what instead of just that something was linked.
+function linkedPairText(sourceId, targetId) {
+  var a = cachedIssueKey(sourceId);
+  var b = cachedIssueKey(targetId);
+  if (a && b) return a + ' linked to ' + b;
+  if (b) return 'Linked to ' + b;
+  return 'Issue linked';
+}
+
+// What an inline issue edit actually changed, for the confirmation toast.
+// Every value used here is already in hand at the call site: the field name
+// and its new value are the autoSave/saveFieldNow arguments, and the user and
+// sprint lookups are the same S.data the drawer already rendered from -- so
+// this reads existing state and computes nothing new. Shared by the drawer's
+// inline fields and All Work's inline status/priority/assignee menus, so the
+// same change reads the same way wherever it is made. A batch (the 800ms
+// debounce can coalesce several edits into one PUT) reports the count rather
+// than listing fields, which keeps the line short and stops it growing
+// unboundedly with the number of fields touched.
+function issueChangeSummary(key, saved) {
+  var fields = Object.keys(saved || {});
+  if (!fields.length) return key + ' updated';
+  if (fields.length > 1) return key + ' updated — ' + fields.length + ' fields';
+  var field = fields[0];
+  var value = saved[field];
+  if (field === 'status') return key + ' moved to ' + value;
+  if (field === 'priority') return key + ' priority set to ' + cap(value);
+  if (field === 'type') return key + ' type set to ' + cap(value);
+  if (field === 'assignee_id') {
+    var u = value ? findUser(value) : null;
+    return u ? key + ' assigned to ' + u.name : key + ' unassigned';
+  }
+  if (field === 'sprint_id') return issueSprintMoveText(key, value);
+  return key + ' ' + issueFieldLabel(field) + ' updated';
+}
+
+// A sprint's name from the already-loaded cache, for the messages that only
+// have its id in hand. '' when it is not cached, so callers stay generic.
+function sprintName(sprintId) {
+  if (!sprintId) return '';
+  var sp = ((S.data && S.data.sprints) || []).find(function (s) {
+    return String(s.id) === String(sprintId);
+  });
+  return (sp && sp.name) ? sp.name : '';
+}
+
+// One phrasing for "this issue changed sprint", shared by the drawer's inline
+// Sprint picker and the backlog's drag-and-drop, so the same action does not
+// describe itself two different ways depending on where it was performed.
+function issueSprintMoveText(label, sprintId) {
+  if (!sprintId) return label + ' moved to the backlog';
+  var sp = ((S.data && S.data.sprints) || []).find(function (s) {
+    return String(s.id) === String(sprintId);
+  });
+  return label + ' moved to ' + (sp ? sp.name : 'the selected sprint');
+}
+
+function issueFieldLabel(field) {
+  if (!field) return 'field';
+  return ISSUE_FIELD_LABELS[field] ||
+    String(field).replace(/_id$/, '').replace(/_/g, ' ');
+}
+
+function emptyYwFilters() {
+  return {
+    key: [], type: [], status: [], priority: [], space: [],
+    productType: [], combination: [], assignee: [], reporter: []
+  };
 }
 
 function fmtMins(mins) {

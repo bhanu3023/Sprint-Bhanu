@@ -98,7 +98,6 @@ async function handleIssueSubmit(e) {
       }
     }
   }
-  var id = $('issueId').value;
   var parentId = $('issueParentId').value || null;
   // Already validated above as non-empty — reuse it rather than re-resolving with
   // a different fallback chain, which is how the two could disagree.
@@ -124,18 +123,24 @@ async function handleIssueSubmit(e) {
   };
   if (parentId) payload.parent_id = parentId;
 
-  if (id) {
-    delete payload.status;
-    await api('/api/issues/' + id, 'PUT', payload);
-    toast('Issue updated');
-    closeModal('modal-issue');
-    await refreshData();
-    renderCurrentView();
-  } else {
+  // NOTE: this modal only ever CREATES. There used to be an `if (id)` branch
+  // here that PUT to /api/issues/:id and toasted an "updated" message, reading
+  // its id from the hidden #issueId input -- but nothing in the app ever writes
+  // to that input except resetIssueForm(), which sets it to ''. Grep it: three
+  // references in the whole codebase -- the declaration in index.html, that one
+  // `= ''`, and the read that used to be here. Every caller also sets the modal
+  // title to "Create Issue" or "Create Subtask", never an Edit variant. Editing
+  // happens through the drawer's inline fields instead, so the branch and its
+  // message were unreachable. The braces are kept so the body below is not
+  // reindented for no reason.
+  {
     var submitBtn = $('issueSubmitBtn');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
     try {
-    var created = await api('/api/issues', 'POST', payload);
+    // silent: the catch below renders its own "Issue creation failed — <reason>"
+    // message, so letting api() toast the raw thrown text too stacked two
+    // error toasts on one failure.
+    var created = await api('/api/issues', 'POST', payload, { silent: true });
     // Save custom field values
     if (created && created.id) {
       // Save dynamic custom fields. A native <select multiple> element's
@@ -177,12 +182,12 @@ async function handleIssueSubmit(e) {
         if (!uploadRes.ok) {
           var uploadErr = 'Attachment upload failed';
           try { var ej = await uploadRes.json(); if (ej.error) uploadErr = ej.error; } catch (_) {}
-          toast('Issue created but ' + uploadErr, 'warning');
+          toast(issueKeyStr(created) + ' created, attachments failed — ' + uploadErr, 'warning');
         }
-      } catch(e) { toast('Issue created but attachments failed to upload', 'warning'); }
+      } catch(e) { toast(issueKeyStr(created) + ' created, attachments failed — ' + errorReason(e, 'the upload was interrupted'), 'warning'); }
     }
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save'; }
-    } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Failed to create issue: " + e.message, "error"); return; }
+    } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Issue creation failed — " + errorReason(e), "error"); return; }
     closeModal('modal-issue');
     await refreshData();
     // Captured before anything below navigates: renderCurrentView() ->
@@ -203,7 +208,7 @@ async function handleIssueSubmit(e) {
     // on screen untouched; the toast below is the only feedback.
     if (created && created.id) {
       if (subtaskOfOpenTicket) {
-        toast('Issue created');
+        toast(issueKeyStr(created) + ' created');
       } else if (ticketWasOpen) {
         // Don't yank the user away from whatever they're reading. Offer a way
         // to jump to the new ticket instead of forcing it.
@@ -213,7 +218,7 @@ async function handleIssueSubmit(e) {
           { label: 'Copy link', handler: function () { copyIssueLinkByKey(newKey); }, dismissOnClick: false }
         ]);
       } else if (!parentId) {
-        toast('Issue created — opening in new tab…');
+        toast(issueKeyStr(created) + ' created — opening…');
         // Wait for custom fields to be saved before opening
         setTimeout(async function() {
           await new Promise(r => setTimeout(r, 500));
@@ -221,7 +226,7 @@ async function handleIssueSubmit(e) {
           openIssuePage(created.id);
         }, 300);
       } else {
-        toast('Issue created');
+        toast(issueKeyStr(created) + ' created');
       }
     } else {
       toast('Issue created');

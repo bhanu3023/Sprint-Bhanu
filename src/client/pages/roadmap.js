@@ -262,7 +262,7 @@ function _prmBoardView(items) {
             _prmPriorityBadge(r.priority) +
             (r.space_name ? '<span class="prm-bc-space">' + esc(r.space_name) + '</span>' : '') +
             (r.assigned_name
-              ? '<span class="prm-bc-avatar" title="' + esc(r.assigned_name) + '">' + esc(initials) + '</span>'
+              ? '<span class="prm-bc-avatar" title="' + escAttr(r.assigned_name) + '">' + esc(initials) + '</span>'
               : '') +
           '</div>' +
           (r.start_date || r.end_date
@@ -436,7 +436,7 @@ function _prmTimelineView(items, groupBy, zoom) {
           '<span class="prm-sl-color-hint">🎨</span>' +
         '</div>' +
         catItems.map(function(r) {
-          return '<div class="prm-sl-item-dot" onclick="window._prmOpenModal(\'' + r.id + '\')" title="' + esc(r.title) + '">' +
+          return '<div class="prm-sl-item-dot" onclick="window._prmOpenModal(\'' + r.id + '\')" title="' + escAttr(r.title) + '">' +
             '<span class="prm-sl-dot-icon">✏</span>' +
           '</div>';
         }).join('') +
@@ -550,7 +550,7 @@ window._prmOpenModal = function(id, defaultStatus) {
     '<div class="modal-box" style="max-width:520px">' +
     '<div class="modal-header"><h3>' + title + '</h3><button class="btn-icon" onclick="window._prmCloseModal()">✕</button></div>' +
     '<div class="modal-body" style="display:grid;gap:14px">' +
-      '<div><label class="form-label">Title *</label><input id="prmFTitle" class="input" value="' + esc(v.title||'') + '" placeholder="Roadmap item title"></div>' +
+      '<div><label class="form-label">Title *</label><input id="prmFTitle" class="input" value="' + escAttr(v.title||'') + '" placeholder="Roadmap item title"></div>' +
       '<div><label class="form-label">Description</label><textarea id="prmFDesc" class="input" rows="8" placeholder="Optional description">' + esc(v.description||'') + '</textarea></div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
         '<div><label class="form-label">Status</label><select id="prmFStatus" class="input">' +
@@ -569,8 +569,8 @@ window._prmOpenModal = function(id, defaultStatus) {
         '<div><label class="form-label">Assignee</label><select id="prmFAssigned" class="input">' + userOptions + '</select></div>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
-        '<div><label class="form-label">Group Name</label><input id="prmFGroup" class="input" value="' + esc(v.group_name||'') + '" placeholder="e.g. Sales, Product"></div>' +
-        '<div><label class="form-label">Category</label><input id="prmFCat" class="input" value="' + esc(v.category||'') + '" placeholder="e.g. Strategy, Dev"></div>' +
+        '<div><label class="form-label">Group Name</label><input id="prmFGroup" class="input" value="' + escAttr(v.group_name||'') + '" placeholder="e.g. Sales, Product"></div>' +
+        '<div><label class="form-label">Category</label><input id="prmFCat" class="input" value="' + escAttr(v.category||'') + '" placeholder="e.g. Strategy, Dev"></div>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
         '<div><label class="form-label">Color</label><input id="prmFColor" type="color" class="input" value="' + esc(v.color||'#4d90e0') + '" style="height:36px;padding:2px 6px"></div>' +
@@ -638,7 +638,7 @@ window._prmSave = async function(id) {
     window._prmCloseModal();
     await window._prmLoad();
   } catch(e) {
-    toast('Failed to save: ' + (e.message||e), 'error');
+    toast('Roadmap item save failed — ' + errorReason(e), 'error');
   }
 };
 
@@ -766,10 +766,10 @@ window._prmDelete = async function(id) {
   if (!confirm('Delete this roadmap item?')) return;
   window._prmCloseModal();
   try {
-    await api('/api/roadmap/' + id, 'DELETE');
-    toast('Deleted');
+    await api('/api/roadmap/' + id, 'DELETE', null, { silent: true });
+    toast('Roadmap item deleted');
     await window._prmLoad();
-  } catch(e) { toast('Delete failed', 'error'); }
+  } catch(e) { toast('Roadmap item delete failed — ' + errorReason(e), 'error'); }
 };
 
 // ═══════════════════════════════════════════════════════════

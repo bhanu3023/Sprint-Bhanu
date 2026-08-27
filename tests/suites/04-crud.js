@@ -86,13 +86,11 @@ module.exports = {
       A.ok(mine, 'the comment must be readable on the issue');
       A.eq(mine.body, 'edited comment ' + x.tag, 'edited comment body persisted');
 
-      // Deleting a comment requires a space admin in the implementation, so the
-      // author alone cannot remove their own comment. See the divergence noted
-      // in the run report against .claude/rules/permission-matrix.md.
-      const delByAuthor = await c.del('/api/comments/' + cid, { token: x.users.member.token });
-      A.status(delByAuthor, 403, 'the author alone cannot delete their comment');
-      const del = await c.del('/api/comments/' + cid, { token: x.users.admin.token });
-      A.statusIn(del, [200, 204], 'a space admin can delete the comment');
+      // Delete now follows the same ownership rule as edit: the author, or an
+      // org admin. Previously site_admin-only regardless of authorship -- see
+      // the ownership test below for the non-author and org-admin cases.
+      const del = await c.del('/api/comments/' + cid, { token: x.users.member.token });
+      A.statusIn(del, [200, 204], 'the author may delete their own comment');
     }},
 
     { name: 'comment edit ownership: author yes, another member no, org admin yes', fn: async (c, x, own) => {
@@ -130,17 +128,30 @@ module.exports = {
       await c.del('/api/comments/' + cid, { token: x.users.admin.token });
     }},
 
-    { name: "a member cannot delete someone else's comment", fn: async (c, x, own) => {
+    { name: 'comment delete ownership: author yes, another member no, org admin yes', fn: async (c, x, own) => {
+      // Mirrors the edit-ownership test above exactly: the author, or an org
+      // admin. A space site_admin (manager here has space role 'manager',
+      // which normalizes to site_admin) who is neither is refused just like
+      // for edit -- elevation is org-level, not space-level.
       const iss = await c.post('/api/issues', { token: x.users.manager.token,
         body: { space_id: x.spaceId, title: 'comment delete perms ' + x.tag, type: 'task' } });
+      A.statusIn(iss, [200, 201], 'issue for delete-ownership test');
       own.issue(iss.body.id);
-      const add = await c.post('/api/comments', { token: x.users.manager.token,
-        body: { issue_id: iss.body.id, body: 'managers comment ' + x.tag } });
-      A.statusIn(add, [200, 201], 'manager creates a comment');
+
+      const add = await c.post('/api/comments', { token: x.users.member.token,
+        body: { issue_id: iss.body.id, body: 'authored by member ' + x.tag } });
+      A.statusIn(add, [200, 201], 'member creates a comment');
       const cid = add.body.id;
-      A.denied(await c.del('/api/comments/' + cid, { token: x.users.member.token }),
-        "member deleting another user's comment");
-      await c.del('/api/comments/' + cid, { token: x.users.admin.token });
+
+      const byOther = await c.del('/api/comments/' + cid, { token: x.users.manager.token });
+      A.status(byOther, 403, 'a non-author who is not an org admin must be refused');
+      A.includes(byOther.raw, 'your own comments', 'the 403 must carry the ownership message');
+
+      const got = await c.get('/api/issues/' + iss.body.id, { token: x.users.member.token });
+      A.ok((got.body.comments || []).find(cm => cm.id === cid), 'the refused delete never applied');
+
+      const byAdmin = await c.del('/api/comments/' + cid, { token: x.users.admin.token });
+      A.statusIn(byAdmin, [200, 204], 'an org admin may delete any comment');
     }},
 
     { name: 'worklog: create -> read -> update -> delete', fn: async (c, x, own) => {
