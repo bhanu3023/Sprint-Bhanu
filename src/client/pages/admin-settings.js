@@ -760,23 +760,23 @@ async function renderAdminEmailSettings(el) {
 }
 
 // ── Audit Log ─────────────────────────────────────────────
-async function renderAdminAuditLog(el) {
-  el.innerHTML = '<div style="padding:20px;color:var(--text3)">Loading audit log...</div>';
+// Full history for the currently-loaded window, kept so the ticket search
+// filters instantly against what's already fetched instead of round-tripping
+// per keystroke -- a week of one org's activity is small enough for that.
+var _auditLogCache = [];
+var _auditLogDays = 7;
+
+var AUDIT_FIELD_LABEL = { title:'Title', status:'Status', priority:'Priority', assignee_id:'Assignee',
+  reporter_id:'Reporter', sprint_id:'Sprint', labels:'Labels', story_points:'Story Points',
+  start_date:'Start Date', due_date:'Due Date', description:'Description' };
+
+function _auditLogRowsHtml(history) {
   var users = (S.data && S.data.users) || [];
   var issues = (S.data && S.data.issues) || [];
-
-  // Fetch real issue_history from DB
-  var history = [];
-  try { history = await api('/api/admin/audit-log'); } catch(e) { history = []; }
-
-  var fieldLabel = { title:'Title', status:'Status', priority:'Priority', assignee_id:'Assignee',
-    reporter_id:'Reporter', sprint_id:'Sprint', labels:'Labels', story_points:'Story Points',
-    start_date:'Start Date', due_date:'Due Date', description:'Description' };
-
-  var rows = history.map(function(h) {
+  return history.map(function(h) {
     var u = users.find(function(u){ return u.id===h.user_id; });
     var issue = issues.find(function(i){ return i.id===h.issue_id; });
-    var fl = fieldLabel[h.field_name] || h.field_name;
+    var fl = AUDIT_FIELD_LABEL[h.field_name] || h.field_name;
     var action = 'Changed <strong>' + esc(fl) + '</strong>';
     if (h.old_value && h.new_value) action += ' from <span style="text-decoration:line-through;color:var(--text3)">' + esc(h.old_value) + '</span> → <strong>' + esc(h.new_value) + '</strong>';
     else if (h.new_value) action += ' to <strong>' + esc(h.new_value) + '</strong>';
@@ -791,16 +791,66 @@ async function renderAdminAuditLog(el) {
       '</td>' +
       '</tr>';
   }).join('');
+}
+
+function _renderAuditLogTable() {
+  var body = $('auditLogTableBody');
+  if (!body) return;
+  var rows = _auditLogRowsHtml(_auditLogCache);
+  body.innerHTML = rows || '';
+  var empty = $('auditLogEmpty');
+  if (empty) empty.style.display = rows ? 'none' : 'block';
+}
+
+window._filterAuditLog = function(term) {
+  term = (term || '').trim().toLowerCase();
+  if (!term) { _renderAuditLogTable(); return; }
+  var issues = (S.data && S.data.issues) || [];
+  var filtered = _auditLogCache.filter(function (h) {
+    var issue = issues.find(function (i) { return i.id === h.issue_id; });
+    var key = (issue && issue.key) || h.issue_key || '';
+    return key.toLowerCase().indexOf(term) !== -1;
+  });
+  var body = $('auditLogTableBody');
+  if (body) body.innerHTML = _auditLogRowsHtml(filtered);
+  var empty = $('auditLogEmpty');
+  if (empty) empty.style.display = filtered.length ? 'none' : 'block';
+}
+
+async function _loadAuditLog(days) {
+  _auditLogDays = days;
+  var body = $('auditLogTableBody');
+  if (body) body.innerHTML = '<tr><td colspan="4" style="padding:20px;color:var(--text3);text-align:center">Loading…</td></tr>';
+  try { _auditLogCache = await api('/api/admin/audit-log?days=' + days, 'GET', null, { silent: true }); }
+  catch (e) { _auditLogCache = []; toast('Audit log failed to load — ' + errorReason(e), 'error'); }
+  var searchBox = $('auditLogSearch');
+  if (searchBox && searchBox.value.trim()) window._filterAuditLog(searchBox.value);
+  else _renderAuditLogTable();
+}
+window._loadAuditLog = _loadAuditLog;
+
+async function renderAdminAuditLog(el) {
+  el.innerHTML = '<div style="padding:20px;color:var(--text3)">Loading audit log...</div>';
 
   el.innerHTML =
     '<div class="admin-section-header">' +
     '<h2>📋 Audit Log</h2>' +
     '<p>All field changes, status updates, and actions across the organization.</p>' +
     '</div>' +
+    '<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">' +
+    '<select id="auditLogDays" onchange="window._loadAuditLog(parseInt(this.value,10))" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text);font-size:13px;outline:none">' +
+      '<option value="7" selected>Last 7 days</option>' +
+      '<option value="30">Last 30 days</option>' +
+      '<option value="90">Last 90 days</option>' +
+    '</select>' +
+    '<input type="text" id="auditLogSearch" placeholder="Search by ticket number (e.g. AI-42)" oninput="window._filterAuditLog(this.value)" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text);font-size:13px;width:240px;outline:none">' +
+    '</div>' +
     '<div class="admin-card" style="padding:0;overflow:hidden">' +
-    (rows ? '<table class="data-table"><thead><tr><th>Date & Time</th><th>User</th><th>Change</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>' :
-    '<div style="padding:32px;text-align:center;color:var(--text3)">No audit history yet. Changes to issues will appear here.</div>') +
+    '<table class="data-table"><thead><tr><th>Date & Time</th><th>User</th><th>Change</th><th>Issue</th></tr></thead><tbody id="auditLogTableBody"></tbody></table>' +
+    '<div id="auditLogEmpty" style="display:none;padding:32px;text-align:center;color:var(--text3)">No audit history in this range.</div>' +
     '</div>';
+
+  await _loadAuditLog(_auditLogDays);
 }
 
 // ── Normalize pasted text in description editors ───────────
