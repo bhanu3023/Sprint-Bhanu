@@ -24,25 +24,35 @@
   main { padding: 20px 24px 60px; }
   #status { color: #64748b; padding: 40px; text-align: center; }
   #status.error { color: #dc2626; }
-  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  /* table-layout:fixed locks column widths from the <th> declarations across
+     every row -- without it, the browser auto-sizes each row's columns from
+     THAT row's own content, so column boundaries drift row to row and no
+     longer line up under the header at all. */
+  table {
+    width: 100%; table-layout: fixed; border-collapse: collapse; background: #fff;
+    border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  /* Sticky elements with no explicit z-index stack in DOM order, and tbody
+     rows come after thead in the document -- without z-index here, a row
+     scrolled up under the sticky header painted OVER it instead of under it. */
   thead th {
     text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
     color: #64748b; background: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0;
-    position: sticky; top: 57px;
+    position: sticky; top: 57px; z-index: 2;
   }
   tbody tr { border-bottom: 1px solid #eef1f6; vertical-align: top; }
   tbody tr:hover { background: #fafbff; }
-  tbody td { padding: 12px 14px; }
+  tbody td { padding: 12px 14px; background: #fff; overflow-wrap: break-word; }
   .ticket-key { font-weight: 700; color: #0129AC; white-space: nowrap; }
-  .ticket-title { color: #475569; font-size: 12px; margin-top: 2px; max-width: 220px; }
+  .ticket-title { color: #475569; font-size: 12px; margin-top: 2px; }
   .space-name { color: #64748b; font-size: 12px; }
-  .current-desc { max-width: 260px; white-space: pre-wrap; word-break: break-word; }
+  .current-desc { white-space: pre-wrap; word-break: break-word; }
   .current-desc.empty { color: #94a3b8; font-style: italic; }
   .flag {
     display: inline-block; margin-bottom: 6px; padding: 2px 8px; border-radius: 10px;
     font-size: 10.5px; font-weight: 700; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca;
   }
-  .history-list { display: flex; flex-direction: column; gap: 8px; min-width: 320px; }
+  .history-list { display: flex; flex-direction: column; gap: 8px; }
   .history-entry { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; background: #fbfcfe; }
   .history-meta { font-size: 11px; color: #64748b; margin-bottom: 4px; }
   .history-meta b { color: #172b4d; }
