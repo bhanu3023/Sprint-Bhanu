@@ -343,20 +343,27 @@ app.get('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   res.json(issue);
 }));
 
-app.post('/api/issues', requireAuth, wrap(async (req, res) => {
-  const b = req.body;
-  if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
-  if (!(await denyUnlessCanAct(q, req.user, res, b.space_id, 'issue.create'))) return;
-  const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [b.space_id])).rows[0];
-  if (!spaceKeyRow) return res.status(400).json({ error: 'Invalid space_id' });
+// Shared by POST /api/issues (one ticket, one HTTP call) and POST
+// /api/issues/bulk-import (many, one CSV) so both go through the exact same
+// validation and the exact same key-allocation retry loop -- extracted
+// unchanged from what used to be the single-create route body, not
+// reimplemented, so bulk import cannot silently diverge from what a person
+// clicking Save one at a time gets. Throws a structured Error with a `status`
+// on the caller's behalf: the single route turns that into its own
+// res.status().json(), and bulk-import turns it into one row's failure entry
+// without aborting the rest of the batch.
+async function createIssueRow(spaceId, actorUserId, fields) {
+  const b = fields;
+  const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [spaceId])).rows[0];
+  if (!spaceKeyRow) throw Object.assign(new Error('Invalid space_id'), { status: 400 });
   const spaceKey = spaceKeyRow.key;
   const finalType = b.type || 'task';
   const finalPriority = b.priority || 'medium';
-  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'type', finalType))) {
-    return res.status(400).json({ error: 'Not a configured type for this space: ' + finalType });
+  if (!(await isBuiltinSelectValueAllowed(spaceId, 'type', finalType))) {
+    throw Object.assign(new Error('Not a configured type for this space: ' + finalType), { status: 400 });
   }
-  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'priority', finalPriority))) {
-    return res.status(400).json({ error: 'Not a configured priority for this space: ' + finalPriority });
+  if (!(await isBuiltinSelectValueAllowed(spaceId, 'priority', finalPriority))) {
+    throw Object.assign(new Error('Not a configured priority for this space: ' + finalPriority), { status: 400 });
   }
   const id = uid();
   // -- Issue key allocation: read-then-insert, retried on conflict ------
@@ -381,20 +388,22 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
   //   - issues_key_key stays the real guarantee. This loop only decides what
   //     the caller sees when it fires.
   // Only 23505 on issues_key_key is retried; any other error propagates
-  // untouched. The jitter stops a burst re-colliding in lockstep.
+  // untouched. The jitter stops a burst re-colliding in lockstep. A bulk
+  // import creating many rows in the same space back-to-back is exactly the
+  // burst this loop exists for.
   const KEY_RETRIES = 25;
   let r = null, key = null, lastConflict = null;
   for (let attempt = 0; attempt < KEY_RETRIES; attempt++) {
     const maxRow = (await q(
       "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1 AND key ~ ($2 || '-[0-9]+$')",
-      [b.space_id, spaceKey]
+      [spaceId, spaceKey]
     )).rows[0];
     key = spaceKey + '-' + (maxRow.mx + 1);
     try {
       r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
         assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
-        [id, key, b.space_id, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
+        [id, key, spaceId, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
          finalType, finalPriority, b.assignee_id || null, b.reporter_id || null,
          b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
          b.original_estimate || null, b.team || null, b.product_type || null]);
@@ -407,11 +416,32 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
   }
   if (!r) {
     console.error('[issues/create] key still conflicting after ' + KEY_RETRIES + ' attempts', lastConflict && lastConflict.detail);
-    return res.status(503).json({ error: 'Could not allocate an issue key, please retry' });
+    throw Object.assign(new Error('Could not allocate an issue key, please retry'), { status: 503 });
   }
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-    VALUES($1,$2,$3,'created',NULL,$4)`, [uid(), id, req.user.id, key]).catch(function () {});
-  res.status(201).json(r.rows[0]);
+    VALUES($1,$2,$3,'created',NULL,$4)`, [uid(), id, actorUserId, key]).catch(function () {});
+  return r.rows[0];
+}
+
+app.post('/api/issues', requireAuth, wrap(async (req, res) => {
+  const b = req.body;
+  if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, b.space_id, 'issue.create'))) return;
+  // createIssueRow throws a structured { status, message } rather than writing
+  // the response itself, so it can be reused by bulk-import below without one
+  // bad row's 400 short-circuiting the whole batch. Caught explicitly here,
+  // not left to the global error handler in errors.js: that handler collapses
+  // every 4xx into a generic "Invalid request" and has no 5xx case at all, so
+  // letting it through would have silently swapped this route's specific,
+  // actionable messages ("Not a configured type for this space: X", "Could
+  // not allocate an issue key, please retry") for a useless generic one.
+  try {
+    const row = await createIssueRow(b.space_id, req.user.id, b);
+    res.status(201).json(row);
+  } catch (e) {
+    if (e && e.status) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
 }));
 
 app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
@@ -534,5 +564,148 @@ app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
     await q('UPDATE issues SET former_sprint_id=NULL WHERE id=ANY($1)', [ids]).catch(() => {});
   }
   res.json({ ok: true, updated: r.rowCount, issues: r.rows });
+}));
+
+// ── Bulk import from CSV ───────────────────────────────────
+// Distinct from POST /api/issues/bulk above on purpose: that one BULK-EDITS
+// existing tickets. This one BULK-CREATES new ones, from rows the client has
+// already parsed out of a CSV file (parsing happens client-side; this route
+// only ever sees plain JSON). One space per request -- the CSV deliberately
+// carries no space column at all, the space is chosen once in the UI.
+//
+// Gated at 'issue.bulk' (site_admin tier, org admin bypasses), the SAME
+// action the bulk-edit route above already uses, not a new permission
+// entry -- "admin and space admin only" for a structured N-row import is
+// exactly what that action already means. This does not and cannot prevent a
+// member from creating many tickets one at a time through the plain
+// issue.create route above; that has always been open to any member and is
+// unrelated to gating the IMPORT FEATURE itself.
+//
+// Every row is independently resolved and validated here, from the RAW values
+// the client sent (an email string, a sprint name, a type name) -- never a
+// client-resolved id. The client does the same resolution for instant
+// feedback before the user ever confirms, but that is UX only; a forged or
+// buggy request body gets no more trust here than the single-create route
+// gives any other POST body. Rows are created ONE BY ONE, in order, each
+// through the exact same createIssueRow() the single-create route uses, so
+// key allocation, the type/priority check, and the issue_history 'created'
+// row all behave identically to a person clicking Save by hand. One row
+// failing (unresolvable assignee, invalid date, whatever) does not abort the
+// rows after it -- the response reports success and failure per row so nothing
+// is silently skipped or silently duplicated on a retry.
+const BULK_IMPORT_MAX_ROWS = 500;
+
+function bulkImportParseDate(raw, label, rowErrors) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(Date.parse(s + 'T00:00:00Z'))) {
+    rowErrors.push(label + ' is not a valid date (expected YYYY-MM-DD): "' + s + '"');
+    return undefined;
+  }
+  return s;
+}
+
+app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
+  const { space_id, rows } = req.body;
+  if (!space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, space_id, 'issue.bulk'))) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: 'At least one row is required' });
+  }
+  if (rows.length > BULK_IMPORT_MAX_ROWS) {
+    return res.status(400).json({ error: 'Too many rows in one import (max ' + BULK_IMPORT_MAX_ROWS + '); split the CSV and import in batches' });
+  }
+  const spaceRow = (await q('SELECT id FROM spaces WHERE id=$1 AND is_archived=false', [space_id])).rows[0];
+  if (!spaceRow) return res.status(400).json({ error: 'Invalid or archived space_id' });
+
+  // Resolved once for the whole batch, not per row: the member list and open
+  // sprint list for THIS space do not change mid-request.
+  const members = (await q(
+    `SELECT u.id, u.name, u.email FROM space_members sm JOIN users u ON u.id=sm.user_id WHERE sm.space_id=$1 AND u.is_active=true`,
+    [space_id])).rows;
+  const memberByEmail = new Map(members.map(function (m) { return [String(m.email || '').toLowerCase().trim(), m]; }));
+  const sprints = (await q(
+    `SELECT id, name, status FROM sprints WHERE space_id=$1 AND deleted_at IS NULL AND status != 'completed'`,
+    [space_id])).rows;
+
+  function resolveEmail(raw, label, rowErrors) {
+    if (raw == null || String(raw).trim() === '') return null;
+    const email = String(raw).toLowerCase().trim();
+    const m = memberByEmail.get(email);
+    if (!m) { rowErrors.push(label + ' "' + raw + '" is not a member of this space'); return undefined; }
+    return m.id;
+  }
+
+  function resolveSprint(raw, rowErrors) {
+    if (raw == null || String(raw).trim() === '') return null;
+    const name = String(raw).trim().toLowerCase();
+    const matches = sprints.filter(function (sp) { return String(sp.name || '').trim().toLowerCase() === name; });
+    if (!matches.length) { rowErrors.push('Sprint "' + raw + '" was not found (or is completed) in this space'); return undefined; }
+    if (matches.length > 1) { rowErrors.push('Sprint "' + raw + '" matches more than one sprint in this space; rename one or leave this blank'); return undefined; }
+    return matches[0].id;
+  }
+
+  const created = [];
+  const failed = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i] || {};
+    const rowNum = i + 1;
+    const rowErrors = [];
+
+    const title = String(raw.title || '').trim();
+    if (!title) rowErrors.push('Title is required');
+    if (title.length > 500) rowErrors.push('Title is too long (max 500 characters)');
+
+    let storyPoints = null;
+    if (raw.story_points != null && String(raw.story_points).trim() !== '') {
+      const n = Number(raw.story_points);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+        rowErrors.push('Story Points must be a whole number 0 or greater: "' + raw.story_points + '"');
+      } else {
+        storyPoints = n;
+      }
+    }
+
+    const assigneeId = resolveEmail(raw.assignee_email, 'Assignee', rowErrors);
+    // Reporter defaults to the person running the import, exactly like a
+    // blank Reporter field on the normal Create Issue form defaults to
+    // whoever is creating the ticket.
+    const reporterRaw = raw.reporter_email != null && String(raw.reporter_email).trim() !== '';
+    const reporterId = reporterRaw ? resolveEmail(raw.reporter_email, 'Reporter', rowErrors) : req.user.id;
+    const sprintId = resolveSprint(raw.sprint, rowErrors);
+    const startDate = bulkImportParseDate(raw.start_date, 'Start Date', rowErrors);
+    const dueDate = bulkImportParseDate(raw.due_date, 'Due Date', rowErrors);
+    if (startDate && dueDate && startDate > dueDate) {
+      rowErrors.push('Due Date (' + dueDate + ') is before Start Date (' + startDate + ')');
+    }
+
+    if (rowErrors.length) {
+      failed.push({ row: rowNum, title: title || '(no title)', errors: rowErrors });
+      continue;
+    }
+
+    try {
+      const issueRow = await createIssueRow(space_id, req.user.id, {
+        title: title,
+        type: raw.type ? String(raw.type).trim().toLowerCase() : undefined,
+        priority: raw.priority ? String(raw.priority).trim().toLowerCase() : undefined,
+        description: raw.description ? String(raw.description) : null,
+        assignee_id: assigneeId,
+        reporter_id: reporterId,
+        sprint_id: sprintId,
+        story_points: storyPoints,
+        team: raw.team ? String(raw.team).trim() : null,
+        product_type: raw.product_type ? String(raw.product_type).trim().toLowerCase() : null,
+        start_date: startDate,
+        due_date: dueDate
+      });
+      created.push({ row: rowNum, id: issueRow.id, key: issueRow.key, title: issueRow.title });
+    } catch (e) {
+      failed.push({ row: rowNum, title: title || '(no title)', errors: [e && e.message ? e.message : 'Could not create this ticket'] });
+    }
+  }
+
+  res.json({ ok: true, total: rows.length, created: created, failed: failed });
 }));
 

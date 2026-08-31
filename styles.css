@@ -1498,6 +1498,121 @@ body.light .board-col {
 }
 
 /* ------------------------------------------------------------
+   BULK ISSUE IMPORT (CSV)
+   ------------------------------------------------------------ */
+.bulk-issue-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.bulk-issue-preview {
+  margin-top: 16px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.bulk-issue-summary {
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.bulk-issue-summary-warn {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: #b45309;
+}
+.bulk-issue-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bulk-issue-row-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg2);
+}
+.bulk-issue-row-item.is-invalid {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.35);
+}
+body.light .bulk-issue-row-item.is-invalid {
+  border-color: #f0b7b7;
+  background: #fef5f5;
+}
+.bulk-issue-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bulk-issue-row-num {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 600;
+  min-width: 46px;
+}
+.bulk-issue-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-issue-row-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg3);
+  color: var(--text3);
+  white-space: nowrap;
+}
+.bulk-issue-row-item.is-valid .bulk-issue-row-badge {
+  background: rgba(0, 135, 90, 0.12);
+  color: #00875a;
+}
+.bulk-issue-row-item.is-invalid .bulk-issue-row-badge {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+}
+.bulk-issue-row-errors {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+.bulk-issue-row-errors li {
+  margin-bottom: 2px;
+}
+.bulk-issue-result-summary {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.bulk-issue-result-keys {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.bulk-issue-result-key {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0129ac;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  text-decoration: none;
+}
+.bulk-issue-result-key:hover {
+  background: var(--bg3);
+}
+
+/* ------------------------------------------------------------
    ALL WORK TABLE
    ------------------------------------------------------------ */
 .data-table {

@@ -106,6 +106,12 @@ document.addEventListener('DOMContentLoaded', function () {
   // Standalone space-change handler — always defined, called from every create-issue entry point
   window._onIssueSpaceChange = function (spaceId, includeSprintId) {
     if ($('issueSpaceId')) $('issueSpaceId').value = spaceId || '';
+    // Bulk Create is admin / space admin only, and needs a space chosen first
+    // to know which one's permissions and options apply -- re-checked on
+    // every space change rather than once at modal-open, since switching the
+    // Space dropdown without closing the modal is the normal way to use it.
+    var bulkBtn = $('bulkCreateIssueBtn');
+    if (bulkBtn) bulkBtn.hidden = !(spaceId && canManageSpace(spaceId));
     var sprintSel = $('issueSprint');
     if (sprintSel) {
       var sprints = getIssueFormSprints(spaceId, { includeSprintId: includeSprintId });
