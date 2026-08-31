@@ -152,7 +152,9 @@
         {
           "file": "src/client/pages/space/backlog.js",
           "from": 5648,
-          "to": 6187
+          "to": 6187,
+          "modified": true,
+          "modifiedReason": "FEATURE: reported live -- a ticket created straight into the backlog (no sprint) and marked Done without ever being planned into a sprint used to sit in the live Backlog lane mixed in with real candidates for the next sprint, so dragging a batch of backlog items into a new sprint could silently pick up already-finished work. The Backlog lane's filter now excludes status='Done' (!iss.sprint_id && iss.status !== 'Done'); those issues get a separate 'Done (Not in a Sprint)' lane instead, placed between the live Backlog and the completed-sprints section. Given the exact same closed-lane treatment already established for completed sprints in this file: collapsed by default, no drop target, no 'Add issue' button -- it is a place to find these tickets, not a pool to plan the next sprint from. Cards stay draggable (backlogRow is unchanged), so deliberately dragging one into a real sprint for record-keeping still works. Verified against the real running app: a Done-no-sprint ticket does not appear in the live Backlog lane, does appear in the new lane (collapsed by default, no data-sprint-drop attribute), and a genuine To Do ticket is unaffected and still appears in the live Backlog lane exactly as before."
         },
         {
           "file": "src/client/pages/space/board.js",
@@ -838,7 +840,7 @@
     "src/client/pages/work-log-pivot.js": "113e5e9a57054c358b255c97570aa3123b6322055ef3b0e12ab429fa8cd55933",
     "src/client/pages/space/summary.js": "face07962f1dc078bd7755040c5ffb6a7873b69cc98ce3f3c5c5b545294d8128",
     "src/client/pages/space/timeline.js": "be957408dc29f3600a5292a5e23aed15e68c1d81471490b83c1a7dfa51179431",
-    "src/client/pages/space/backlog.js": "1bfff04e92a7d7bd3aeef163e6f11440760aa4e2e00c9ee9ff03387247cee468",
+    "src/client/pages/space/backlog.js": "b8b309d446277e38324feb1876ec634bbf69a0e4b6f5ad472a28ad7979c6fdbd",
     "src/client/pages/space/board.js": "d31805f0fd5ad00ee6d126444583ff2415ebd0091360a51f78eb5a7cc12226f1",
     "src/client/pages/space/calendar.js": "beac6f46d01e8bb1abbaa557740f033c88acc8743e6b9af30cb6e2f05a285ae8",
     "src/client/pages/space/reports.js": "ba865fe0c04381c4a5311f8e157c10247363d4805d09e4bcd0ea205440c9bb88",
