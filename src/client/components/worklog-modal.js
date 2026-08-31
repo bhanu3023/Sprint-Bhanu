@@ -9,6 +9,14 @@ async function handleWorklogSubmit(e) {
   var timeSpent = hours * 60 + minutes;
   if (timeSpent <= 0) { toast('Please enter time spent', 'error'); return; }
 
+  // Nothing disabled the Save button while the request was in flight, so a
+  // double/triple-click (or an impatient repeat click before the modal
+  // visibly closed) fired this handler once per click, each posting its own
+  // worklog -- one real entry showing up as several identical rows.
+  var saveBtn = $('worklogSaveBtn');
+  if (saveBtn && saveBtn._submitting) return;
+  if (saveBtn) { saveBtn._submitting = true; saveBtn.disabled = true; }
+
   var payload = {
     issue_id: $('worklogIssueId').value,
     user_id: S.currentUser,
@@ -18,7 +26,11 @@ async function handleWorklogSubmit(e) {
     is_billable: $('worklogBillable').checked
   };
 
-  await api('/api/worklogs', 'POST', payload);
+  try {
+    await api('/api/worklogs', 'POST', payload);
+  } finally {
+    if (saveBtn) { saveBtn._submitting = false; saveBtn.disabled = false; }
+  }
   closeModal('modal-worklog');
   toast(fmtMins(timeSpent) + ' logged on ' + (cachedIssueKey(payload.issue_id) || 'this issue'));
 
