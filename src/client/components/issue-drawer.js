@@ -578,9 +578,34 @@ function bindMentionAutocomplete(el) {
     sel.addRange(delRange);
     document.execCommand('delete', false, null);
 
-    // Insert mention chip + non-breaking space
-    var chip = '<span class="mention-chip" data-user-id="' + (userId || '') + '" contenteditable="false">@' + esc(name) + '</span> ';
-    document.execCommand('insertHTML', false, chip);
+    // Insert the chip + a trailing space via direct DOM manipulation, not
+    // execCommand('insertHTML') — the browser's own post-insert caret
+    // placement next to a contenteditable="false" island is unreliable, and
+    // in practice left the caret BEFORE the mention instead of after it, so
+    // anything typed next landed in front of "@Name" rather than following it.
+    var insertRange = sel.getRangeAt(0);
+    insertRange.collapse(true);
+
+    var chipEl = document.createElement('span');
+    chipEl.className = 'mention-chip';
+    chipEl.setAttribute('contenteditable', 'false');
+    chipEl.setAttribute('data-user-id', userId || '');
+    chipEl.textContent = '@' + name;
+    var spaceNode = document.createTextNode(' ');
+
+    var frag = document.createDocumentFragment();
+    frag.appendChild(chipEl);
+    frag.appendChild(spaceNode);
+    insertRange.insertNode(frag);
+
+    // Explicitly place the caret right after the inserted space, rather than
+    // trusting wherever the browser's default landed it.
+    var caretRange = document.createRange();
+    caretRange.setStart(spaceNode, spaceNode.length);
+    caretRange.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(caretRange);
+    el.focus();
   }
 
   function showMention(query) {
