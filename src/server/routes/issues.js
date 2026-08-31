@@ -1,7 +1,7 @@
 const { requireAuth } = require('../auth');
 const { uid, wrap } = require('../core');
 const { q } = require('../db');
-const { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays } = require('../deps');
+const { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays, upsertIssueFieldValue } = require('../deps');
 const { app } = require('../express-app');
 const { createNotif } = require('../notify');
 // ── Issues ────────────────────────────────────────────────
@@ -595,14 +595,54 @@ app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
 // is silently skipped or silently duplicated on a retry.
 const BULK_IMPORT_MAX_ROWS = 500;
 
-function bulkImportParseDate(raw, label, rowErrors) {
+// Date.parse (and the JS Date constructor generally) does not reject an
+// out-of-range calendar date -- it silently rolls it forward, so
+// Date.parse('2026-02-30T00:00:00Z') "succeeds" as March 2. A round trip
+// through Date.UTC and back is the only way to actually catch that: if the
+// year/month/day we asked for don't match what comes back, the input
+// overflowed and must be rejected, not silently corrected.
+function isRealCalendarDate(year, month, day) {
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
+
+// Excel silently reformats a typed date into the system's regional format
+// when the CSV is saved (09-12-2003, 09/12/2003, ...), so a strict
+// YYYY-MM-DD-only check rejects perfectly good dates with a message that does
+// not explain why. This also accepts DD-MM-YYYY / DD/MM/YYYY -- always
+// day-first, never guessed by magnitude -- since that is this org's own
+// convention and a magnitude-based guess (e.g. treating "12-25-2026" as
+// month-first only because 25 can't be a month) would be a second implicit
+// rule nobody asked for. A day-first value that is not a real calendar date
+// (month or day out of range) is still rejected, not silently reinterpreted.
+function bulkNormalizeDate(raw, label, rowErrors) {
   if (raw == null || raw === '') return null;
   const s = String(raw).trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(Date.parse(s + 'T00:00:00Z'))) {
-    rowErrors.push(label + ' is not a valid date (expected YYYY-MM-DD): "' + s + '"');
-    return undefined;
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/) || s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (iso) {
+    const year = parseInt(iso[1], 10), month = parseInt(iso[2], 10), day = parseInt(iso[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || !isRealCalendarDate(year, month, day)) {
+      rowErrors.push(label + ' is not a real date: "' + s + '"');
+      return undefined;
+    }
+    return iso[1] + '-' + iso[2] + '-' + iso[3];
   }
-  return s;
+
+  const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (dmy) {
+    const day = parseInt(dmy[1], 10), month = parseInt(dmy[2], 10), year = parseInt(dmy[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || !isRealCalendarDate(year, month, day)) {
+      rowErrors.push(label + ' is not a valid date (read as day-first, DD-MM-YYYY): "' + s + '"');
+      return undefined;
+    }
+    return year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+  }
+
+  rowErrors.push(label + ' is not a valid date (expected YYYY-MM-DD or DD-MM-YYYY): "' + s + '". ' +
+    'Tip: if you are editing this in Excel, format the column as Text before typing dates, ' +
+    'otherwise Excel may rewrite them into your regional date format when you save.');
+  return undefined;
 }
 
 app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
@@ -618,8 +658,9 @@ app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
   const spaceRow = (await q('SELECT id FROM spaces WHERE id=$1 AND is_archived=false', [space_id])).rows[0];
   if (!spaceRow) return res.status(400).json({ error: 'Invalid or archived space_id' });
 
-  // Resolved once for the whole batch, not per row: the member list and open
-  // sprint list for THIS space do not change mid-request.
+  // Resolved once for the whole batch, not per row: the member list, open
+  // sprint list, and custom field configuration for THIS space do not change
+  // mid-request.
   const members = (await q(
     `SELECT u.id, u.name, u.email FROM space_members sm JOIN users u ON u.id=sm.user_id WHERE sm.space_id=$1 AND u.is_active=true`,
     [space_id])).rows;
@@ -627,7 +668,17 @@ app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
   const sprints = (await q(
     `SELECT id, name, status FROM sprints WHERE space_id=$1 AND deleted_at IS NULL AND status != 'completed'`,
     [space_id])).rows;
-
+  // Same split the client uses (bulk-issue.js): fields that live directly on
+  // the issues table row already have their own fixed handling above/below;
+  // every other field the space shows on Create -- the builtin Combination
+  // field included -- is a "dynamic" field stored via issue_field_values.
+  const ISSUES_ROW_FIELD_KEYS = ['title', 'type', 'priority', 'assignee', 'reporter', 'sprint', 'story_points', 'team', 'product_type', 'start_date', 'due_date', 'description'];
+  const allFields = (await q('SELECT * FROM custom_fields WHERE space_id=$1', [space_id])).rows;
+  const dynamicFields = allFields.filter(function (f) {
+    if (f.is_builtin && ISSUES_ROW_FIELD_KEYS.indexOf(f.field_key) !== -1) return false;
+    const showIn = f.show_in || [];
+    return showIn.indexOf('create') !== -1;
+  });
   function resolveEmail(raw, label, rowErrors) {
     if (raw == null || String(raw).trim() === '') return null;
     const email = String(raw).toLowerCase().trim();
@@ -643,6 +694,80 @@ app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
     if (!matches.length) { rowErrors.push('Sprint "' + raw + '" was not found (or is completed) in this space'); return undefined; }
     if (matches.length > 1) { rowErrors.push('Sprint "' + raw + '" matches more than one sprint in this space; rename one or leave this blank'); return undefined; }
     return matches[0].id;
+  }
+
+  function customFieldOptionList(field) {
+    let raw = field.options;
+    if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (_) { raw = []; } }
+    if (raw && raw.v === 2 && raw.groups) return Array.isArray(raw.flat) ? raw.flat : [];
+    return Array.isArray(raw) ? raw.map(function (o) { return (o && typeof o === 'object') ? String(o.value != null ? o.value : o.label) : String(o); }) : [];
+  }
+
+  function isCombinationField(field) {
+    return field.field_key === 'combination' || String(field.name || '').toLowerCase().trim() === 'combination';
+  }
+
+  // Independently re-validates and resolves every dynamic (non-issues-row)
+  // field value the client sent, exactly mirroring the client-side checks in
+  // bulk-issue.js's validateBulkRow -- never trusting that the client already
+  // did this correctly. Returns { [fieldId]: valueToStore }; entries here are
+  // written to issue_field_values via upsertIssueFieldValue after the ticket
+  // is created.
+  function resolveCustomFieldValues(rawMap, productTypeRaw, rowErrors) {
+    const out = {};
+    if (!rawMap || typeof rawMap !== 'object') return out;
+    for (const field of dynamicFields) {
+      const raw = rawMap[field.id];
+      const trimmed = raw == null ? '' : String(raw).trim();
+      if (!trimmed) continue;
+
+      if (isCombinationField(field)) {
+        let parsed = field.options;
+        if (typeof parsed === 'string') { try { parsed = JSON.parse(parsed); } catch (_) { parsed = null; } }
+        const flat = customFieldOptionList(field);
+        const match = flat.find(function (o) { return String(o).toLowerCase() === trimmed.toLowerCase(); });
+        if (!match) { rowErrors.push('"' + field.name + '" value "' + trimmed + '" is not one of this space\'s configured combinations'); continue; }
+        const ptVal = String(productTypeRaw || '').trim();
+        if (parsed && parsed.groups && ptVal && Array.isArray(parsed.groups[ptVal]) && parsed.groups[ptVal].length &&
+            !parsed.groups[ptVal].some(function (o) { return String(o).toLowerCase() === match.toLowerCase(); })) {
+          rowErrors.push('"' + field.name + '" value "' + match + '" is not available for Product Type "' + ptVal + '"');
+          continue;
+        }
+        out[field.id] = match;
+        continue;
+      }
+
+      if (field.field_type === 'select' || field.field_type === 'multi_select') {
+        const opts = customFieldOptionList(field);
+        const tokens = field.field_type === 'multi_select' ? trimmed.split(';').map(function (s) { return s.trim(); }).filter(Boolean) : [trimmed];
+        const resolved = [];
+        const bad = [];
+        tokens.forEach(function (t) {
+          const m = opts.find(function (o) { return String(o).toLowerCase() === t.toLowerCase(); });
+          if (m) resolved.push(m); else bad.push(t);
+        });
+        if (bad.length) { rowErrors.push('"' + field.name + '" value "' + bad.join('", "') + '" not configured for this field'); continue; }
+        out[field.id] = resolved.join(',');
+      } else if (field.field_type === 'number') {
+        const n = Number(trimmed);
+        if (!Number.isFinite(n)) { rowErrors.push('"' + field.name + '" must be a number: "' + trimmed + '"'); continue; }
+        out[field.id] = String(n);
+      } else if (field.field_type === 'date') {
+        const d = bulkNormalizeDate(trimmed, field.name, rowErrors);
+        if (d) out[field.id] = d;
+      } else if (field.field_type === 'checkbox') {
+        const b = trimmed.toLowerCase();
+        if (['true', 'yes', '1'].indexOf(b) !== -1) out[field.id] = 'true';
+        else if (['false', 'no', '0'].indexOf(b) === -1) rowErrors.push('"' + field.name + '" must be true/false, yes/no, or 1/0: "' + trimmed + '"');
+      } else if (field.field_type === 'user') {
+        const m = memberByEmail.get(trimmed.toLowerCase());
+        if (!m) { rowErrors.push('"' + field.name + '" value "' + trimmed + '" is not a member of this space (match by email)'); continue; }
+        out[field.id] = m.id;
+      } else {
+        out[field.id] = trimmed;
+      }
+    }
+    return out;
   }
 
   const created = [];
@@ -674,11 +799,12 @@ app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
     const reporterRaw = raw.reporter_email != null && String(raw.reporter_email).trim() !== '';
     const reporterId = reporterRaw ? resolveEmail(raw.reporter_email, 'Reporter', rowErrors) : req.user.id;
     const sprintId = resolveSprint(raw.sprint, rowErrors);
-    const startDate = bulkImportParseDate(raw.start_date, 'Start Date', rowErrors);
-    const dueDate = bulkImportParseDate(raw.due_date, 'Due Date', rowErrors);
+    const startDate = bulkNormalizeDate(raw.start_date, 'Start Date', rowErrors);
+    const dueDate = bulkNormalizeDate(raw.due_date, 'Due Date', rowErrors);
     if (startDate && dueDate && startDate > dueDate) {
       rowErrors.push('Due Date (' + dueDate + ') is before Start Date (' + startDate + ')');
     }
+    const customFieldValues = resolveCustomFieldValues(raw.custom_field_values, raw.product_type, rowErrors);
 
     if (rowErrors.length) {
       failed.push({ row: rowNum, title: title || '(no title)', errors: rowErrors });
@@ -696,10 +822,17 @@ app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
         sprint_id: sprintId,
         story_points: storyPoints,
         team: raw.team ? String(raw.team).trim() : null,
-        product_type: raw.product_type ? String(raw.product_type).trim().toLowerCase() : null,
+        product_type: raw.product_type ? String(raw.product_type).trim() : null,
         start_date: startDate,
         due_date: dueDate
       });
+      // Fire-and-forget per this codebase's own convention for post-create side
+      // effects, but sequential (not Promise.all) so a single slow field write
+      // never overtakes another for the same issue and there is no lock
+      // contention on issue_field_values under a large batch.
+      for (const fieldId of Object.keys(customFieldValues)) {
+        await upsertIssueFieldValue(issueRow.id, fieldId, customFieldValues[fieldId], req.user.id).catch(() => {});
+      }
       created.push({ row: rowNum, id: issueRow.id, key: issueRow.key, title: issueRow.title });
     } catch (e) {
       failed.push({ row: rowNum, title: title || '(no title)', errors: [e && e.message ? e.message : 'Could not create this ticket'] });

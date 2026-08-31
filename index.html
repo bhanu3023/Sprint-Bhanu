@@ -1226,12 +1226,21 @@
             <input type="file" id="bulkIssueFile" accept=".csv,text/csv" style="display:none" onchange="handleBulkIssueFileChange(this)">
           </div>
           <p style="font-size:12px;color:var(--text3);margin:10px 0 0">
-            Only <strong>Title</strong> is always required. Type, Priority, Team and Product Type must match one of
-            this space's configured options (see the sample CSV) — leave a cell blank to use the default. Assignee
-            and Reporter are matched by email against this space's members; Reporter defaults to you if left blank.
-            Sprint is matched by name against this space's open sprints; leave blank to add straight to the Backlog.
-            Dates use YYYY-MM-DD. Attachments and the Combination field are not supported here — add those after
+            Only <strong>Title</strong> is always required. The sample CSV includes every field this space shows on
+            Create — Type, Priority, Team, Product Type, Combination, and any other custom field this space has
+            added — each matched against this space's own configured options; leave a cell blank to use the
+            default or skip it. For a multi-select field, separate multiple values with a semicolon
+            (<strong>;</strong>). Assignee, Reporter, and any user-type field are matched by email against this
+            space's members; Reporter defaults to you if left blank. Sprint is matched by name against this
+            space's open sprints; leave blank to add straight to the Backlog. Dates use YYYY-MM-DD, or day-first
+            DD-MM-YYYY (e.g. 09-12-2003 = 9 December 2003). Attachments are not supported here — add those after
             creating the ticket. Max 500 rows per file.
+          </p>
+          <p style="font-size:12px;color:var(--text3);margin:6px 0 0">
+            Editing this CSV in Excel: format the Start Date / Due Date columns as <strong>Text</strong> before
+            typing into them, or Excel may silently rewrite your dates into a different format when you save. If a
+            cell shows <strong>#######</strong>, that's just Excel's column too narrow to display the value — widen
+            the column; the underlying data is unaffected.
           </p>
         </div>
         <div id="bulkIssuePreview" class="bulk-issue-preview" hidden></div>

@@ -20,12 +20,15 @@
 // exist for immediate feedback before the user commits, not as the security
 // boundary, matching how every other form in this app works.
 //
-// Deliberately NOT supported via CSV: attachments (a CSV cell cannot hold a
-// file), the Combination field (a compound, Product-Type-dependent picker
-// with its own bespoke UI), and arbitrary per-space custom fields beyond
-// Team/Product Type. A space that has marked any OTHER field required for a
-// given issue Type is detected and reported per-row, not silently ignored —
-// see BULK_UNSUPPORTED_REQUIRED_MESSAGE below.
+// Every field the space has configured to show on Create gets a CSV column:
+// the fixed issues-row fields below (Title, Type, Priority, Assignee,
+// Reporter, Sprint, Story Points, Team, Product Type, dates, Description),
+// PLUS one column per remaining field the space shows on Create — the
+// builtin Combination field and any genuinely custom field (text, number,
+// date, select, multi_select, checkbox, user) alike — named after that
+// field, generated fresh per space by buildBulkSampleCsv/bulkGetDynamicFields
+// below. Only attachments are not supported via CSV (a spreadsheet cell
+// cannot hold a file) — add those to the ticket after creating it.
 
 // Canonical CSV column keys, in the order the sample CSV writes them, each
 // with the header names accepted on import (case-insensitive, trimmed, and
@@ -96,7 +99,7 @@ function normalizeCsvHeaderCell(s) {
 // works. Returns { rows, headerError } — headerError is set (and rows empty)
 // only when the header row cannot be found at all (no recognizable Title
 // column), since every other column is optional.
-function mapCsvToBulkRows(csvText) {
+function mapCsvToBulkRows(csvText, spaceId) {
   var table = parseCsvText(csvText);
   if (!table.length) return { rows: [], headerError: 'The file is empty.' };
   var header = table[0].map(normalizeCsvHeaderCell);
@@ -109,12 +112,28 @@ function mapCsvToBulkRows(csvText) {
   if (colIndex.title == null) {
     return { rows: [], headerError: 'No "Title" column found in the header row. Use the sample CSV\'s column names (order does not matter, but Title must be present).' };
   }
+  // Dynamic (per-space) fields — matched by the field's own name, using the
+  // same case/whitespace-tolerant normalization as the fixed columns above.
+  var dynamicFields = spaceId ? bulkGetDynamicFields(spaceId) : [];
+  var dynamicColIndex = {};
+  dynamicFields.forEach(function (field) {
+    var target = normalizeCsvHeaderCell(field.name);
+    for (var i = 0; i < header.length; i++) {
+      if (header[i] === target) { dynamicColIndex[field.id] = i; break; }
+    }
+  });
+
   var dataRows = table.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim(); }); });
   var rows = dataRows.map(function (r) {
     var obj = {};
     BULK_ISSUE_COLUMNS.forEach(function (col) {
       var idx = colIndex[col.key];
       obj[col.key] = idx != null ? (r[idx] != null ? String(r[idx]) : '') : '';
+    });
+    obj._dynamic = {};
+    dynamicFields.forEach(function (field) {
+      var idx = dynamicColIndex[field.id];
+      if (idx != null) obj._dynamic[field.id] = r[idx] != null ? String(r[idx]) : '';
     });
     return obj;
   });
@@ -135,6 +154,52 @@ function bulkGetOptionList(spaceId, fieldKey) {
   return opts;
 }
 
+// The builtin fields that live directly on the issues table row, each with
+// its own fixed CSV column above. Everything else the space shows on Create
+// -- the builtin Combination field included -- is a "dynamic" field: a
+// separate custom_fields row, keyed by its own id, whose value is stored via
+// issue_field_values after the ticket is created (see bulkGetDynamicFields).
+var BULK_ISSUES_ROW_FIELD_KEYS = ['title', 'type', 'priority', 'assignee', 'reporter', 'sprint', 'story_points', 'team', 'product_type', 'start_date', 'due_date', 'description'];
+
+// Every OTHER field this space shows on Create, in a stable order (position,
+// same as the real form) so the generated header does not reshuffle between
+// downloads. A same-named field would collide as a CSV header, so a later
+// duplicate name is skipped defensively -- custom field creation already
+// enforces unique names per space, so this should never actually trigger.
+function bulkGetDynamicFields(spaceId) {
+  var seen = {};
+  return getSpaceFieldRows(spaceId)
+    .filter(function (f) {
+      if (f.is_builtin && BULK_ISSUES_ROW_FIELD_KEYS.indexOf(f.field_key) !== -1) return false;
+      if (!customFieldShowsIn(f, 'create')) return false;
+      var key = (f.name || '').toLowerCase().trim();
+      if (!key || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    })
+    .sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+}
+
+// A useful example value for the sample CSV's first data row. Select-type
+// fields get a real configured option (so the shape is obvious); anything
+// else (text, number, date, checkbox, user, or a genuinely custom field with
+// unpredictable content) is left blank, same as Assignee/Reporter/Sprint
+// already are -- guessing free-form content risks the user keeping the
+// placeholder by accident.
+function bulkDynamicFieldExample(field) {
+  if (isCombinationField(field)) {
+    var flat = getCustomFieldOptions(field);
+    return flat[0] || '';
+  }
+  if (field.field_type === 'select') return getCustomFieldOptions(field)[0] || '';
+  if (field.field_type === 'multi_select') return getCustomFieldOptions(field).slice(0, 2).join(';');
+  return '';
+}
+
+function bulkSlugForFilename(s) {
+  return String(s || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 function buildBulkSampleCsv(spaceId) {
   var typeOpts = bulkGetOptionList(spaceId, 'type');
   var priorityOpts = bulkGetOptionList(spaceId, 'priority');
@@ -143,6 +208,7 @@ function buildBulkSampleCsv(spaceId) {
   var teamOpts = teamEnabled ? bulkGetOptionList(spaceId, 'team') : [];
   var productTypeOpts = productTypeEnabled ? bulkGetOptionList(spaceId, 'product_type') : [];
   var todayIso = fmtDateISO(new Date());
+  var dynamicFields = bulkGetDynamicFields(spaceId);
 
   var columns = BULK_ISSUE_COLUMNS.filter(function (col) {
     if (col.key === 'team') return teamEnabled;
@@ -155,9 +221,11 @@ function buildBulkSampleCsv(spaceId) {
     team: 'Team', product_type: 'Product Type', start_date: 'Start Date', due_date: 'Due Date',
     description: 'Description'
   };
-  var lines = [csvRowToLine(columns.map(function (c) { return headerLabels[c.key]; }))];
+  var fixedHeader = columns.map(function (c) { return headerLabels[c.key]; });
+  var dynamicHeader = dynamicFields.map(function (f) { return f.name; });
+  var lines = [csvRowToLine(fixedHeader.concat(dynamicHeader))];
 
-  function sampleRow(overrides) {
+  function sampleRow(overrides, dynamicOverrides) {
     var base = {
       title: '', type: typeOpts[0] || '', priority: priorityOpts[0] || '',
       assignee_email: '', reporter_email: '', sprint: '', story_points: '',
@@ -165,7 +233,12 @@ function buildBulkSampleCsv(spaceId) {
       start_date: todayIso, due_date: '', description: ''
     };
     Object.assign(base, overrides);
-    return columns.map(function (c) { return base[c.key]; });
+    var fixedCells = columns.map(function (c) { return base[c.key]; });
+    var dynamicCells = dynamicFields.map(function (f) {
+      return (dynamicOverrides && Object.prototype.hasOwnProperty.call(dynamicOverrides, f.id))
+        ? dynamicOverrides[f.id] : bulkDynamicFieldExample(f);
+    });
+    return fixedCells.concat(dynamicCells);
   }
 
   lines.push(csvRowToLine(sampleRow({
@@ -173,12 +246,14 @@ function buildBulkSampleCsv(spaceId) {
     story_points: '3',
     description: 'Plain text only -- formatting typed in a spreadsheet cell is not preserved.'
   })));
+  var blankDynamic = {};
+  dynamicFields.forEach(function (f) { blankDynamic[f.id] = ''; });
   lines.push(csvRowToLine(sampleRow({
     title: 'Example: leave a cell blank to skip that field',
     type: typeOpts[1] || typeOpts[0] || '',
     priority: priorityOpts[priorityOpts.length - 1] || '',
     team: '', product_type: '', story_points: '', start_date: '', description: ''
-  })));
+  }, blankDynamic)));
 
   // ﻿ BOM so Excel opens this as UTF-8 rather than guessing the system
   // codepage -- without it, anything non-ASCII typed into a cell later can
@@ -195,7 +270,10 @@ function downloadBulkSampleCsv() {
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  a.download = 'bulk-issues-' + (space ? space.key : 'sample') + '.csv';
+  // Named after the space itself (name + key), not a generic "sample", so a
+  // user juggling several spaces' CSVs can tell them apart in their Downloads
+  // folder without opening each one.
+  a.download = 'bulk-issues-' + (space ? (bulkSlugForFilename(space.name) + '-' + space.key) : 'sample') + '.csv';
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -214,16 +292,55 @@ function bulkFieldEnabled(spaceId, fieldKey) {
   return isSpaceBuiltinFieldEnabled(spaceId, fieldKey, 'create');
 }
 
-var BULK_SUPPORTED_FIELD_KEYS = ['title', 'type', 'priority', 'assignee', 'reporter', 'sprint', 'story_points', 'team', 'product_type', 'start_date', 'due_date', 'description'];
+// Date.parse (and the JS Date constructor generally) does not reject an
+// out-of-range calendar date -- it silently rolls it forward, so
+// Date.parse('2026-02-30T00:00:00Z') "succeeds" as March 2. A round trip
+// through Date.UTC and back is the only way to actually catch that: if the
+// year/month/day we asked for don't match what comes back, the input
+// overflowed and must be rejected, not silently corrected.
+function isRealCalendarDate(year, month, day) {
+  var dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
 
+// Mirrors bulkNormalizeDate in src/server/routes/issues.js -- keep both in
+// step. Excel silently reformats a typed date into the system's regional
+// format when the CSV is saved (09-12-2003, 09/12/2003, ...), so a strict
+// YYYY-MM-DD-only check rejects perfectly good dates with a message that does
+// not explain why. This also accepts DD-MM-YYYY / DD/MM/YYYY -- always
+// day-first, never guessed by magnitude -- since that is this org's own
+// convention and a magnitude-based guess (e.g. treating "12-25-2026" as
+// month-first only because 25 can't be a month) would be a second implicit
+// rule nobody asked for. A day-first value that is not a real calendar date
+// (month or day out of range) is still rejected, not silently reinterpreted.
 function bulkParseDateForValidation(raw, label, errors) {
   var s = String(raw || '').trim();
   if (!s) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(Date.parse(s + 'T00:00:00Z'))) {
-    errors.push(label + ' is not a valid date (expected YYYY-MM-DD): "' + s + '"');
-    return undefined;
+
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/) || s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (iso) {
+    var isoYear = parseInt(iso[1], 10), isoMonth = parseInt(iso[2], 10), isoDay = parseInt(iso[3], 10);
+    if (isoMonth < 1 || isoMonth > 12 || isoDay < 1 || isoDay > 31 || !isRealCalendarDate(isoYear, isoMonth, isoDay)) {
+      errors.push(label + ' is not a real date: "' + s + '"');
+      return undefined;
+    }
+    return iso[1] + '-' + iso[2] + '-' + iso[3];
   }
-  return s;
+
+  var dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (dmy) {
+    var day = parseInt(dmy[1], 10), month = parseInt(dmy[2], 10), year = parseInt(dmy[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || !isRealCalendarDate(year, month, day)) {
+      errors.push(label + ' is not a valid date (read as day-first, DD-MM-YYYY): "' + s + '"');
+      return undefined;
+    }
+    return year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+  }
+
+  errors.push(label + ' is not a valid date (expected YYYY-MM-DD or DD-MM-YYYY): "' + s + '". ' +
+    'Tip: if you are editing this in Excel, format the column as Text before typing dates, ' +
+    'otherwise Excel may rewrite them into your regional date format when you save.');
+  return undefined;
 }
 
 function validateBulkRow(row, spaceId, ctx) {
@@ -243,7 +360,7 @@ function validateBulkRow(row, spaceId, ctx) {
   if (ctx.teamEnabled && String(row.team || '').trim() && ctx.teamOpts.indexOf(String(row.team).trim()) === -1) {
     errors.push('Team "' + row.team + '" is not configured for this space. Valid: ' + ctx.teamOpts.join(', '));
   }
-  if (ctx.productTypeEnabled && String(row.product_type || '').trim() && ctx.productTypeOpts.indexOf(String(row.product_type).trim().toLowerCase()) === -1) {
+  if (ctx.productTypeEnabled && String(row.product_type || '').trim() && ctx.productTypeOpts.indexOf(String(row.product_type).trim()) === -1) {
     errors.push('Product Type "' + row.product_type + '" is not configured for this space. Valid: ' + ctx.productTypeOpts.join(', '));
   }
 
@@ -271,34 +388,108 @@ function validateBulkRow(row, spaceId, ctx) {
     else if (matches.length > 1) errors.push('Sprint "' + sprintName + '" matches more than one sprint in this space; rename one or leave this blank');
   }
 
-  bulkParseDateForValidation(row.start_date, 'Start Date', errors);
-  var startOk = !errors.some(function (e) { return e.indexOf('Start Date') === 0; });
   var dueOk0 = errors.length;
-  bulkParseDateForValidation(row.due_date, 'Due Date', errors);
-  var startDate = String(row.start_date || '').trim();
-  var dueDate = String(row.due_date || '').trim();
-  if (startOk && errors.length === dueOk0 && startDate && dueDate && startDate > dueDate) {
+  var startDate = bulkParseDateForValidation(row.start_date, 'Start Date', errors);
+  var dueDate = bulkParseDateForValidation(row.due_date, 'Due Date', errors);
+  if (errors.length === dueOk0 && startDate && dueDate && startDate > dueDate) {
     errors.push('Due Date (' + dueDate + ') is before Start Date (' + startDate + ')');
   }
 
-  // Required-field rules configured for this space (Settings -> Custom
-  // Fields), applied to the type this row resolves to. A field this codebase
-  // does not expose as a CSV column but that the space marks required blocks
-  // the row outright, rather than silently creating a ticket that violates a
-  // rule the admin configured on purpose.
+  // Required-field rules for the fixed issues-row fields (Settings -> Custom
+  // Fields), applied to the type this row resolves to.
   var fieldRows = getSpaceFieldRows(spaceId);
   fieldRows.forEach(function (field) {
+    if (!field.is_builtin || BULK_ISSUES_ROW_FIELD_KEYS.indexOf(field.field_key) === -1) return;
     if (!fieldRequiredForType(field, typeVal)) return;
     if (!customFieldShowsIn(field, 'create')) return;
-    if (field.is_builtin && field.field_key === 'title') return; // already checked above unconditionally
-    var supportedKey = field.is_builtin ? field.field_key : null;
-    if (!field.is_builtin || BULK_SUPPORTED_FIELD_KEYS.indexOf(supportedKey) === -1) {
-      errors.push('Issue type "' + esc(typeVal) + '" requires "' + esc(field.name) + '" in this space, which bulk import does not support — create this ticket individually');
-      return;
-    }
-    var csvKey = supportedKey === 'assignee' ? 'assignee_email' : supportedKey === 'reporter' ? 'reporter_email' : supportedKey;
+    if (field.field_key === 'title') return; // already checked above unconditionally
+    var csvKey = field.field_key === 'assignee' ? 'assignee_email' : field.field_key === 'reporter' ? 'reporter_email' : field.field_key;
     if (!String(row[csvKey] || '').trim()) {
       errors.push('"' + esc(field.name) + '" is required for issue type "' + esc(typeVal) + '" in this space');
+    }
+  });
+
+  // Every OTHER field this space shows on Create -- the builtin Combination
+  // field and any genuinely custom field alike -- gets its value from its own
+  // dynamic CSV column (matched by field name in mapCsvToBulkRows) and is
+  // resolved/validated here by its actual field_type. A resolved value goes
+  // into customFieldValues, keyed by field id, and is stored via
+  // issue_field_values after the ticket is created — exactly like the normal
+  // Create Issue form already does for these fields.
+  var customFieldValues = {};
+  bulkGetDynamicFields(spaceId).forEach(function (field) {
+    var raw = (row._dynamic && row._dynamic[field.id] != null) ? String(row._dynamic[field.id]) : '';
+    var trimmed = raw.trim();
+    if (!trimmed) {
+      if (fieldRequiredForType(field, typeVal)) {
+        errors.push('"' + esc(field.name) + '" is required for issue type "' + esc(typeVal) + '" in this space');
+      }
+      return;
+    }
+
+    if (isCombinationField(field)) {
+      var comboOpts = getCustomFieldOptions(field);
+      var comboMatch = comboOpts.filter(function (o) { return String(o).toLowerCase() === trimmed.toLowerCase(); })[0];
+      if (!comboMatch) {
+        errors.push('"' + esc(field.name) + '" value "' + trimmed + '" is not one of this space\'s configured combinations');
+        return;
+      }
+      // If this field carries per-Product-Type groups and a Product Type was
+      // given, the chosen combination must actually belong to that group —
+      // otherwise a combination valid only for "Content" could silently
+      // attach itself to a "Message" ticket.
+      var parsed = (typeof parseCombinationFieldOptions === 'function') ? parseCombinationFieldOptions(field) : null;
+      var ptVal = ctx.productTypeEnabled ? String(row.product_type || '').trim() : '';
+      if (parsed && parsed.groups && ptVal && parsed.groups[ptVal] && parsed.groups[ptVal].length &&
+          parsed.groups[ptVal].map(function (o) { return String(o).toLowerCase(); }).indexOf(comboMatch.toLowerCase()) === -1) {
+        errors.push('"' + esc(field.name) + '" value "' + comboMatch + '" is not available for Product Type "' + esc(ptVal) + '"');
+        return;
+      }
+      customFieldValues[field.id] = comboMatch;
+      return;
+    }
+
+    var ftype = field.field_type;
+    if (ftype === 'select' || ftype === 'multi_select') {
+      var opts = getCustomFieldOptions(field);
+      var tokens = ftype === 'multi_select' ? trimmed.split(';').map(function (s) { return s.trim(); }).filter(Boolean) : [trimmed];
+      var resolvedTokens = [], badTokens = [];
+      tokens.forEach(function (t) {
+        var m = opts.filter(function (o) { return String(o).toLowerCase() === t.toLowerCase(); })[0];
+        if (m) resolvedTokens.push(m); else badTokens.push(t);
+      });
+      if (badTokens.length) {
+        errors.push('"' + esc(field.name) + '" value "' + badTokens.join('", "') + '" not configured for this field. Valid: ' + opts.join(', '));
+        return;
+      }
+      customFieldValues[field.id] = resolvedTokens.join(',');
+    } else if (ftype === 'number') {
+      var n2 = Number(trimmed);
+      if (!Number.isFinite(n2)) { errors.push('"' + esc(field.name) + '" must be a number: "' + trimmed + '"'); return; }
+      customFieldValues[field.id] = String(n2);
+    } else if (ftype === 'date') {
+      var dErrs = [];
+      var dVal = bulkParseDateForValidation(trimmed, field.name, dErrs);
+      if (dErrs.length) { errors.push.apply(errors, dErrs); return; }
+      if (dVal) customFieldValues[field.id] = dVal;
+    } else if (ftype === 'checkbox') {
+      var boolStr = trimmed.toLowerCase();
+      if (['true', 'yes', '1'].indexOf(boolStr) !== -1) {
+        customFieldValues[field.id] = 'true';
+      } else if (['false', 'no', '0'].indexOf(boolStr) === -1) {
+        errors.push('"' + esc(field.name) + '" must be true/false, yes/no, or 1/0: "' + trimmed + '"');
+      }
+      // false/no/0 -> leave unset, matching how an unchecked box on the real form never sets a value
+    } else if (ftype === 'user') {
+      var email = trimmed.toLowerCase();
+      if (!ctx.memberEmails.has(email)) {
+        errors.push('"' + esc(field.name) + '" value "' + trimmed + '" is not a member of this space (match by email)');
+        return;
+      }
+      customFieldValues[field.id] = email; // resolved to a user id server-side, same as Assignee/Reporter
+    } else {
+      // text / textarea, and any future type this file has not special-cased
+      customFieldValues[field.id] = trimmed;
     }
   });
 
@@ -311,7 +502,8 @@ function validateBulkRow(row, spaceId, ctx) {
       team: ctx.teamEnabled ? (String(row.team || '').trim() || undefined) : undefined,
       product_type: ctx.productTypeEnabled ? (String(row.product_type || '').trim() || undefined) : undefined,
       start_date: startDate || undefined, due_date: dueDate || undefined,
-      description: String(row.description || '')
+      description: String(row.description || ''),
+      custom_field_values: Object.keys(customFieldValues).length ? customFieldValues : undefined
     }
   };
 }
@@ -379,7 +571,7 @@ async function handleBulkIssueFileChange(input) {
   try { text = await file.text(); }
   catch (e) { toast('Could not read that file — ' + errorReason(e), 'error'); return; }
 
-  var mapped = mapCsvToBulkRows(text);
+  var mapped = mapCsvToBulkRows(text, _bulkIssueSpaceId);
   if (mapped.headerError) {
     toast(mapped.headerError, 'error');
     return;
