@@ -411,7 +411,7 @@
           "gluePrefix": "var __dirname = require(\"path\").dirname(require.resolve(\"../../package.json\"));\r\nconst { express } = require('./core');\r\n",
           "glueSuffix": "\r\nmodule.exports = { app };\r\n",
           "modified": true,
-          "modifiedReason": "FIX C - express.static allowlist replaces whole-repo static root"
+          "modifiedReason": "FIX C - express.static allowlist replaces whole-repo static root || FEATURE: /recover-description.html added to PUBLIC_ROOT_PATHS, same reasoning as index.html/login.html -- the page shell has no secrets baked in. The data behind it is protected server-side by /api/admin/description-history requiring an org-admin session, not by keeping the shell unlisted."
         },
         {
           "file": "src/server/files.js",
@@ -661,7 +661,7 @@
           "gluePrefix": "const { generateToken, requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { requireOrgAdmin } = require('../deps');\r\nconst { sendEmail, sendInviteEmail } = require('../email');\r\nconst { app } = require('../express-app');\r\n",
           "glueSuffix": "",
           "modified": true,
-          "modifiedReason": "P2: organizations LIMIT 1 -> req.user.org_id / inv.org_id (5 sites) instead of guessing at \"the\" org"
+          "modifiedReason": "P2: organizations LIMIT 1 -> req.user.org_id / inv.org_id (5 sites) instead of guessing at \"the\" org || FEATURE: GET /api/admin/description-history, requested to recover descriptions that went missing on production tickets. Every description edit is already written to issue_history (field_name='description') by PUT /api/issues/:id and never deleted, so the full edit trail survives even when the live issues.description column has since been overwritten -- this is the read-only view of that trail: one row per issue, org-scoped via req.user.org_id (unlike the pre-existing audit-log endpoint above it in this file, which is NOT org-scoped -- left alone, out of scope for this change), each with its full description-change sequence for /recover-description.html to render."
         },
         {
           "file": "src/server/errors.js",
@@ -786,7 +786,7 @@
     "src/server/core.js": "1b6d980f8a53b1af094a6efade945baa03d3389447a1704c7cc7200c49b564d0",
     "src/server/deps.js": "29d579449151676c969bf5c94f7054cfd89b0d6fbdd521740fad174aa6f398b6",
     "src/server/notify.js": "f177e6f4ca496a41da99cea919988c7bbc9f50486120a35beeeb0e904981632b",
-    "src/server/express-app.js": "e2a67b3a04f9a76cf921a2c4390187dbba480cb0eb99bb339a6423640a5bea2f",
+    "src/server/express-app.js": "76b1009841216231c765b9707bb0854860cefdf9da2b31ca981617cef8f762d2",
     "src/server/files.js": "fc97fa7f83ed02d3f98770d8aed2d11c9086f5d9f3fb4ff1c37b1d71ac18c458",
     "src/server/oauth-helpers.js": "bc13361d710c9cf5f37e763b832d7be08bb62fd962c3795ce0d1c9d1327f1f42",
     "src/server/routes/data.js": "1c72806ecc1f1c08bd1147671c1646b71255c19d896795a92634ca83717bcbf3",
@@ -806,7 +806,7 @@
     "src/server/routes/notifications.js": "ce488a24d1094c63ce62e452563334214f149243c4fbb0423f39fc142839ab33",
     "src/server/routes/oauth.js": "5734ab387c5e045321dd925deeaa016a72be1de56ed853e45cd5927ea3c3ddea",
     "src/server/routes/users.js": "6511060ee73683cab801e6b6535987e491cd4ee89a1d7c97f7bfff50aff56535",
-    "src/server/routes/admin.js": "157e508b023c9d2c90dcdea26491c61b063106c95aa3ebc04acede249be38073",
+    "src/server/routes/admin.js": "85c4c90c89a815372747d13d9588e7d1eea0e15f3370893b08bbd31ff67a6929",
     "src/server/errors.js": "2ae32d5fa2232508580e13c0464299f5009ef26d1285b7fffa6901bdbb0cbd3f",
     "src/server/routes/spa.js": "6c753958aefd3f8c22ebd70ae43864e1dd7e228603dcdf974870d2c2c2271f3c",
     "src/server/startup.js": "49c1c98f2082c03f3f85b9168b7322b4db12eccae47f50f55761b0a487323195",
