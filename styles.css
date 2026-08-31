@@ -3396,9 +3396,6 @@ body.light .data-table td { border-bottom-color: #eaeef2; }
 body.light .data-table tr:hover td { background: #f7f8fa; }
 .drawer-label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text3); letter-spacing: 0.04em; margin-bottom: 4px; }
 .drawer-title { font-size: 18px; margin-bottom: 12px; min-height: 0; }
-.drawer-desc { min-height: 60px; padding: 8px; border-radius: var(--radius); border: 1px solid transparent; font-size: 13px; line-height: 1.6; outline: none; }
-.drawer-desc:focus { border-color: var(--accent); background: var(--bg3); }
-.drawer-desc:empty::before { content: attr(data-placeholder); color: var(--text3); }
 .drawer-field-group { margin-bottom: 16px; }
 .drawer-subtasks { }
 .drawer-activity-section { margin-top: 20px; }
