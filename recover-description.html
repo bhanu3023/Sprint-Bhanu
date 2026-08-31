@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Description Recovery — Sprint Board</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f4f6fb; color: #172b4d; font-size: 13px;
+  }
+  header {
+    background: #fff; border-bottom: 1px solid #e2e8f0; padding: 14px 24px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 16px; margin: 0; color: #0129AC; }
+  header .sub { color: #64748b; font-size: 12px; }
+  #searchBox {
+    margin-left: auto; padding: 7px 12px; border: 1.5px solid #dfe3eb; border-radius: 6px;
+    font-size: 13px; min-width: 240px; outline: none;
+  }
+  #searchBox:focus { border-color: #0129AC; }
+  main { padding: 20px 24px 60px; }
+  #status { color: #64748b; padding: 40px; text-align: center; }
+  #status.error { color: #dc2626; }
+  /* table-layout:fixed locks column widths from the <th> declarations across
+     every row -- without it, the browser auto-sizes each row's columns from
+     THAT row's own content, so column boundaries drift row to row and no
+     longer line up under the header at all. */
+  table {
+    width: 100%; table-layout: fixed; border-collapse: collapse; background: #fff;
+    border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  /* Sticky elements with no explicit z-index stack in DOM order, and tbody
+     rows come after thead in the document -- without z-index here, a row
+     scrolled up under the sticky header painted OVER it instead of under it. */
+  thead th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #64748b; background: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0;
+    position: sticky; top: 57px; z-index: 2;
+  }
+  tbody tr { border-bottom: 1px solid #eef1f6; vertical-align: top; }
+  tbody tr:hover { background: #fafbff; }
+  tbody td { padding: 12px 14px; background: #fff; overflow-wrap: break-word; }
+  .ticket-key { font-weight: 700; color: #0129AC; white-space: nowrap; }
+  .ticket-title { color: #475569; font-size: 12px; margin-top: 2px; }
+  .space-name { color: #64748b; font-size: 12px; }
+  .current-desc { white-space: pre-wrap; word-break: break-word; }
+  .current-desc.empty { color: #94a3b8; font-style: italic; }
+  .flag {
+    display: inline-block; margin-bottom: 6px; padding: 2px 8px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 700; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca;
+  }
+  .history-list { display: flex; flex-direction: column; gap: 8px; }
+  .history-entry { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; background: #fbfcfe; }
+  .history-meta { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+  .history-meta b { color: #172b4d; }
+  .history-diff { font-size: 12px; }
+  .history-diff .old { color: #b91c1c; text-decoration: line-through; opacity: 0.8; }
+  .history-diff .new { color: #15803d; }
+  .history-diff .arrow { color: #94a3b8; margin: 0 4px; }
+  .history-empty { color: #94a3b8; font-style: italic; font-size: 12px; }
+  .val-empty { color: #94a3b8; font-style: italic; }
+  .count-badge { color: #64748b; font-size: 11px; margin-left: 6px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Description Recovery</h1>
+    <span class="sub" id="headerSub">Loading…</span>
+    <input type="text" id="searchBox" placeholder="Search by ticket number (e.g. AI-42)" oninput="applyFilter()">
+  </header>
+  <main>
+    <div id="status">Loading tickets…</div>
+    <table id="table" style="display:none">
+      <thead>
+        <tr>
+          <th style="width:110px">Ticket</th>
+          <th style="width:120px">Space</th>
+          <th style="width:260px">Current Description</th>
+          <th>Description Changes (oldest → newest)</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </main>
+
+<script>
+  var ROWS = [];
+
+  function getToken() { return localStorage.getItem('sb-token') || ''; }
+
+  function fmtDate(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Descriptions are stored as raw HTML. Never render them via innerHTML here —
+  // this page's whole job is displaying untrusted historical content, so every
+  // value goes through textContent only.
+  function plainText(html) {
+    if (!html) return '';
+    var doc = new DOMParser().parseFromString(String(html), 'text/html');
+    return (doc.body && doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function truncate(s, n) {
+    if (!s) return s;
+    return s.length > n ? s.slice(0, n) + '…' : s;
+  }
+
+  function el(tag, opts) {
+    var e = document.createElement(tag);
+    opts = opts || {};
+    if (opts.class) e.className = opts.class;
+    if (opts.text != null) e.textContent = opts.text;
+    if (opts.title != null) e.title = opts.title;
+    if (opts.style) e.setAttribute('style', opts.style);
+    return e;
+  }
+
+  function buildHistoryCell(row) {
+    var wrap = el('div', { class: 'history-list' });
+    if (!row.history.length) {
+      wrap.appendChild(el('div', { class: 'history-empty', text: 'No description changes recorded.' }));
+      return wrap;
+    }
+    row.history.forEach(function (h) {
+      var entry = el('div', { class: 'history-entry' });
+      var meta = el('div', { class: 'history-meta' });
+      var who = el('b', { text: h.user_name });
+      meta.appendChild(document.createTextNode(fmtDate(h.created_at) + '  —  '));
+      meta.appendChild(who);
+      entry.appendChild(meta);
+
+      var diff = el('div', { class: 'history-diff' });
+      var oldText = plainText(h.old_value);
+      var newText = plainText(h.new_value);
+      var oldSpan = oldText
+        ? el('span', { class: 'old', text: truncate(oldText, 140), title: oldText })
+        : el('span', { class: 'val-empty', text: '(empty)' });
+      var newSpan = newText
+        ? el('span', { class: 'new', text: truncate(newText, 140), title: newText })
+        : el('span', { class: 'val-empty', text: '(empty)' });
+      diff.appendChild(oldSpan);
+      diff.appendChild(el('span', { class: 'arrow', text: '→' }));
+      diff.appendChild(newSpan);
+      entry.appendChild(diff);
+      wrap.appendChild(entry);
+    });
+    return wrap;
+  }
+
+  function buildRow(row) {
+    var tr = document.createElement('tr');
+
+    var tdKey = document.createElement('td');
+    tdKey.appendChild(el('div', { class: 'ticket-key', text: row.key }));
+    if (row.title) tdKey.appendChild(el('div', { class: 'ticket-title', text: row.title }));
+    tr.appendChild(tdKey);
+
+    var tdSpace = document.createElement('td');
+    tdSpace.appendChild(el('div', { class: 'space-name', text: row.space_name + ' (' + row.space_key + ')' }));
+    tr.appendChild(tdSpace);
+
+    var tdCurrent = document.createElement('td');
+    var currentText = plainText(row.description);
+    var hadContentBefore = row.history.some(function (h) { return plainText(h.old_value) || plainText(h.new_value); });
+    if (!currentText && hadContentBefore) {
+      tdCurrent.appendChild(el('div', { class: 'flag', text: 'EMPTY NOW — HAD CONTENT BEFORE' }));
+    }
+    var descDiv = currentText
+      ? el('div', { class: 'current-desc', text: truncate(currentText, 300), title: currentText })
+      : el('div', { class: 'current-desc empty', text: '(no description)' });
+    tdCurrent.appendChild(descDiv);
+    tr.appendChild(tdCurrent);
+
+    var tdHistory = document.createElement('td');
+    var countBadge = el('span', { class: 'count-badge', text: row.history.length + ' change' + (row.history.length === 1 ? '' : 's') });
+    tdHistory.appendChild(countBadge);
+    tdHistory.appendChild(buildHistoryCell(row));
+    tr.appendChild(tdHistory);
+
+    return tr;
+  }
+
+  function render(rows) {
+    var tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    rows.forEach(function (row) { tbody.appendChild(buildRow(row)); });
+    document.getElementById('table').style.display = rows.length ? 'table' : 'none';
+    var statusEl = document.getElementById('status');
+    if (!rows.length) {
+      statusEl.textContent = 'No tickets match that search.';
+      statusEl.style.display = 'block';
+      statusEl.className = '';
+    } else {
+      statusEl.style.display = 'none';
+    }
+  }
+
+  function applyFilter() {
+    var term = document.getElementById('searchBox').value.trim().toLowerCase();
+    if (!term) { render(ROWS); return; }
+    render(ROWS.filter(function (r) {
+      return r.key.toLowerCase().indexOf(term) !== -1;
+    }));
+  }
+
+  function showStatus(msg, isError) {
+    var s = document.getElementById('status');
+    s.textContent = msg;
+    s.className = isError ? 'error' : '';
+    s.style.display = 'block';
+    document.getElementById('table').style.display = 'none';
+  }
+
+  async function load() {
+    var token = getToken();
+    if (!token) {
+      showStatus('You need to be logged in to the main app in this browser first. Open the app, log in, then reload this page.', true);
+      return;
+    }
+    try {
+      var res = await fetch('/api/admin/description-history', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if (res.status === 401) {
+        showStatus('Your session has expired. Log in to the main app again, then reload this page.', true);
+        return;
+      }
+      if (res.status === 403) {
+        showStatus('Only an org admin can view description history.', true);
+        return;
+      }
+      if (!res.ok) {
+        showStatus('Could not load description history (HTTP ' + res.status + ').', true);
+        return;
+      }
+      ROWS = await res.json();
+      document.getElementById('headerSub').textContent =
+        ROWS.length + ' ticket' + (ROWS.length === 1 ? '' : 's') + ' · ' +
+        ROWS.reduce(function (n, r) { return n + r.history.length; }, 0) + ' recorded description changes';
+      render(ROWS);
+    } catch (e) {
+      showStatus('Could not reach the server — check your connection and try again.', true);
+    }
+  }
+
+  load();
+</script>
+</body>
+</html>

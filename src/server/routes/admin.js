@@ -4,6 +4,46 @@ const { q } = require('../db');
 const { requireOrgAdmin } = require('../deps');
 const { escapeHtml, sendEmail, sendInviteEmail } = require('../email');
 const { app } = require('../express-app');
+// ── Description recovery ──────────────────────────────────
+// Every description edit is written to issue_history (field_name='description')
+// by PUT /api/issues/:id and never deleted, so the full edit trail survives even
+// when the live issues.description column has since been overwritten with
+// something else (including blank). This is the read-only recovery view for
+// that trail: one row per issue, in the requester's own org only, each with its
+// full sequence of description changes so a wiped or wrong description can be
+// traced back to its last good value and to who/when changed it.
+app.get('/api/admin/description-history', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can view description history.')) return;
+  const issues = (await q(
+    `SELECT i.id, i.key, i.title, i.description, s.key AS space_key, s.name AS space_name
+       FROM issues i
+       JOIN spaces s ON s.id = i.space_id
+      WHERE s.org_id = $1 AND i.deleted_at IS NULL
+      ORDER BY s.key, i.key`, [req.user.org_id])).rows;
+  const history = (await q(
+    `SELECT h.issue_id, h.created_at, h.old_value, h.new_value, u.name AS user_name
+       FROM issue_history h
+       JOIN issues i ON i.id = h.issue_id
+       JOIN spaces s ON s.id = i.space_id
+       LEFT JOIN users u ON u.id = h.user_id
+      WHERE s.org_id = $1 AND h.field_name = 'description'
+      ORDER BY h.created_at ASC`, [req.user.org_id])).rows;
+  const byIssue = {};
+  history.forEach(function (h) {
+    (byIssue[h.issue_id] = byIssue[h.issue_id] || []).push({
+      created_at: h.created_at, user_name: h.user_name || 'Unknown',
+      old_value: h.old_value, new_value: h.new_value
+    });
+  });
+  res.json(issues.map(function (i) {
+    return {
+      id: i.id, key: i.key, title: i.title, description: i.description,
+      space_key: i.space_key, space_name: i.space_name,
+      history: byIssue[i.id] || []
+    };
+  }));
+}));
+
 // ── Admin Audit Log ───────────────────────────────────────
 app.get('/api/admin/audit-log', requireAuth, wrap(async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'owner')
