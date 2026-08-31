@@ -139,12 +139,21 @@ function renderBacklog() {
 
   var html = lanesFor('active') + lanesFor('planning') + strayLanes;
 
-  // Backlog (no sprint)
-  var backlogIssues = issues.filter(function (iss) { return !iss.sprint_id; });
+  // Backlog (no sprint). Done issues that never touched a sprint are split
+  // OUT of this list -- an issue created straight into the backlog and marked
+  // Done without ever being planned into a sprint used to sit here mixed in
+  // with real candidates for the next sprint, so dragging a batch of backlog
+  // items into a new sprint could silently pick up already-finished work.
+  // They get their own lane below instead of just vanishing: the ticket still
+  // needs to be findable, just not offered as sprint-planning material.
+  var backlogIssues = issues.filter(function (iss) { return !iss.sprint_id && iss.status !== 'Done'; });
+  var doneNoSprintIssues = issues.filter(function (iss) { return !iss.sprint_id && iss.status === 'Done'; });
   if (searchTerm) {
-    backlogIssues = backlogIssues.filter(function (iss) {
+    var matchesSearch = function (iss) {
       return iss.title.toLowerCase().indexOf(searchTerm) >= 0 || issueKeyStr(iss).toLowerCase().indexOf(searchTerm) >= 0;
-    });
+    };
+    backlogIssues = backlogIssues.filter(matchesSearch);
+    doneNoSprintIssues = doneNoSprintIssues.filter(matchesSearch);
   }
   // Backlog shows a points total too, so its header matches the sprint lanes.
   var backlogPoints = backlogIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
@@ -173,6 +182,35 @@ function renderBacklog() {
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
     'Add issue</button></div>';
   html += '</div></div>';
+
+  // Done, but never assigned to any sprint. Same treatment as a completed
+  // sprint lane -- collapsed by default, no drop target, no "Add issue" -- it
+  // is a place to FIND these tickets, not a pool to plan the next sprint from.
+  // Cards stay draggable (backlogRow doesn't change), so deliberately dragging
+  // one into a real sprint for record-keeping still works; the lane itself
+  // just doesn't accept drops the way the live Backlog lane does.
+  if (doneNoSprintIssues.length) {
+    var doneNoSprintPoints = doneNoSprintIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
+    html += '<div class="backlog-lane">' +
+      '<div class="backlog-lane-header" onclick="window._toggleBacklogLane(this)">' +
+      '<div class="lane-header-left">' +
+      '<span class="lane-toggle is-collapsed" aria-hidden="true">' +
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+      '</span>' +
+      '<span class="lane-title">Done (Not in a Sprint)</span>' +
+      '<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#00875a;background:rgba(0,135,90,0.1);padding:2px 8px;border-radius:10px">' +
+        '<span style="width:6px;height:6px;border-radius:50%;background:#00875a;display:inline-block"></span>Completed outside sprint planning</span>' +
+      '<span class="lane-meta">' +
+        '<span class="lane-meta-item">' + doneNoSprintIssues.length + (doneNoSprintIssues.length === 1 ? ' issue' : ' issues') + '</span>' +
+        '<span class="lane-meta-item">' + doneNoSprintPoints + ' pts</span>' +
+      '</span>' +
+      '</div></div>' +
+      '<div class="backlog-lane-body collapsed" data-lane-closed="true">';
+    for (var dn = 0; dn < doneNoSprintIssues.length; dn++) {
+      html += backlogRow(doneNoSprintIssues[dn]);
+    }
+    html += '</div></div>';
+  }
 
   // Completed sprints go last, below the backlog (collapsed by default).
   html += lanesFor('completed');

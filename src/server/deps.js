@@ -10,6 +10,13 @@ const {
   getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed
 } = require('./lib/permissions');
 const { seedBuiltinIssueFields, getConfiguredOptions } = require('./lib/builtin-issue-fields');
+const { uid } = require('./core');
+const { upsertIssueFieldValue: upsertIssueFieldValueImpl } = require('./lib/issue-field-values');
+// One shared upsert for every custom-field-value write — the drawer's PUT
+// route and the bulk CSV import both call this instead of maintaining two
+// copies of the empty-string-deletes-the-row rule and the history write.
+const upsertIssueFieldValue = (issueId, fieldId, value, actorUserId) =>
+  upsertIssueFieldValueImpl({ q, uid }, issueId, fieldId, value, actorUserId);
 
 /**
  * type/priority have no DB CHECK constraint since migration 016 — each space
@@ -36,4 +43,4 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 
-module.exports = { validateSchemaReadOnly, logProductTeamCombinationStatus, logDuplicateKeyWarning, runMigrations, buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin, UPDATE_WHITELIST, validateSpaceRoleAssignment, canRemoveSpaceMember, getSpaceMemberRole, getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId, getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed, seedBuiltinIssueFields, getConfiguredOptions, isBuiltinSelectValueAllowed, startRetentionSweeper, retentionDays, purgeIssueCascade, purgeIssueRows, completeSprint, startSprintAutoCompleter, https, oauthStates };
+module.exports = { validateSchemaReadOnly, logProductTeamCombinationStatus, logDuplicateKeyWarning, runMigrations, buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin, UPDATE_WHITELIST, validateSpaceRoleAssignment, canRemoveSpaceMember, getSpaceMemberRole, getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId, getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed, seedBuiltinIssueFields, getConfiguredOptions, isBuiltinSelectValueAllowed, startRetentionSweeper, retentionDays, purgeIssueCascade, purgeIssueRows, completeSprint, startSprintAutoCompleter, https, oauthStates, upsertIssueFieldValue };

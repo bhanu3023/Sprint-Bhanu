@@ -1,7 +1,7 @@
 const { requireAuth } = require('../auth');
 const { uid, wrap } = require('../core');
 const { q } = require('../db');
-const { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays } = require('../deps');
+const { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays, upsertIssueFieldValue } = require('../deps');
 const { app } = require('../express-app');
 const { createNotif } = require('../notify');
 // ── Issues ────────────────────────────────────────────────
@@ -343,20 +343,27 @@ app.get('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   res.json(issue);
 }));
 
-app.post('/api/issues', requireAuth, wrap(async (req, res) => {
-  const b = req.body;
-  if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
-  if (!(await denyUnlessCanAct(q, req.user, res, b.space_id, 'issue.create'))) return;
-  const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [b.space_id])).rows[0];
-  if (!spaceKeyRow) return res.status(400).json({ error: 'Invalid space_id' });
+// Shared by POST /api/issues (one ticket, one HTTP call) and POST
+// /api/issues/bulk-import (many, one CSV) so both go through the exact same
+// validation and the exact same key-allocation retry loop -- extracted
+// unchanged from what used to be the single-create route body, not
+// reimplemented, so bulk import cannot silently diverge from what a person
+// clicking Save one at a time gets. Throws a structured Error with a `status`
+// on the caller's behalf: the single route turns that into its own
+// res.status().json(), and bulk-import turns it into one row's failure entry
+// without aborting the rest of the batch.
+async function createIssueRow(spaceId, actorUserId, fields) {
+  const b = fields;
+  const spaceKeyRow = (await q('SELECT key FROM spaces WHERE id=$1', [spaceId])).rows[0];
+  if (!spaceKeyRow) throw Object.assign(new Error('Invalid space_id'), { status: 400 });
   const spaceKey = spaceKeyRow.key;
   const finalType = b.type || 'task';
   const finalPriority = b.priority || 'medium';
-  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'type', finalType))) {
-    return res.status(400).json({ error: 'Not a configured type for this space: ' + finalType });
+  if (!(await isBuiltinSelectValueAllowed(spaceId, 'type', finalType))) {
+    throw Object.assign(new Error('Not a configured type for this space: ' + finalType), { status: 400 });
   }
-  if (!(await isBuiltinSelectValueAllowed(b.space_id, 'priority', finalPriority))) {
-    return res.status(400).json({ error: 'Not a configured priority for this space: ' + finalPriority });
+  if (!(await isBuiltinSelectValueAllowed(spaceId, 'priority', finalPriority))) {
+    throw Object.assign(new Error('Not a configured priority for this space: ' + finalPriority), { status: 400 });
   }
   const id = uid();
   // -- Issue key allocation: read-then-insert, retried on conflict ------
@@ -381,20 +388,22 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
   //   - issues_key_key stays the real guarantee. This loop only decides what
   //     the caller sees when it fires.
   // Only 23505 on issues_key_key is retried; any other error propagates
-  // untouched. The jitter stops a burst re-colliding in lockstep.
+  // untouched. The jitter stops a burst re-colliding in lockstep. A bulk
+  // import creating many rows in the same space back-to-back is exactly the
+  // burst this loop exists for.
   const KEY_RETRIES = 25;
   let r = null, key = null, lastConflict = null;
   for (let attempt = 0; attempt < KEY_RETRIES; attempt++) {
     const maxRow = (await q(
       "SELECT COALESCE(MAX(CAST(SPLIT_PART(key, '-', 2) AS INTEGER)), 0) AS mx FROM issues WHERE space_id=$1 AND key ~ ($2 || '-[0-9]+$')",
-      [b.space_id, spaceKey]
+      [spaceId, spaceKey]
     )).rows[0];
     key = spaceKey + '-' + (maxRow.mx + 1);
     try {
       r = await q(`INSERT INTO issues(id,key,space_id,sprint_id,parent_id,title,description,type,priority,
         assignee_id,reporter_id,story_points,labels,start_date,due_date,original_estimate,team,product_type)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
-        [id, key, b.space_id, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
+        [id, key, spaceId, b.sprint_id || null, b.parent_id || null, b.title, b.description || null,
          finalType, finalPriority, b.assignee_id || null, b.reporter_id || null,
          b.story_points || b.points || null, b.labels || null, b.start_date || null, b.due_date || null,
          b.original_estimate || null, b.team || null, b.product_type || null]);
@@ -407,11 +416,32 @@ app.post('/api/issues', requireAuth, wrap(async (req, res) => {
   }
   if (!r) {
     console.error('[issues/create] key still conflicting after ' + KEY_RETRIES + ' attempts', lastConflict && lastConflict.detail);
-    return res.status(503).json({ error: 'Could not allocate an issue key, please retry' });
+    throw Object.assign(new Error('Could not allocate an issue key, please retry'), { status: 503 });
   }
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
-    VALUES($1,$2,$3,'created',NULL,$4)`, [uid(), id, req.user.id, key]).catch(function () {});
-  res.status(201).json(r.rows[0]);
+    VALUES($1,$2,$3,'created',NULL,$4)`, [uid(), id, actorUserId, key]).catch(function () {});
+  return r.rows[0];
+}
+
+app.post('/api/issues', requireAuth, wrap(async (req, res) => {
+  const b = req.body;
+  if (!b.space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, b.space_id, 'issue.create'))) return;
+  // createIssueRow throws a structured { status, message } rather than writing
+  // the response itself, so it can be reused by bulk-import below without one
+  // bad row's 400 short-circuiting the whole batch. Caught explicitly here,
+  // not left to the global error handler in errors.js: that handler collapses
+  // every 4xx into a generic "Invalid request" and has no 5xx case at all, so
+  // letting it through would have silently swapped this route's specific,
+  // actionable messages ("Not a configured type for this space: X", "Could
+  // not allocate an issue key, please retry") for a useless generic one.
+  try {
+    const row = await createIssueRow(b.space_id, req.user.id, b);
+    res.status(201).json(row);
+  } catch (e) {
+    if (e && e.status) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
 }));
 
 app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
@@ -534,5 +564,281 @@ app.post('/api/issues/bulk', requireAuth, wrap(async (req, res) => {
     await q('UPDATE issues SET former_sprint_id=NULL WHERE id=ANY($1)', [ids]).catch(() => {});
   }
   res.json({ ok: true, updated: r.rowCount, issues: r.rows });
+}));
+
+// ── Bulk import from CSV ───────────────────────────────────
+// Distinct from POST /api/issues/bulk above on purpose: that one BULK-EDITS
+// existing tickets. This one BULK-CREATES new ones, from rows the client has
+// already parsed out of a CSV file (parsing happens client-side; this route
+// only ever sees plain JSON). One space per request -- the CSV deliberately
+// carries no space column at all, the space is chosen once in the UI.
+//
+// Gated at 'issue.bulk' (site_admin tier, org admin bypasses), the SAME
+// action the bulk-edit route above already uses, not a new permission
+// entry -- "admin and space admin only" for a structured N-row import is
+// exactly what that action already means. This does not and cannot prevent a
+// member from creating many tickets one at a time through the plain
+// issue.create route above; that has always been open to any member and is
+// unrelated to gating the IMPORT FEATURE itself.
+//
+// Every row is independently resolved and validated here, from the RAW values
+// the client sent (an email string, a sprint name, a type name) -- never a
+// client-resolved id. The client does the same resolution for instant
+// feedback before the user ever confirms, but that is UX only; a forged or
+// buggy request body gets no more trust here than the single-create route
+// gives any other POST body. Rows are created ONE BY ONE, in order, each
+// through the exact same createIssueRow() the single-create route uses, so
+// key allocation, the type/priority check, and the issue_history 'created'
+// row all behave identically to a person clicking Save by hand. One row
+// failing (unresolvable assignee, invalid date, whatever) does not abort the
+// rows after it -- the response reports success and failure per row so nothing
+// is silently skipped or silently duplicated on a retry.
+const BULK_IMPORT_MAX_ROWS = 500;
+
+// Date.parse (and the JS Date constructor generally) does not reject an
+// out-of-range calendar date -- it silently rolls it forward, so
+// Date.parse('2026-02-30T00:00:00Z') "succeeds" as March 2. A round trip
+// through Date.UTC and back is the only way to actually catch that: if the
+// year/month/day we asked for don't match what comes back, the input
+// overflowed and must be rejected, not silently corrected.
+function isRealCalendarDate(year, month, day) {
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
+
+// Excel silently reformats a typed date into the system's regional format
+// when the CSV is saved (09-12-2003, 09/12/2003, ...), so a strict
+// YYYY-MM-DD-only check rejects perfectly good dates with a message that does
+// not explain why. This also accepts DD-MM-YYYY / DD/MM/YYYY -- always
+// day-first, never guessed by magnitude -- since that is this org's own
+// convention and a magnitude-based guess (e.g. treating "12-25-2026" as
+// month-first only because 25 can't be a month) would be a second implicit
+// rule nobody asked for. A day-first value that is not a real calendar date
+// (month or day out of range) is still rejected, not silently reinterpreted.
+function bulkNormalizeDate(raw, label, rowErrors) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/) || s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (iso) {
+    const year = parseInt(iso[1], 10), month = parseInt(iso[2], 10), day = parseInt(iso[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || !isRealCalendarDate(year, month, day)) {
+      rowErrors.push(label + ' is not a real date: "' + s + '"');
+      return undefined;
+    }
+    return iso[1] + '-' + iso[2] + '-' + iso[3];
+  }
+
+  const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (dmy) {
+    const day = parseInt(dmy[1], 10), month = parseInt(dmy[2], 10), year = parseInt(dmy[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || !isRealCalendarDate(year, month, day)) {
+      rowErrors.push(label + ' is not a valid date (read as day-first, DD-MM-YYYY): "' + s + '"');
+      return undefined;
+    }
+    return year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+  }
+
+  rowErrors.push(label + ' is not a valid date (expected YYYY-MM-DD or DD-MM-YYYY): "' + s + '". ' +
+    'Tip: if you are editing this in Excel, format the column as Text before typing dates, ' +
+    'otherwise Excel may rewrite them into your regional date format when you save.');
+  return undefined;
+}
+
+app.post('/api/issues/bulk-import', requireAuth, wrap(async (req, res) => {
+  const { space_id, rows } = req.body;
+  if (!space_id) return res.status(400).json({ error: 'space_id is required' });
+  if (!(await denyUnlessCanAct(q, req.user, res, space_id, 'issue.bulk'))) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: 'At least one row is required' });
+  }
+  if (rows.length > BULK_IMPORT_MAX_ROWS) {
+    return res.status(400).json({ error: 'Too many rows in one import (max ' + BULK_IMPORT_MAX_ROWS + '); split the CSV and import in batches' });
+  }
+  const spaceRow = (await q('SELECT id FROM spaces WHERE id=$1 AND is_archived=false', [space_id])).rows[0];
+  if (!spaceRow) return res.status(400).json({ error: 'Invalid or archived space_id' });
+
+  // Resolved once for the whole batch, not per row: the member list, open
+  // sprint list, and custom field configuration for THIS space do not change
+  // mid-request.
+  const members = (await q(
+    `SELECT u.id, u.name, u.email FROM space_members sm JOIN users u ON u.id=sm.user_id WHERE sm.space_id=$1 AND u.is_active=true`,
+    [space_id])).rows;
+  const memberByEmail = new Map(members.map(function (m) { return [String(m.email || '').toLowerCase().trim(), m]; }));
+  const sprints = (await q(
+    `SELECT id, name, status FROM sprints WHERE space_id=$1 AND deleted_at IS NULL AND status != 'completed'`,
+    [space_id])).rows;
+  // Same split the client uses (bulk-issue.js): fields that live directly on
+  // the issues table row already have their own fixed handling above/below;
+  // every other field the space shows on Create -- the builtin Combination
+  // field included -- is a "dynamic" field stored via issue_field_values.
+  const ISSUES_ROW_FIELD_KEYS = ['title', 'type', 'priority', 'assignee', 'reporter', 'sprint', 'story_points', 'team', 'product_type', 'start_date', 'due_date', 'description'];
+  const allFields = (await q('SELECT * FROM custom_fields WHERE space_id=$1', [space_id])).rows;
+  const dynamicFields = allFields.filter(function (f) {
+    if (f.is_builtin && ISSUES_ROW_FIELD_KEYS.indexOf(f.field_key) !== -1) return false;
+    const showIn = f.show_in || [];
+    return showIn.indexOf('create') !== -1;
+  });
+  function resolveEmail(raw, label, rowErrors) {
+    if (raw == null || String(raw).trim() === '') return null;
+    const email = String(raw).toLowerCase().trim();
+    const m = memberByEmail.get(email);
+    if (!m) { rowErrors.push(label + ' "' + raw + '" is not a member of this space'); return undefined; }
+    return m.id;
+  }
+
+  function resolveSprint(raw, rowErrors) {
+    if (raw == null || String(raw).trim() === '') return null;
+    const name = String(raw).trim().toLowerCase();
+    const matches = sprints.filter(function (sp) { return String(sp.name || '').trim().toLowerCase() === name; });
+    if (!matches.length) { rowErrors.push('Sprint "' + raw + '" was not found (or is completed) in this space'); return undefined; }
+    if (matches.length > 1) { rowErrors.push('Sprint "' + raw + '" matches more than one sprint in this space; rename one or leave this blank'); return undefined; }
+    return matches[0].id;
+  }
+
+  function customFieldOptionList(field) {
+    let raw = field.options;
+    if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (_) { raw = []; } }
+    if (raw && raw.v === 2 && raw.groups) return Array.isArray(raw.flat) ? raw.flat : [];
+    return Array.isArray(raw) ? raw.map(function (o) { return (o && typeof o === 'object') ? String(o.value != null ? o.value : o.label) : String(o); }) : [];
+  }
+
+  function isCombinationField(field) {
+    return field.field_key === 'combination' || String(field.name || '').toLowerCase().trim() === 'combination';
+  }
+
+  // Independently re-validates and resolves every dynamic (non-issues-row)
+  // field value the client sent, exactly mirroring the client-side checks in
+  // bulk-issue.js's validateBulkRow -- never trusting that the client already
+  // did this correctly. Returns { [fieldId]: valueToStore }; entries here are
+  // written to issue_field_values via upsertIssueFieldValue after the ticket
+  // is created.
+  function resolveCustomFieldValues(rawMap, productTypeRaw, rowErrors) {
+    const out = {};
+    if (!rawMap || typeof rawMap !== 'object') return out;
+    for (const field of dynamicFields) {
+      const raw = rawMap[field.id];
+      const trimmed = raw == null ? '' : String(raw).trim();
+      if (!trimmed) continue;
+
+      if (isCombinationField(field)) {
+        let parsed = field.options;
+        if (typeof parsed === 'string') { try { parsed = JSON.parse(parsed); } catch (_) { parsed = null; } }
+        const flat = customFieldOptionList(field);
+        const match = flat.find(function (o) { return String(o).toLowerCase() === trimmed.toLowerCase(); });
+        if (!match) { rowErrors.push('"' + field.name + '" value "' + trimmed + '" is not one of this space\'s configured combinations'); continue; }
+        const ptVal = String(productTypeRaw || '').trim();
+        if (parsed && parsed.groups && ptVal && Array.isArray(parsed.groups[ptVal]) && parsed.groups[ptVal].length &&
+            !parsed.groups[ptVal].some(function (o) { return String(o).toLowerCase() === match.toLowerCase(); })) {
+          rowErrors.push('"' + field.name + '" value "' + match + '" is not available for Product Type "' + ptVal + '"');
+          continue;
+        }
+        out[field.id] = match;
+        continue;
+      }
+
+      if (field.field_type === 'select' || field.field_type === 'multi_select') {
+        const opts = customFieldOptionList(field);
+        const tokens = field.field_type === 'multi_select' ? trimmed.split(';').map(function (s) { return s.trim(); }).filter(Boolean) : [trimmed];
+        const resolved = [];
+        const bad = [];
+        tokens.forEach(function (t) {
+          const m = opts.find(function (o) { return String(o).toLowerCase() === t.toLowerCase(); });
+          if (m) resolved.push(m); else bad.push(t);
+        });
+        if (bad.length) { rowErrors.push('"' + field.name + '" value "' + bad.join('", "') + '" not configured for this field'); continue; }
+        out[field.id] = resolved.join(',');
+      } else if (field.field_type === 'number') {
+        const n = Number(trimmed);
+        if (!Number.isFinite(n)) { rowErrors.push('"' + field.name + '" must be a number: "' + trimmed + '"'); continue; }
+        out[field.id] = String(n);
+      } else if (field.field_type === 'date') {
+        const d = bulkNormalizeDate(trimmed, field.name, rowErrors);
+        if (d) out[field.id] = d;
+      } else if (field.field_type === 'checkbox') {
+        const b = trimmed.toLowerCase();
+        if (['true', 'yes', '1'].indexOf(b) !== -1) out[field.id] = 'true';
+        else if (['false', 'no', '0'].indexOf(b) === -1) rowErrors.push('"' + field.name + '" must be true/false, yes/no, or 1/0: "' + trimmed + '"');
+      } else if (field.field_type === 'user') {
+        const m = memberByEmail.get(trimmed.toLowerCase());
+        if (!m) { rowErrors.push('"' + field.name + '" value "' + trimmed + '" is not a member of this space (match by email)'); continue; }
+        out[field.id] = m.id;
+      } else {
+        out[field.id] = trimmed;
+      }
+    }
+    return out;
+  }
+
+  const created = [];
+  const failed = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i] || {};
+    const rowNum = i + 1;
+    const rowErrors = [];
+
+    const title = String(raw.title || '').trim();
+    if (!title) rowErrors.push('Title is required');
+    if (title.length > 500) rowErrors.push('Title is too long (max 500 characters)');
+
+    let storyPoints = null;
+    if (raw.story_points != null && String(raw.story_points).trim() !== '') {
+      const n = Number(raw.story_points);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+        rowErrors.push('Story Points must be a whole number 0 or greater: "' + raw.story_points + '"');
+      } else {
+        storyPoints = n;
+      }
+    }
+
+    const assigneeId = resolveEmail(raw.assignee_email, 'Assignee', rowErrors);
+    // Reporter defaults to the person running the import, exactly like a
+    // blank Reporter field on the normal Create Issue form defaults to
+    // whoever is creating the ticket.
+    const reporterRaw = raw.reporter_email != null && String(raw.reporter_email).trim() !== '';
+    const reporterId = reporterRaw ? resolveEmail(raw.reporter_email, 'Reporter', rowErrors) : req.user.id;
+    const sprintId = resolveSprint(raw.sprint, rowErrors);
+    const startDate = bulkNormalizeDate(raw.start_date, 'Start Date', rowErrors);
+    const dueDate = bulkNormalizeDate(raw.due_date, 'Due Date', rowErrors);
+    if (startDate && dueDate && startDate > dueDate) {
+      rowErrors.push('Due Date (' + dueDate + ') is before Start Date (' + startDate + ')');
+    }
+    const customFieldValues = resolveCustomFieldValues(raw.custom_field_values, raw.product_type, rowErrors);
+
+    if (rowErrors.length) {
+      failed.push({ row: rowNum, title: title || '(no title)', errors: rowErrors });
+      continue;
+    }
+
+    try {
+      const issueRow = await createIssueRow(space_id, req.user.id, {
+        title: title,
+        type: raw.type ? String(raw.type).trim().toLowerCase() : undefined,
+        priority: raw.priority ? String(raw.priority).trim().toLowerCase() : undefined,
+        description: raw.description ? String(raw.description) : null,
+        assignee_id: assigneeId,
+        reporter_id: reporterId,
+        sprint_id: sprintId,
+        story_points: storyPoints,
+        team: raw.team ? String(raw.team).trim() : null,
+        product_type: raw.product_type ? String(raw.product_type).trim() : null,
+        start_date: startDate,
+        due_date: dueDate
+      });
+      // Fire-and-forget per this codebase's own convention for post-create side
+      // effects, but sequential (not Promise.all) so a single slow field write
+      // never overtakes another for the same issue and there is no lock
+      // contention on issue_field_values under a large batch.
+      for (const fieldId of Object.keys(customFieldValues)) {
+        await upsertIssueFieldValue(issueRow.id, fieldId, customFieldValues[fieldId], req.user.id).catch(() => {});
+      }
+      created.push({ row: rowNum, id: issueRow.id, key: issueRow.key, title: issueRow.title });
+    } catch (e) {
+      failed.push({ row: rowNum, title: title || '(no title)', errors: [e && e.message ? e.message : 'Could not create this ticket'] });
+    }
+  }
+
+  res.json({ ok: true, total: rows.length, created: created, failed: failed });
 }));
 

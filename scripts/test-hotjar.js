@@ -263,7 +263,7 @@ for (const bad of MALFORMED) {
     'prmContent', 'summaryWidgets', 'favIssues', 'notifList', 'globalSearchDrop',
     // Modals carrying data that is not ours
     'modal-issue', 'modal-invite-member', 'modal-worklog', 'modal-confirm',
-    'modal-invite-user', 'modal-reset-pw'
+    'modal-invite-user', 'modal-reset-pw', 'modal-bulk-issue'
   ];
 
   for (const id of MUST_BE_SUPPRESSED) {

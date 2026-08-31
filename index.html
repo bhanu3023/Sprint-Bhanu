@@ -1188,8 +1188,68 @@
         </form>
       </div>
       <div class="modal-footer">
+        <!-- Admin / space admin only (real gate is server-side on
+             POST /api/issues/bulk-import; this hides the button for everyone
+             else purely as UX). Hidden until a Space is picked above, and
+             re-evaluated every time that selection changes, in
+             _onIssueSpaceChange. -->
+        <button type="button" class="btn btn-secondary" id="bulkCreateIssueBtn" onclick="openBulkIssueModal()" hidden style="margin-right:auto">Bulk Create…</button>
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-issue')">Cancel</button>
         <button class="btn btn-primary" id="issueSubmitBtn" type="submit" form="issueForm">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Create Issues (CSV import) Modal -->
+  <div id="modal-bulk-issue" data-hj-suppress class="modal" hidden>
+    <div class="modal-backdrop" onclick="closeBulkIssueModal()"></div>
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-header">
+        <h3>Bulk Create Issues</h3>
+        <button type="button" class="btn-icon modal-close" id="bulkIssueCloseBtn" onclick="closeBulkIssueModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text2);margin:0 0 14px">
+          Creating tickets in <strong id="bulkIssueSpaceName"></strong>. Every row becomes one new ticket in the
+          backlog of this space (no sprint), with status <strong>To Do</strong>.
+        </p>
+        <div id="bulkIssueUploadStep">
+          <div class="bulk-issue-actions">
+            <button type="button" class="btn btn-outline" onclick="downloadBulkSampleCsv()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download Sample CSV
+            </button>
+            <label class="btn btn-primary" for="bulkIssueFile" style="cursor:pointer;margin:0">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              Import CSV…
+            </label>
+            <input type="file" id="bulkIssueFile" accept=".csv,text/csv" style="display:none" onchange="handleBulkIssueFileChange(this)">
+          </div>
+          <p style="font-size:12px;color:var(--text3);margin:10px 0 0">
+            Only <strong>Title</strong> is always required. The sample CSV includes every field this space shows on
+            Create — Type, Priority, Team, Product Type, Combination, and any other custom field this space has
+            added — each matched against this space's own configured options; leave a cell blank to use the
+            default or skip it. For a multi-select field, separate multiple values with a semicolon
+            (<strong>;</strong>). Assignee, Reporter, and any user-type field are matched by email against this
+            space's members; Reporter defaults to you if left blank. Sprint is matched by name against this
+            space's open sprints; leave blank to add straight to the Backlog. Dates use YYYY-MM-DD, or day-first
+            DD-MM-YYYY (e.g. 09-12-2003 = 9 December 2003). Attachments are not supported here — add those after
+            creating the ticket. Max 500 rows per file.
+          </p>
+          <p style="font-size:12px;color:var(--text3);margin:6px 0 0">
+            Editing this CSV in Excel: format the Start Date / Due Date columns as <strong>Text</strong> before
+            typing into them, or Excel may silently rewrite your dates into a different format when you save. If a
+            cell shows <strong>#######</strong>, that's just Excel's column too narrow to display the value — widen
+            the column; the underlying data is unaffected.
+          </p>
+        </div>
+        <div id="bulkIssuePreview" class="bulk-issue-preview" hidden></div>
+        <div id="bulkIssueResult" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="bulkIssueCancelBtn" onclick="closeBulkIssueModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="bulkIssueConfirmBtn" onclick="confirmBulkIssueCreate()" hidden disabled>Create Tickets</button>
+        <button type="button" class="btn btn-primary" id="bulkIssueDoneBtn" onclick="finishBulkIssueImport()" hidden>Done</button>
       </div>
     </div>
   </div>
@@ -1466,6 +1526,7 @@
   <script src="src/client/crud/space.js"></script>
   <script src="src/client/crud/sprint.js"></script>
   <script src="src/client/crud/issue.js"></script>
+  <script src="src/client/crud/bulk-issue.js"></script>
   <script src="src/client/components/worklog-modal.js"></script>
   <script src="src/client/components/notifications.js"></script>
   <script src="src/client/event-bindings.js"></script>

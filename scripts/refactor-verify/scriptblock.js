@@ -21,6 +21,12 @@
  *                   combination-options.js) keep their relative order and still
  *                   precede the managed block, since the managed code depends on
  *                   globals they define.
+ *   7. NEW FILES  — genuinely new post-refactor application files, declared
+ *                   per-target as `newFiles` (never part of the original
+ *                   app.js, so `parts`/`modified:true` do not apply to them):
+ *                   each resolves to exactly one real <script> tag, anywhere
+ *                   in the document -- unlike #6 they may depend on managed
+ *                   globals, so there is no "must precede" requirement.
  */
 const fs = require('fs');
 const path = require('path');
@@ -52,11 +58,20 @@ for (const t of clientTargets) {
 
   const parts = (t.parts || []).slice().sort((x, y) => x.from - y.from);
   const managedSet = new Set(parts.map(p => p.file.replace(/\\/g, '/')));
+  // Genuinely new post-refactor application files -- never part of the
+  // original app.js, so they have no line range to be faithful to and no
+  // "modified:true" declaration makes sense for them. Unlike the pre-block
+  // unmanaged infra (config.js, hotjar.js, the vendored purify.min.js), these
+  // depend on functions defined throughout the managed files, so they belong
+  // to the same rule as "6. UNMANAGED" only loosely -- check 7 below verifies
+  // them separately instead of requiring they precede the block they need.
+  const newFiles = (t.newFiles || []);
+  const newFileSet = new Set(newFiles.map(f => (f.file || f).replace(/\\/g, '/')));
   const managedInDoc = srcs.map(norm).filter(s => managedSet.has(s));
-  const unmanagedInDoc = srcs.map(norm).filter(s => !managedSet.has(s));
+  const unmanagedInDoc = srcs.map(norm).filter(s => !managedSet.has(s) && !newFileSet.has(s));
   const expectedOrder = parts.map(p => p.file.replace(/\\/g, '/'));
 
-  console.log('   tags total=' + srcs.length + '  managed=' + managedInDoc.length + '  unmanaged=' + unmanagedInDoc.length);
+  console.log('   tags total=' + srcs.length + '  managed=' + managedInDoc.length + '  unmanaged=' + unmanagedInDoc.length + (newFileSet.size ? '  new=' + newFileSet.size : ''));
 
   // 1. ORDER
   const orderOk = managedInDoc.length === expectedOrder.length &&
@@ -101,14 +116,36 @@ for (const t of clientTargets) {
   if (dropped.length) { failed = true; console.log('   [5.5] NO DROPS   : FAIL — no <script src> for: ' + dropped.join(', ')); }
   else console.log('   [5.5] NO DROPS   : PASS — every manifest part has a tag');
 
-  // 6. UNMANAGED scripts precede the managed block and keep their order
+  // 6. UNMANAGED (pre-block infra) scripts precede the managed block
   const firstManagedIdx = srcs.map(norm).findIndex(s => managedSet.has(s));
   const unmanagedAfter = firstManagedIdx < 0 ? [] :
-    srcs.map(norm).slice(firstManagedIdx).filter(s => !managedSet.has(s));
+    srcs.map(norm).slice(firstManagedIdx).filter(s => !managedSet.has(s) && !newFileSet.has(s));
   if (unmanagedAfter.length) {
     failed = true;
     console.log('   [5.6] UNMANAGED  : FAIL — these load AFTER managed code starts: ' + unmanagedAfter.join(', '));
   } else console.log('   [5.6] UNMANAGED  : PASS — ' + JSON.stringify(unmanagedInDoc) + ' all precede the managed block');
+
+  // 7. NEW FILES (genuinely new post-refactor code, declared in the manifest)
+  // May load anywhere relative to the managed block -- unlike config.js/
+  // hotjar.js/vendor files they are free to depend on managed globals, so
+  // there is no "before" requirement -- but each must still resolve to
+  // exactly one real <script> tag, same as a managed part.
+  if (newFiles.length) {
+    const newInDoc = srcs.map(norm).filter(s => newFileSet.has(s));
+    const missingNew = newFiles.map(f => (f.file || f).replace(/\\/g, '/')).filter(f => !newInDoc.includes(f));
+    const newSeen = new Map();
+    newInDoc.forEach(s => newSeen.set(s, (newSeen.get(s) || 0) + 1));
+    const newDupes = [...newSeen.entries()].filter(([, c]) => c > 1);
+    const missingOnDisk = newFiles.map(f => (f.file || f).replace(/\\/g, '/')).filter(f => !fs.existsSync(path.join(ROOT, f)));
+    if (missingNew.length || newDupes.length || missingOnDisk.length) {
+      failed = true;
+      if (missingNew.length) console.log('   [5.7] NEW FILES  : FAIL — no <script src> for: ' + missingNew.join(', '));
+      if (newDupes.length) console.log('   [5.7] NEW FILES  : FAIL — duplicate tag(s): ' + newDupes.map(([s, c]) => s + ' x' + c).join(', '));
+      if (missingOnDisk.length) console.log('   [5.7] NEW FILES  : FAIL — missing on disk: ' + missingOnDisk.join(', '));
+    } else {
+      console.log('   [5.7] NEW FILES  : PASS — ' + newFiles.length + ' declared, each present exactly once: ' + JSON.stringify([...newFileSet]));
+    }
+  }
 
   console.log('');
 }

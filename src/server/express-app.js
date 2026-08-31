@@ -95,6 +95,10 @@ const PUBLIC_ROOT_PATHS = new Set([
   '/',                        // static's index option serves index.html, as before
   '/index.html',
   '/login.html',
+  // The page shell has no secrets baked in and needs no session of its own --
+  // same reasoning as index.html/login.html. The data behind it is protected
+  // server-side: /api/admin/description-history requires an org-admin session.
+  '/recover-description.html',
   '/styles.css',
   '/hotjar.js',
   '/combination-options.js'

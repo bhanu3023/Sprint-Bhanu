@@ -4,18 +4,80 @@ const { q } = require('../db');
 const { requireOrgAdmin } = require('../deps');
 const { escapeHtml, sendEmail, sendInviteEmail } = require('../email');
 const { app } = require('../express-app');
+// ── Description recovery ──────────────────────────────────
+// Every description edit is written to issue_history (field_name='description')
+// by PUT /api/issues/:id and never deleted, so the full edit trail survives even
+// when the live issues.description column has since been overwritten with
+// something else (including blank). This is the read-only recovery view for
+// that trail: one row per issue, in the requester's own org only, each with its
+// full sequence of description changes so a wiped or wrong description can be
+// traced back to its last good value and to who/when changed it.
+app.get('/api/admin/description-history', requireAuth, wrap(async (req, res) => {
+  if (!requireOrgAdmin(req.user, res, 'Only an org admin can view description history.')) return;
+  const issues = (await q(
+    `SELECT i.id, i.key, i.title, i.description, s.key AS space_key, s.name AS space_name
+       FROM issues i
+       JOIN spaces s ON s.id = i.space_id
+      WHERE s.org_id = $1 AND i.deleted_at IS NULL
+      ORDER BY s.key, i.key`, [req.user.org_id])).rows;
+  const history = (await q(
+    `SELECT h.issue_id, h.created_at, h.old_value, h.new_value, u.name AS user_name
+       FROM issue_history h
+       JOIN issues i ON i.id = h.issue_id
+       JOIN spaces s ON s.id = i.space_id
+       LEFT JOIN users u ON u.id = h.user_id
+      WHERE s.org_id = $1 AND h.field_name = 'description'
+      ORDER BY h.created_at ASC`, [req.user.org_id])).rows;
+  const byIssue = {};
+  history.forEach(function (h) {
+    (byIssue[h.issue_id] = byIssue[h.issue_id] || []).push({
+      created_at: h.created_at, user_name: h.user_name || 'Unknown',
+      old_value: h.old_value, new_value: h.new_value
+    });
+  });
+  res.json(issues.map(function (i) {
+    return {
+      id: i.id, key: i.key, title: i.title, description: i.description,
+      space_key: i.space_key, space_name: i.space_name,
+      history: byIssue[i.id] || []
+    };
+  }));
+}));
+
 // ── Admin Audit Log ───────────────────────────────────────
+// FIX: was capped at 100 rows total with no date window at all, so "the last
+// week" silently lost anything past the 100 most recent org-wide changes --
+// and was not scoped to the requester's org (LEFT JOIN issues, no spaces join
+// at all), so an admin with more than one organization in the same database
+// could see every other org's history too. Both fixed together: org-scoped
+// via spaces.org_id (INNER JOIN -- a history row that cannot be attributed to
+// an issue/space/org is not this org's history, unlike the recovery tool
+// above which also excludes soft-deleted issues on purpose; an audit log's
+// job is showing what happened, including to since-deleted tickets, so
+// deleted_at is deliberately NOT filtered here), and a real ?days= window
+// (default 7, i.e. "the last week") instead of an arbitrary row count. ?ticket=
+// filters to one issue's key. The row cap is now a safety ceiling (3000),
+// not the everyday limit -- a week of one org's activity should never
+// approach it.
 app.get('/api/admin/audit-log', requireAuth, wrap(async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'owner')
     return res.status(403).json({ error: 'Admins only' });
-  const limit = parseInt(req.query.limit) || 100;
+  const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 365);
+  const limit = Math.min(parseInt(req.query.limit) || 3000, 3000);
+  const ticket = (req.query.ticket || '').trim();
+  const params = [req.user.org_id, days];
+  let ticketClause = '';
+  if (ticket) { params.push('%' + ticket + '%'); ticketClause = `AND i.key ILIKE $${params.length}`; }
+  params.push(limit);
   const r = await q(`SELECT h.*, u.name AS user_name, u.color AS user_color,
       i.key AS issue_key, i.title AS issue_title
     FROM issue_history h
+    JOIN issues i ON i.id=h.issue_id
+    JOIN spaces s ON s.id=i.space_id
     LEFT JOIN users u ON u.id=h.user_id
-    LEFT JOIN issues i ON i.id=h.issue_id
+    WHERE s.org_id=$1 AND h.created_at >= NOW() - make_interval(days => $2) ${ticketClause}
     ORDER BY h.created_at DESC
-    LIMIT $1`, [limit]);
+    LIMIT $${params.length}`, params);
   res.json(r.rows);
 }));
 
