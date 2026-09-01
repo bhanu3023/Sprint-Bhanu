@@ -4822,6 +4822,14 @@ body.light .yw-tab-badge {
 }
 .yw-table-wrap {
   position: relative;
+  /* This table has up to 9 columns (Key, Title, Type, Status, Priority,
+     Space, Product Type, Combination, Reporter/Assignee) and no per-column
+     width caps, so it easily runs wider than the viewport. Without this, the
+     overflow spilled into .views-container's own implicit horizontal scroll
+     -- which also carries the sidebar and topbar along with it -- instead of
+     scrolling just the table. Confining it here keeps the rest of the page
+     fixed while only the table itself pans left/right. */
+  overflow-x: auto;
 }
 .yw-table-toolbar {
   display: flex;
@@ -4853,7 +4861,15 @@ body.light .yw-tab-badge {
   font-size: 13px;
 }
 .yw-table thead th {
-  position: relative;
+  /* sticky (not relative) so the header row stays pinned to the top of
+     .views-container -- the page's actual vertical scroll container -- as
+     the table's rows scroll past underneath it. Still works as the
+     containing block for .yw-filter-panel's absolute positioning below,
+     same as relative did. The opaque background is required for this: a
+     transparent sticky header would let scrolled-past rows show through. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
   text-align: left;
   padding: 8px 14px;
   font-size: 11px;
