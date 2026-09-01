@@ -456,7 +456,11 @@ window._showMbrBugTrend = function (userId, kind) {
     if (ps && ps.count) {
       var key = 'mbr_bugtrend_' + kind + '_' + sp.id + '_' + userId;
       window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' (' + (kind === 'reporter' ? 'Reported' : 'Assigned') + ')', issues: ps.issues };
-      clickAttr = ' onclick="window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
+      // Closes this trend overlay before opening the shared drill popup on
+      // top of it -- otherwise clicking a ticket row in that popup navigates
+      // away (openIssuePage) but only ever closes ITSELF, leaving this trend
+      // overlay still in the DOM and visible over the issue page underneath.
+      clickAttr = ' onclick="var _o=document.getElementById(\'_mbrBugTrendOverlay\');if(_o)_o.remove();window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
     }
     return '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="transparent"' + clickAttr + '><title>' + esc(sp.name) + ': ' + v + ' bug' + (v === 1 ? '' : 's') + '</title></circle>' +
       '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + lineColor + '" stroke="var(--bg)" stroke-width="1.5" style="pointer-events:none"/>' +
@@ -536,7 +540,11 @@ window._showMbrUserTrend = function (userId) {
     if (ps && ps.points) {
       var key = 'mbr_ut_' + sp.id + '_' + userId;
       window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' Spillover', issues: ps.issues.filter(mbrHasPts), points: true };
-      clickAttr = ' onclick="window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
+      // Closes this trend overlay before opening the shared drill popup on
+      // top of it -- otherwise clicking a ticket row in that popup navigates
+      // away (openIssuePage) but only ever closes ITSELF, leaving this trend
+      // overlay still in the DOM and visible over the issue page underneath.
+      clickAttr = ' onclick="var _o=document.getElementById(\'_mbrUserTrendOverlay\');if(_o)_o.remove();window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
     }
     return '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="transparent"' + clickAttr + '><title>' + esc(sp.name) + ': ' + v + ' pts</title></circle>' +
       '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + lineColor + '" stroke="var(--bg)" stroke-width="1.5" style="pointer-events:none"/>' +
