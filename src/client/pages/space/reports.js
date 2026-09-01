@@ -145,11 +145,22 @@ window._showReportIssues = function(key) {
         var ptsBadge = group.points
           ? '<span style="font-size:11px;font-weight:700;color:#0052cc;background:#deebff;border-radius:10px;padding:2px 8px;flex-shrink:0">' + (Number(iss.story_points) || 0) + ' pt' + (Number(iss.story_points) === 1 ? '' : 's') + '</span>'
           : '';
+        // showReporter is additive and off by default — only the combination-
+        // by-upgrader drill-down (which needs "assigned to" AND "raised by"
+        // side by side) turns it on, every other caller of this shared popup
+        // is unaffected.
+        var reporterHtml = '';
+        if (group.showReporter) {
+          var reporter = findUser(iss.reporter_id);
+          var reporterName = (reporter && reporter.name) || iss.reporter_name || 'Unknown';
+          reporterHtml = '<span style="font-size:11px;color:#6b778c;flex-shrink:0;white-space:nowrap">raised by <strong style="color:#172b4d">' + esc(reporterName) + '</strong></span>';
+        }
         return '<div class="_reportDrillRow" data-id="' + iss.id + '" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'\'">' +
           '<span style="flex-shrink:0">' + typeIcon(iss.type) + '</span>' +
           '<span style="font-size:12px;font-weight:700;color:#6b778c;flex-shrink:0;min-width:64px">' + esc(issueKeyStr(iss)) + '</span>' +
           '<span style="flex:1;font-size:13px;color:#172b4d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(iss.title || '') + '</span>' +
           ptsBadge +
+          reporterHtml +
           statusBadge(iss.status) +
           (assignee ? avatarHtml(assignee, 24) : '') +
         '</div>';

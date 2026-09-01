@@ -308,6 +308,60 @@ function renderMBRComparison(c, data) {
   var bugColTruncNote = sprints.length > 8
     ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns — click a user to see their full trend.</p>' : '';
 
+  // ── Bugs by Combination, Upgrader, Sprint-wise — last section on the page,
+  // only rendered when this space actually has a Combination field. Unlike
+  // the Assignee/Reporter tables above, each per-sprint NUMBER is directly
+  // clickable (no intermediate trend-chart hop) since what's wanted here is
+  // the ticket/assignee/reporter list for that exact cell, not a trend line.
+  var bugsByCombination = data.bugs_by_combination;
+  var comboSectionHtml = '';
+  if (Array.isArray(bugsByCombination)) {
+    var comboCols = sprints.slice(Math.max(0, sprints.length - 8));
+    var comboColTruncNote = sprints.length > 8
+      ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns.</p>' : '';
+    var comboHeaderCols = comboCols.map(function (sp) {
+      return '<th title="' + escAttr(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
+    }).join('');
+    function comboCell(combo, safeKey, sp) {
+      var ps = combo.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
+      var count = ps ? ps.count : 0;
+      if (!count) return '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--text3)">0</td>';
+      var key = 'mbr_combo_' + safeKey + '_' + sp.id;
+      window._reportDrillData[key] = { label: combo.combination + ' — ' + sp.name, issues: ps.issues, showReporter: true };
+      return '<td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:#0052cc;cursor:pointer" onclick="event.stopPropagation();window._showReportIssues(\'' + key + '\')" title="Click to see tickets, assignee and reporter">' + count + '</td>';
+    }
+    var comboBodyRows = bugsByCombination.length
+      ? bugsByCombination.map(function (combo) {
+          var safeKey = combo.combination.replace(/[^a-zA-Z0-9_-]/g, '_');
+          var cells = comboCols.map(function (sp) { return comboCell(combo, safeKey, sp); }).join('');
+          var totalKey = 'mbr_combo_total_' + safeKey;
+          var allIssues = combo.per_sprint.reduce(function (acc, p) { return acc.concat(p.issues); }, []);
+          window._reportDrillData[totalKey] = { label: combo.combination + ' — All Sprints', issues: allIssues, showReporter: true };
+          var upgraderHtml = combo.upgrader_name
+            ? esc(combo.upgrader_name)
+            : '<strong style="color:var(--text3)">undefined</strong>';
+          return '<tr style="border-bottom:1px solid var(--border)">' +
+            '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + esc(combo.combination) + '</td>' +
+            '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + upgraderHtml + '</td>' +
+            cells +
+            '<td style="padding:8px 12px;text-align:right;font-weight:700;color:#0052cc;cursor:pointer" onclick="window._showReportIssues(\'' + totalKey + '\')" title="Click to see all tickets for this combination">' + combo.total_count + '</td>' +
+          '</tr>';
+        }).join('')
+      : '<tr><td colspan="' + (comboCols.length + 3) + '" style="padding:16px;color:var(--text3);text-align:center">No bugs raised against any combination across these sprints</td></tr>';
+
+    comboSectionHtml =
+      '<h4 style="margin:24px 0 4px;font-size:13px">Bugs by Combination, Upgrader — Sprint-wise</h4>' +
+      '<p style="font-size:11px;color:var(--text3);margin:0 0 8px">Click any number to see the ticket, who it\'s assigned to, and who raised it.</p>' +
+      comboColTruncNote +
+      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr>' +
+      '<th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Combination</th>' +
+      '<th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Upgrader</th>' +
+      comboHeaderCols +
+      '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th>' +
+      '</tr></thead><tbody>' + comboBodyRows + '</tbody></table></div>';
+  }
+
   c.innerHTML = '<div class="report-chart">' +
     '<h4 style="margin:0 0 4px">Comparison Trends</h4>' +
     '<p style="font-size:12px;color:var(--text3);margin:0 0 20px">Sprint-over-sprint comparisons for this board — completed sprints only. Click any bar to see its tickets.</p>' +
@@ -351,6 +405,7 @@ function renderMBRComparison(c, data) {
     '<h4 style="margin:24px 0 4px;font-size:13px">Bugs Created By, Sprint-wise</h4>' +
     bugColTruncNote +
     bugReporterTableHtml +
+    comboSectionHtml +
     '</div>';
 }
 

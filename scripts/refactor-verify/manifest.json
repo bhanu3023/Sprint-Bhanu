@@ -175,14 +175,14 @@
           "from": 6350,
           "to": 7864,
           "modified": true,
-          "modifiedReason": "In this file: CLASS C (attribute-escaping): esc() escapes & < > but not quotes, so a user- or admin-controlled value containing a double quote closes a quoted HTML attribute early and can inject a new one -- including an event handler. Same defect as the title= filename hole fixed in 7d0c4c4, found in the same audit as the sanitiser. Verified exploitable, not theoretical: a display name of `Bob\" onmouseover=\"...\" x=\"` creates a real onmouseover on the rendered avatar that fires on hover. escAttr() already existed (utils/index.js) -- this pass applies it at the call sites that were missing it. My first count (185 sites) was wrong; the accurate, traced figure was 39 confirmed + 61 needing a human read, and each of the 61 was traced by hand rather than pattern-matched: ids, enums, fixed option arrays, numbers, browser-constrained date/color inputs and a querySelector (non-innerHTML) usage were left alone, and the genuinely user- or admin-controlled ones were fixed alongside the confirmed set. developer-name titles in the spillover/control charts."
+          "modifiedReason": "In this file: CLASS C (attribute-escaping): esc() escapes & < > but not quotes, so a user- or admin-controlled value containing a double quote closes a quoted HTML attribute early and can inject a new one -- including an event handler. Same defect as the title= filename hole fixed in 7d0c4c4, found in the same audit as the sanitiser. Verified exploitable, not theoretical: a display name of `Bob\" onmouseover=\"...\" x=\"` creates a real onmouseover on the rendered avatar that fires on hover. escAttr() already existed (utils/index.js) -- this pass applies it at the call sites that were missing it. My first count (185 sites) was wrong; the accurate, traced figure was 39 confirmed + 61 needing a human read, and each of the 61 was traced by hand rather than pattern-matched: ids, enums, fixed option arrays, numbers, browser-constrained date/color inputs and a querySelector (non-innerHTML) usage were left alone, and the genuinely user- or admin-controlled ones were fixed alongside the confirmed set. developer-name titles in the spillover/control charts. || FEATURE (requested): the shared window._showReportIssues drill-down popup gains an additive group.showReporter flag, off by default for every existing caller. When set, each row also shows 'raised by <name>' next to the assignee avatar -- used by the new MBR Bugs-by-Combination table so a single click surfaces ticket, assignee AND reporter together."
         },
         {
           "file": "src/client/pages/space/mbr.js",
           "from": 7865,
           "to": 8732,
           "modified": true,
-          "modifiedReason": "In this file: CLASS C (attribute-escaping): esc() escapes & < > but not quotes, so a user- or admin-controlled value containing a double quote closes a quoted HTML attribute early and can inject a new one -- including an event handler. Same defect as the title= filename hole fixed in 7d0c4c4, found in the same audit as the sanitiser. Verified exploitable, not theoretical: a display name of `Bob\" onmouseover=\"...\" x=\"` creates a real onmouseover on the rendered avatar that fires on hover. escAttr() already existed (utils/index.js) -- this pass applies it at the call sites that were missing it. My first count (185 sites) was wrong; the accurate, traced figure was 39 confirmed + 61 needing a human read, and each of the 61 was traced by hand rather than pattern-matched: ids, enums, fixed option arrays, numbers, browser-constrained date/color inputs and a querySelector (non-innerHTML) usage were left alone, and the genuinely user- or admin-controlled ones were fixed alongside the confirmed set. sprint/category/assignee-name titles across the MBR charts."
+          "modifiedReason": "In this file: CLASS C (attribute-escaping): esc() escapes & < > but not quotes, so a user- or admin-controlled value containing a double quote closes a quoted HTML attribute early and can inject a new one -- including an event handler. Same defect as the title= filename hole fixed in 7d0c4c4, found in the same audit as the sanitiser. Verified exploitable, not theoretical: a display name of `Bob\" onmouseover=\"...\" x=\"` creates a real onmouseover on the rendered avatar that fires on hover. escAttr() already existed (utils/index.js) -- this pass applies it at the call sites that were missing it. My first count (185 sites) was wrong; the accurate, traced figure was 39 confirmed + 61 needing a human read, and each of the 61 was traced by hand rather than pattern-matched: ids, enums, fixed option arrays, numbers, browser-constrained date/color inputs and a querySelector (non-innerHTML) usage were left alone, and the genuinely user- or admin-controlled ones were fixed alongside the confirmed set. sprint/category/assignee-name titles across the MBR charts. || FEATURE (requested): new 'Bugs by Combination, Upgrader — Sprint-wise' table at the end of the Comparison Trends sub-tab, rendered only when GET /api/reports/mbr/:spaceId returns bugs_by_combination (i.e. the space has a Combination field configured). Columns are Combination, Upgrader (name, or 'undefined' in muted text when no Upgrader is assigned), one column per sprint (last 8, same truncation convention as the Assignee/Reporter tables above it), then Total. Unlike those two tables, each per-sprint NUMBER is directly clickable (no intermediate trend-chart hop) since the request was to see the ticket/assignee/reporter for that exact cell, not a trend line -- populates window._reportDrillData per cell/per-combination-total and opens the shared _showReportIssues popup with the new showReporter flag on (see reports.js's own modifiedReason)."
         },
         {
           "file": "src/client/pages/space/all-work.js",
@@ -629,7 +629,9 @@
             ]
           ],
           "gluePrefix": "const { requireAuth } = require('../auth');\r\nconst { uid, wrap } = require('../core');\r\nconst { q } = require('../db');\r\nconst { denyUnlessCanAct, getConfiguredOptions, isOrgAdmin, requireOrgAdmin } = require('../deps');\r\nconst { app } = require('../express-app');\r\n",
-          "glueSuffix": ""
+          "glueSuffix": "",
+          "modified": true,
+          "modifiedReason": "FEATURE (requested): new \"Bugs by Combination, Upgrader\" breakdown on GET /api/reports/mbr/:spaceId, only populated when the space actually has a Combination field configured (same field_key='combination' / name='combination' detection custom-fields.js uses). Joins the existing bugRows against issue_field_values for that field to get each bug's combination value, and against combination_upgraders for the assigned upgrader per combination -- mirroring the existing buildBugBreakdown() per-sprint shape but keyed by combination string instead of a user id. A bug with no combination value set is grouped under 'No Combination' rather than dropped, and a bug whose value names more than one combination (the field is stored as multi_select even though the picker only ever offers one at a time) is counted once per combination named, not collapsed into a single bucket. Each grouped issue is enriched with resolved assignee_name/reporter_name so the client's direct per-cell drill-down needs no further lookups. Response gains bugs_by_combination (null when the space has no Combination field)."
         },
         {
           "file": "src/server/routes/notifications.js",
@@ -822,7 +824,7 @@
     "src/server/routes/attachments.js": "8dc008ee20462f448ea885a2ee6df87117d2649928d9140044f26cf7cab114b4",
     "src/server/routes/custom-fields.js": "97355fe8fc4c5d97f324ef59436b83e21ef261c4cfe2af25e4d8e544582309f8",
     "src/server/routes/filters.js": "6e2304ce1be931edd46c89cfbcddf86f86ecc9a669419e2c8d94427f6e086598",
-    "src/server/routes/reports.js": "cf1fa331eeb8b3774171a77b8e6930f22319eb9ea542ae71b614c16f08839544",
+    "src/server/routes/reports.js": "92a8d373e989a12cf908119f8b6738019549db6b823e69b15fca094a0d343a6d",
     "src/server/routes/notifications.js": "ce488a24d1094c63ce62e452563334214f149243c4fbb0423f39fc142839ab33",
     "src/server/routes/oauth.js": "5734ab387c5e045321dd925deeaa016a72be1de56ed853e45cd5927ea3c3ddea",
     "src/server/routes/users.js": "6511060ee73683cab801e6b6535987e491cd4ee89a1d7c97f7bfff50aff56535",
@@ -861,8 +863,8 @@
     "src/client/pages/space/backlog.js": "b8b309d446277e38324feb1876ec634bbf69a0e4b6f5ad472a28ad7979c6fdbd",
     "src/client/pages/space/board.js": "d31805f0fd5ad00ee6d126444583ff2415ebd0091360a51f78eb5a7cc12226f1",
     "src/client/pages/space/calendar.js": "beac6f46d01e8bb1abbaa557740f033c88acc8743e6b9af30cb6e2f05a285ae8",
-    "src/client/pages/space/reports.js": "9549dade056b10ef5715b1d15b319a8308444b101e5fdb6e03644403b57558a3",
-    "src/client/pages/space/mbr.js": "5835f3e049f9e75d68c1a83e62bda626cf8be704b44a99bb1cabc5557aff30e5",
+    "src/client/pages/space/reports.js": "e5f01920c7319faed954104056cfbcaca2add459083f295ba87d6b298c9cf628",
+    "src/client/pages/space/mbr.js": "b89865495b639996705806fb5ab264179434041c9a95ab95adc4e8b8ec585229",
     "src/client/pages/space/all-work.js": "0108fc4798ed4a530ecde39862e6156a4fe84822733f5ac6ce15e62385c64213",
     "src/client/pages/space/settings.js": "67a7384dcd3ce8e784520a51097cdb99541d33ffa7bf7d15e3c64ae100ec55b8",
     "src/client/components/space-context-menu.js": "93b0b3736930ca6b68252042dc012e479bc1e56e2f31d9e53b16e24f5fce7f25",

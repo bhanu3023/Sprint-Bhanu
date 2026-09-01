@@ -510,6 +510,36 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     `, [completedIds])).rows;
   }
 
+  // Bugs by Combination, sprint-wise — only when this space actually has a
+  // Combination field configured (same detection custom-fields.js uses:
+  // field_key='combination', or a plain field literally named that for
+  // spaces that predate the built-in field_key). A bug's combination value
+  // lives in issue_field_values, not a column on issues itself, and a bug
+  // with no value set (or the field missing entirely) is grouped under
+  // "No Combination" rather than dropped, so the sprint's full bug count
+  // still reconciles against the Bug Summary total above.
+  const combinationField = (await q(
+    `SELECT id, options FROM custom_fields WHERE space_id=$1 AND (field_key='combination' OR LOWER(name)='combination') LIMIT 1`,
+    [spaceId]
+  )).rows[0];
+  let bugCombinationByIssueId = {};
+  let upgraderByCombination = {};
+  if (combinationField && bugRows.length) {
+    const valueRows = (await q(
+      `SELECT issue_id, value FROM issue_field_values WHERE field_id=$1 AND issue_id = ANY($2::varchar[])`,
+      [combinationField.id, bugRows.map(r => r.id)]
+    )).rows;
+    valueRows.forEach(r => { bugCombinationByIssueId[r.issue_id] = r.value; });
+
+    const upgraderRows = (await q(
+      `SELECT cu.combination, cu.user_id, u.name AS user_name, u.email AS user_email
+       FROM combination_upgraders cu LEFT JOIN users u ON u.id = cu.user_id
+       WHERE cu.field_id=$1`,
+      [combinationField.id]
+    )).rows;
+    upgraderRows.forEach(r => { upgraderByCombination[r.combination] = r; });
+  }
+
   const doneBySprintId = {};
   doneRows.forEach(r => { (doneBySprintId[r.sprint_id] = doneBySprintId[r.sprint_id] || []).push(r); });
   const spilloverBySprintId = {};
@@ -606,7 +636,11 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   // who assigned/reported a bug can show up here (not scoped to a sprint's
   // Developer/QA lists like spillover is, since a bug's assignee or reporter
   // can genuinely be anyone).
-  const bugUserIds = [...new Set(bugRows.flatMap(r => [r.assignee_id, r.reporter_id]).filter(Boolean))];
+  const bugUserIds = [...new Set(
+    bugRows.flatMap(r => [r.assignee_id, r.reporter_id])
+      .concat(Object.values(upgraderByCombination).map(u => u.user_id))
+      .filter(Boolean)
+  )];
   const bugUserMap = {};
   if (bugUserIds.length) {
     const users = (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [bugUserIds])).rows;
@@ -643,6 +677,46 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     closed_bugs: bugRows.filter(r => r.status === 'Done').length
   };
 
+  // Bugs by Combination, Upgrader, sprint-wise — mirrors buildBugBreakdown's
+  // per-sprint shape but keyed by combination string instead of a user id,
+  // with each grouped issue enriched with resolved assignee/reporter names
+  // so the client's per-sprint drill-down (ticket, assigned to, raised by)
+  // needs no further lookups. A bug is filed under every combination it
+  // names — the field is stored as a multi_select, even though the picker
+  // UI only ever offers one at a time — so a comma-joined value counts once
+  // per combination rather than being silently collapsed into one bucket.
+  let bugsByCombination = null;
+  if (combinationField) {
+    const grouped = {};
+    bugRows.forEach(r => {
+      const raw = bugCombinationByIssueId[r.id];
+      const combos = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const keys = combos.length ? combos : ['No Combination'];
+      const enriched = {
+        ...r,
+        assignee_name: (bugUserMap[r.assignee_id] && bugUserMap[r.assignee_id].name) || null,
+        reporter_name: (bugUserMap[r.reporter_id] && bugUserMap[r.reporter_id].name) || null
+      };
+      keys.forEach(combo => {
+        const g = (grouped[combo] = grouped[combo] || { per_sprint: {} });
+        const ps = (g.per_sprint[r.sprint_id] = g.per_sprint[r.sprint_id] || { sprint_id: r.sprint_id, sprint_name: sprintNameById[r.sprint_id] || '', count: 0, issues: [] });
+        ps.count += 1;
+        ps.issues.push(enriched);
+      });
+    });
+    bugsByCombination = Object.keys(grouped).map(combo => {
+      const perSprintArr = Object.values(grouped[combo].per_sprint);
+      const upgrader = upgraderByCombination[combo];
+      return {
+        combination: combo,
+        upgrader_name: (upgrader && upgrader.user_name) || null,
+        upgrader_email: (upgrader && upgrader.user_email) || null,
+        total_count: perSprintArr.reduce((s, p) => s + p.count, 0),
+        per_sprint: perSprintArr
+      };
+    }).sort((a, b) => b.total_count - a.total_count);
+  }
+
   res.json({
     sprints: allSprintRows,
     completed_sprints: completedSprintRows,
@@ -650,7 +724,8 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     spillover_by_user: spilloverByUser,
     bug_summary: bugSummaryOverall,
     bugs_by_assignee: bugsByAssignee,
-    bugs_by_reporter: bugsByReporter
+    bugs_by_reporter: bugsByReporter,
+    bugs_by_combination: bugsByCombination
   });
 }));
 
