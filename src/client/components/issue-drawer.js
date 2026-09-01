@@ -964,6 +964,21 @@ function bindDrawerEdits(issue) {
   })();
   var drawerDescSaveBtn = $('drawerDescSave');
   var drawerDescCancelBtn = $('drawerDescCancel');
+  // Clicking Save/Cancel while the description is still focused fires a
+  // mousedown -> blur -> mouseup -> click sequence, and that blur is what
+  // makes the toolbar above collapse (display:none) via the delegated
+  // focusin/focusout handler in admin-settings.js -- a real reflow that
+  // shifts everything below the editor upward WHILE the click is still in
+  // flight. If the mouseup lands after that shift, it can miss the button
+  // entirely: nothing happens, no error, the edited text is still sitting
+  // there unsaved, and the toolbar is just gone -- reported live as "first
+  // click does nothing, second click saves." preventDefault() on mousedown
+  // stops the browser's default focus-change action, so the description
+  // never blurs mid-click and the layout never moves under the cursor -- the
+  // exact technique this file already uses for the toolbar buttons and the
+  // mention-autocomplete list, applied here too.
+  if (drawerDescSaveBtn) drawerDescSaveBtn.onmousedown = function (e) { e.preventDefault(); };
+  if (drawerDescCancelBtn) drawerDescCancelBtn.onmousedown = function (e) { e.preventDefault(); };
   if(drawerDescSaveBtn) drawerDescSaveBtn.onclick = async function(e) {
     e.preventDefault(); e.stopPropagation();
     var descEl = $('drawerDesc');
@@ -997,6 +1012,11 @@ function bindDrawerEdits(issue) {
       _drawerDescOriginal = descEl.innerHTML;
       window._drawerDescOriginalHtml = _drawerDescOriginal;
       var b = $('drawerDescBtns'); if(b) b.style.display='none';
+      // The mousedown guard above keeps descEl focused (and its toolbar
+      // visible) all the way through the click, on purpose -- so the "editing
+      // is done" visual (border and toolbar gone) has to be triggered
+      // explicitly now, instead of happening for free via blur.
+      descEl.blur();
     } finally {
       drawerDescSaveBtn.disabled = false;
       drawerDescSaveBtn.textContent = 'Save';
@@ -1008,6 +1028,7 @@ function bindDrawerEdits(issue) {
     $('drawerDesc').innerHTML = _drawerDescOriginal;
     window._drawerDescOriginalHtml = _drawerDescOriginal;
     var b = $('drawerDescBtns'); if(b) b.style.display='none';
+    $('drawerDesc').blur();
   };
   $('drawerDesc').oninput = function () {
     updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
@@ -1022,6 +1043,9 @@ function bindDrawerEdits(issue) {
   };
   var fixSaveBtn = $('drawerFixDescSave');
   var fixCancelBtn = $('drawerFixDescCancel');
+  // Same fix as drawerDescSave/Cancel above, same reason.
+  if (fixSaveBtn) fixSaveBtn.onmousedown = function (e) { e.preventDefault(); };
+  if (fixCancelBtn) fixCancelBtn.onmousedown = function (e) { e.preventDefault(); };
   if(fixSaveBtn) fixSaveBtn.onclick = async function(e) {
     e.preventDefault(); e.stopPropagation();
     var fixEl = $('drawerFixDesc');
@@ -1034,6 +1058,7 @@ function bindDrawerEdits(issue) {
       _drawerFixDescOriginal = fixEl.innerHTML;
       window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
       var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
+      fixEl.blur();
     } finally {
       fixSaveBtn.disabled = false;
       fixSaveBtn.textContent = 'Save';
@@ -1045,6 +1070,7 @@ function bindDrawerEdits(issue) {
     $('drawerFixDesc').innerHTML = _drawerFixDescOriginal;
     window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
     var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
+    $('drawerFixDesc').blur();
   };
   $('drawerFixDesc').oninput = function () {
     updateDrawerDescEditorState('drawerFixDesc', _drawerFixDescOriginal);

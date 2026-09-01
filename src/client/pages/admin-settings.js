@@ -1418,28 +1418,17 @@ window._copyIssueUrl = function() {
 };
 
 
-// Show/hide description toolbars on focus
-(function() {
-  function initDescToolbars() {
-    var fields = [
-      { field: 'drawerDesc', toolbar: 'drawerDescToolbar' },
-      { field: 'drawerFixDesc', toolbar: 'drawerFixDescToolbar' }
-    ];
-    fields.forEach(function(item) {
-      var el = document.getElementById(item.field); if(!el) return;
-      var tb = document.getElementById(item.toolbar);
-      el._tbInit = true;
-      if(tb) tb.classList.remove('active');
-      el.addEventListener('focus', function() { if(tb) tb.classList.add('active'); }); el.addEventListener('blur', function() { setTimeout(function(){ if(tb) tb.classList.remove('active'); }, 200); });
-    });
-  }
-  var origOpen = window.openDrawer;
-  window.openDrawer = function(id) {
-    origOpen && origOpen(id);
-    setTimeout(initDescToolbars, 500);
-  };
-  document.addEventListener('DOMContentLoaded', function() { setTimeout(initDescToolbars, 500); });
-})();
+// Toolbar show/hide on focus is handled by the delegated focusin/focusout
+// listeners below (_jiraEditorPairs) -- this used to be a SECOND, separate
+// implementation of the exact same thing, wrapping window.openDrawer and
+// re-running on every drawer open. It bound a fresh focus/blur listener pair
+// directly onto #drawerDesc/#drawerFixDesc EVERY time (el._tbInit was set but
+// never actually checked before adding another pair), so listeners piled up
+// unboundedly for the life of the session -- open 20 tickets, get 20 pairs of
+// listeners all firing on every focus/blur of the same two persistent
+// elements. Removed rather than fixed: the delegated version already covers
+// these same two fields (plus the comment box, which this one didn't), is
+// bound once, and never accumulates.
 // Auto-linkify URLs
 (function(){
   // Only bare URLs sitting in plain text become links. Deliberately DOM-based:
