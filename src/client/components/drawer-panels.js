@@ -1337,9 +1337,12 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
   // Set by ensureCombinationUpgradersLoaded right before this picker is built
   // (Create Issue: renderIssueProductTypeSets; drawer: renderDrawerProductTypeSets)
   // -- both call sites share this same rendering code, so showing the
-  // Upgrader here covers both surfaces at once. Silently shows nothing for a
-  // combination with none assigned, rather than a "No upgrader" label on
-  // every one of a space's 70+ rows.
+  // Upgrader here covers both surfaces at once. Shown only for a CHECKED
+  // combination, not every row in the list -- with 70+ combinations under one
+  // product type, showing it everywhere buried the one that actually
+  // matters. "undefined" (not blank) when the checked combination has no
+  // Upgrader assigned, so a missing assignment reads as a real, visible gap
+  // rather than nothing having rendered at all.
   var upgraders = (meta && meta.__upgradersByCombo) || {};
   var html = '';
   comboTypes.forEach(function (type) {
@@ -1351,10 +1354,15 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
       '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
-      var upgrader = upgraders[c];
-      var upgraderHtml = (upgrader && upgrader.user_name)
-        ? '<span class="pt-combo-upgrader"> — Upgrader: ' + esc(upgrader.user_name) + '</span>'
-        : '';
+      var upgraderHtml = '';
+      if (checked) {
+        var upgrader = upgraders[c];
+        // The email's local part (before "@"), not the display name -- e.g.
+        // "abhinav.surattu" for abhinav.surattu@cloudfuze.com, whatever the
+        // actual domain happens to be.
+        var upgraderId = (upgrader && upgrader.user_email) ? upgrader.user_email.split('@')[0] : 'undefined';
+        upgraderHtml = '<span class="pt-combo-upgrader">Upgrader: <strong>' + esc(upgraderId) + '</strong></span>';
+      }
       // title carries the full value — labels are single-line with an ellipsis.
       return '<label class="pt-combo-check" title="' + escAttr(c) + '">' +
         '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + escAttr(c) + '"' + (checked ? ' checked' : '') + '>' +
@@ -1434,6 +1442,14 @@ function bindProductTypeComboPicker(container, meta, config) {
       });
       sel.combinations = merged;
     }
+    // Re-render so the checked combination's Upgrader badge appears/disappears
+    // immediately (buildCombinationCheckboxListHtml only shows it for a
+    // checked row) -- toggling a combination checkbox used to update `sel`
+    // and rely on the browser's own native checked state for everything
+    // visual, which was enough before the badge existed but left it always
+    // one click stale otherwise. Matches the same refresh readTypeCheckboxes
+    // already does above.
+    refreshComboList();
     notify();
   }
 

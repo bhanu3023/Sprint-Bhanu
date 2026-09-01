@@ -1522,7 +1522,21 @@ body.light .board-col {
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
 }
-.cu-row:last-child {
+/* When the trailing .cu-row-error actually has something to show, the
+   border moves down to sit under IT instead of between the row and its own
+   error message -- avoids a double border stacked right on top of the
+   error text. */
+.cu-row:has(+ .cu-row-error:not([hidden])) {
+  border-bottom: none;
+}
+.cu-row-error {
+  font-size: 12px;
+  color: var(--red, #dc2626);
+  line-height: 1.4;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.cu-row-error:last-child {
   border-bottom: none;
 }
 .cu-combo-label {
@@ -3819,14 +3833,21 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
   color: var(--accent);
   font-weight: 600;
 }
+/* Only ever rendered on a CHECKED combination's row (see
+   buildCombinationCheckboxListHtml), so this reads as the one highlighted
+   piece of information for whichever combination is actually selected --
+   full-strength accent color, not dimmed, with the name itself in <strong>.
+   display:block puts it on its own line below the combination name instead
+   of running inline beside it, which crowded the row and could wrap
+   mid-sentence for a long combination value. */
 .pt-combo-upgrader {
-  color: var(--text3);
-  font-weight: 400;
-  font-size: 0.92em;
-}
-.pt-combo-check:has(input:checked) .pt-combo-upgrader {
+  display: block;
   color: var(--accent);
-  opacity: .75;
+  font-size: 0.85em;
+  margin-top: 2px;
+}
+.pt-combo-upgrader strong {
+  font-weight: 700;
 }
 .pt-type-list .pt-combo-check-label {
   white-space: nowrap;

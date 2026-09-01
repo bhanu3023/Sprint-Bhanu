@@ -201,10 +201,13 @@ app.get('/api/custom-fields/:id/upgraders', requireAuth, wrap(async (req, res) =
 
 // PUT is site_admin tier (custom_field.manage) — same gate as editing the
 // Combination field's options themselves. Body: { combination, email } —
-// email blank/omitted clears the assignment. The target must be an ACTIVE
-// member of THIS field's space: "select from the space, or type their
-// email" both resolve against the same member list, so a typo or someone
-// outside the space fails clearly instead of silently assigning a stranger.
+// email blank/omitted clears the assignment. The target only has to be an
+// ACTIVE user in the SAME ORGANIZATION as this field's space, not a member of
+// this specific space -- an Upgrader is very often a specialist who handles
+// a given combination without being formally added to every space that has
+// one, and this org's own users routinely live in several different spaces
+// already. Anyone outside the organization entirely (or a typo matching no
+// real account) still fails clearly.
 app.put('/api/custom-fields/:id/upgraders', requireAuth, wrap(async (req, res) => {
   const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
   if (!field) return res.status(404).json({ error: 'Field not found' });
@@ -228,11 +231,14 @@ app.put('/api/custom-fields/:id/upgraders', requireAuth, wrap(async (req, res) =
   }
 
   const member = (await q(
-    `SELECT u.id, u.name, u.email FROM space_members sm JOIN users u ON u.id=sm.user_id
-     WHERE sm.space_id=$1 AND u.is_active=true AND LOWER(u.email)=LOWER($2)`,
+    `SELECT u.id, u.name, u.email FROM users u
+     JOIN spaces sp ON sp.org_id = u.org_id
+     WHERE sp.id=$1 AND u.is_active=true AND LOWER(u.email)=LOWER($2)`,
     [field.space_id, emailRaw]
   )).rows[0];
-  if (!member) return res.status(400).json({ error: '"' + emailRaw + '" is not an active member of this space' });
+  if (!member) {
+    return res.status(400).json({ error: '"' + emailRaw + '" is not an active user in this organization' });
+  }
 
   await q(
     `INSERT INTO combination_upgraders(id, field_id, combination, user_id, updated_at, updated_by)
