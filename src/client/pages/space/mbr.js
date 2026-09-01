@@ -182,19 +182,44 @@ function renderMBROverview(c, data) {
     '</div>';
 }
 
+// How many completed sprints Comparison Trends compares, editable via its own
+// selector at the top of the tab (Overview has an equivalent _mbrSprintWindow,
+// kept separate so switching one tab's window doesn't reset the other's).
+// 'all' shows everything.
+var _mbrComparisonSprintWindow = '5';
+window._setMbrComparisonSprintWindow = function (val) {
+  _mbrComparisonSprintWindow = val;
+  if (_mbrData) renderMBRComparison($('mbrTabContent'), _mbrData);
+};
+
 // Comparison Trends is scoped to CLOSED sprints only — an in-flight sprint
 // hasn't spilled anything yet, so it has no place in a spillover/committed
 // comparison (the Overview tab is where its live progress shows instead).
 function renderMBRComparison(c, data) {
-  var sprints = (data && data.completed_sprints) || [];
+  var allSprints = (data && data.completed_sprints) || [];
   var prevLast = (data && data.previous_vs_last) || { previous: null, last: null };
   var byUser = (data && data.spillover_by_user) || [];
 
-  if (!sprints.length) {
+  if (!allSprints.length) {
     c.innerHTML = '<div class="report-chart"><h4 style="margin:0 0 4px">Comparison Trends</h4>' +
       '<p class="placeholder-text">No completed sprints yet. Complete a sprint to see comparisons here.</p></div>';
     return;
   }
+
+  // How many completed sprints to compare, same selector pattern as the
+  // Overview tab's _mbrSprintWindow -- a separate variable because the two
+  // tabs are independently switchable and shouldn't reset each other's
+  // choice. previous_vs_last is deliberately NOT affected by this window: it
+  // is always the two most recent completed sprints, server-computed,
+  // regardless of how many sprints this tab is currently showing.
+  var sprints = _mbrComparisonSprintWindow === 'all' ? allSprints : allSprints.slice(Math.max(0, allSprints.length - Number(_mbrComparisonSprintWindow)));
+  var comparisonWindowLabel = _mbrComparisonSprintWindow === 'all' ? 'All Sprints' : 'Last ' + _mbrComparisonSprintWindow + ' Sprints';
+  var comparisonWindowSelectorHtml = '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:16px">' +
+    '<label style="font-size:12px;color:var(--text2)">Show:</label>' +
+    '<select class="input input-sm" onchange="window._setMbrComparisonSprintWindow(this.value)">' +
+    ['5', '10', '15', 'all'].map(function (v) {
+      return '<option value="' + v + '"' + (v === _mbrComparisonSprintWindow ? ' selected' : '') + '>' + (v === 'all' ? 'All sprints' : 'Last ' + v + ' sprints') + '</option>';
+    }).join('') + '</select></div>';
 
   function drill(key, label, issues) {
     window._reportDrillData[key] = { label: label, issues: (issues || []).filter(mbrHasPts), points: true };
@@ -246,7 +271,10 @@ function renderMBRComparison(c, data) {
   // they had no spillover), capped to the last 8 sprints as columns so it
   // stays readable. Click a row to see that user's full sprint-wise trend
   // as a chart, covering every completed sprint, not just the visible ones.
-  window._mbrUserTrendStore = { sprints: sprints, byUser: byUser };
+  // Fed with allSprints (not the windowed `sprints`), matching this popup's
+  // own documented contract just below -- it "covers every completed sprint"
+  // regardless of how many the table above is currently showing.
+  window._mbrUserTrendStore = { sprints: allSprints, byUser: byUser };
   var sprintCols = sprints.slice(Math.max(0, sprints.length - 8));
   var userTruncNote = sprints.length > 8
     ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns — click a user to see their full trend.</p>' : '';
@@ -269,7 +297,9 @@ function renderMBRComparison(c, data) {
   var bugSummary = data.bug_summary || { total_bugs: 0, open_bugs: 0, closed_bugs: 0 };
   var bugsByAssignee = data.bugs_by_assignee || [];
   var bugsByReporter = data.bugs_by_reporter || [];
-  window._mbrBugTrendStore = { sprints: sprints, byAssignee: bugsByAssignee, byReporter: bugsByReporter };
+  // Same reasoning as _mbrUserTrendStore above -- fed with allSprints so its
+  // popup still covers every completed sprint regardless of this tab's window.
+  window._mbrBugTrendStore = { sprints: allSprints, byAssignee: bugsByAssignee, byReporter: bugsByReporter };
 
   var bugChartHtml = mbrBarChart(sprints.map(function (sp) {
     var v = sp.bug_count || 0;
@@ -364,7 +394,8 @@ function renderMBRComparison(c, data) {
 
   c.innerHTML = '<div class="report-chart">' +
     '<h4 style="margin:0 0 4px">Comparison Trends</h4>' +
-    '<p style="font-size:12px;color:var(--text3);margin:0 0 20px">Sprint-over-sprint comparisons for this board — completed sprints only. Click any bar to see its tickets.</p>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 4px">Sprint-over-sprint comparisons for this board — showing ' + esc(comparisonWindowLabel) + ' (completed only). Click any bar to see its tickets.</p>' +
+    comparisonWindowSelectorHtml +
 
     '<h4 style="margin:0 0 8px;font-size:13px">Story Points — Committed vs Completed</h4>' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
