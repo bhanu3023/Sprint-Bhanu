@@ -3,6 +3,7 @@ const { uid, wrap } = require('../core');
 const { q } = require('../db');
 const { UPDATE_WHITELIST, buildDynamicUpdate, canRemoveSpaceMember, denyUnlessCanAct, getSpaceMemberRecord, isOrgAdmin, pickAllowed, requireOrgAdmin, seedBuiltinIssueFields, validateSpaceRoleAssignment } = require('../deps');
 const { app } = require('../express-app');
+const { createNotif } = require('../notify');
 // ── Spaces ────────────────────────────────────────────────
 app.get('/api/spaces', requireAuth, wrap(async (req, res) => {
   const userId = req.user.user_id || req.user.id;
@@ -66,6 +67,18 @@ app.post('/api/spaces', requireAuth, wrap(async (req, res) => {
   } catch (e) {
     console.error('[spaces] Built-in field seed failed:', e.message);
   }
+  // Org admins keep visibility over their whole org even when they didn't
+  // create this space themselves -- notifies every OTHER active owner/admin
+  // in the org, never the creator.
+  const otherAdmins = (await q(
+    `SELECT id FROM users WHERE org_id=$1 AND role IN ('owner','admin') AND is_active=true AND id<>$2`,
+    [req.user.org_id, req.user.id]
+  )).rows;
+  otherAdmins.forEach(function (a) {
+    createNotif({ user_id: a.id, space_id: id, type: 'space_created',
+      title: req.user.name + ' created a new space: ' + name,
+      body: 'Key: ' + key, link: '/space/' + encodeURIComponent(key) });
+  });
   res.status(201).json(r.rows[0]);
 }));
 
@@ -187,6 +200,20 @@ app.post('/api/space-members', requireAuth, wrap(async (req, res) => {
   if (!validated.ok) return res.status(403).json({ error: validated.error });
   const r = await q('INSERT INTO space_members(id,space_id,user_id,role) VALUES($1,$2,$3,$4) RETURNING *',
     [uid(), space_id, user_id, validated.role]);
+  // Group-involvement notice: the added member finds out they now have
+  // access, the same way an assignee finds out about a ticket. Skipped when
+  // the actor added themselves (e.g. an org admin's own space.create flow
+  // above already inserts the owner directly, not through this route, but a
+  // self-add here is guarded the same way self-assignment is everywhere else).
+  if (user_id !== req.user.id) {
+    const space = (await q('SELECT name, key FROM spaces WHERE id=$1', [space_id])).rows[0];
+    if (space) {
+      createNotif({ user_id, space_id, type: 'space_member_added',
+        title: 'You were added to ' + space.name,
+        body: req.user.name + ' added you as a ' + validated.role.replace('_', ' ') + '.',
+        link: '/space/' + encodeURIComponent(space.key) });
+    }
+  }
   res.status(201).json(r.rows[0]);
 }));
 
@@ -198,6 +225,19 @@ app.put('/api/space-members/:id', requireAuth, wrap(async (req, res) => {
   const validated = await validateSpaceRoleAssignment(q, req.user, rec.space_id, req.body.role, rec.role);
   if (!validated.ok) return res.status(403).json({ error: validated.error });
   const r = await q('UPDATE space_members SET role=$1 WHERE id=$2 RETURNING *', [validated.role, req.params.id]);
+  // Notify the target when someone ELSE changes their role -- a role change
+  // is normally another admin's action against a different member's row (the
+  // rec.role/current-role check above already stops a space admin demoting a
+  // peer), but the actor-guard is kept anyway for defense in depth.
+  if (rec.role !== validated.role && rec.user_id !== req.user.id) {
+    const space = (await q('SELECT name, key FROM spaces WHERE id=$1', [rec.space_id])).rows[0];
+    if (space) {
+      createNotif({ user_id: rec.user_id, space_id: rec.space_id, type: 'space_role_changed',
+        title: 'Your role in ' + space.name + ' was changed to ' + validated.role.replace('_', ' '),
+        body: 'Changed by ' + req.user.name + '.',
+        link: '/space/' + encodeURIComponent(space.key) });
+    }
+  }
   res.json(r.rows[0]);
 }));
 
