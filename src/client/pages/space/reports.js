@@ -129,12 +129,18 @@ window._showReportIssues = function(key) {
   var existing = document.getElementById('_reportDrillOverlay');
   if (existing) existing.remove();
 
-  // Point-based groups (Story Points Completed/Remaining/Total) show each
-  // issue's own point value so the list visibly adds up to the tile's number,
-  // instead of mixing in 0/unpointed issues that inflate the list without
-  // affecting the sum.
-  var rows = group.issues.length
-    ? group.issues.map(function(iss) {
+  // Point-based groups (Story Points Completed/Remaining/Total, Team Workload's
+  // Assigned/Completed/Remaining) show each issue's own point value so the
+  // list visibly adds up to the tile's number, instead of mixing in 0/unpointed
+  // issues that inflate the list without affecting the sum. Sorted highest
+  // points first for the same reason -- the biggest contributors to that
+  // number should be the first thing you see, not wherever they happened to
+  // sit in the underlying issue list.
+  var groupIssues = group.points
+    ? group.issues.slice().sort(function(a, b) { return (Number(b.story_points) || 0) - (Number(a.story_points) || 0); })
+    : group.issues;
+  var rows = groupIssues.length
+    ? groupIssues.map(function(iss) {
         var assignee = findUser(iss.assignee_id);
         var ptsBadge = group.points
           ? '<span style="font-size:11px;font-weight:700;color:#0052cc;background:#deebff;border-radius:10px;padding:2px 8px;flex-shrink:0">' + (Number(iss.story_points) || 0) + ' pt' + (Number(iss.story_points) === 1 ? '' : 's') + '</span>'

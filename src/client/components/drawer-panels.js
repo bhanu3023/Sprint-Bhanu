@@ -379,7 +379,12 @@ function _renderActivityTab(tab, issue) {
         // design — see _saveComment) rather than the [img:name|url] markup the
         // bracket branch below handles. Without this, those images would never
         // get a token at all, on any render, ever.
-        return augmentFileUrlsInHtml(safe);
+        // A comment saved before mention chips were preserved as real markup
+        // (or one with a stray trailing <br>) can carry a PLAIN "@Name" string
+        // alongside an HTML tag, which is what routed it into this branch in
+        // the first place — highlight it the same way the plain-text branch
+        // below does, so it doesn't render as unstyled text forever.
+        return highlightMentionsInSanitizedHtml(augmentFileUrlsInHtml(safe));
       }
       var html = highlightMentionsInCommentBody(body);
       // fname is an UPLOADED FILENAME -- user-controlled -- and was

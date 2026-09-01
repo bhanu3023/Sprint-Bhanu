@@ -1078,15 +1078,14 @@ function bindDrawerEdits(issue) {
     else if (!bodyIsRich) {
       body = _ci.value.trim();
     } else {
-      // contenteditable: convert mention chips to plain @Name text, keep the
-      // rest of the markup as-is -- this used to flatten to .textContent,
-      // which is what silently discarded every bold/bullet-list the toolbar
-      // had just produced.
-      var _clone = _ci.cloneNode(true);
-      _clone.querySelectorAll('.mention-chip').forEach(function(chip) {
-        chip.replaceWith('@' + chip.textContent.replace(/^@/, ''));
-      });
-      body = _clone.innerHTML.trim();
+      // contenteditable: keep the markup as-is, mention chips included --
+      // this used to flatten to .textContent, which is what silently
+      // discarded every bold/bullet-list the toolbar had just produced. A
+      // mention chip is a real <span class="mention-chip"> the sanitizer
+      // already allows (survives the same way _saveComment's edit path
+      // already lets one through unmodified), so it renders as a proper
+      // mention on reload instead of decaying into plain "@Name" text.
+      body = _ci.innerHTML.trim();
       if (body === '<br>') body = '';
     }
     var commentBody = body;
