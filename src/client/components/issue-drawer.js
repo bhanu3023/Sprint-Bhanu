@@ -163,8 +163,6 @@ async function openDrawer(issueId) {
     history.replaceState({ issueId: issueId }, '', replaceUrl);
     window._currentIssueKey = issue.key;
   }
-  document.body.classList.add('issue-page'); void document.body.offsetHeight; var dp = document.querySelector('.drawer-panel'); if(dp){ dp.style.position='fixed'; dp.style.inset='0'; dp.style.width='100vw'; dp.style.maxWidth='100vw'; dp.style.height='100vh'; dp.style.zIndex='99999'; dp.style.display='flex'; dp.style.flexDirection='column'; } $('issueDrawer').removeAttribute('hidden');
-
   // Parent breadcrumb for subtasks
   var parentCrumb = $('drawerParentBreadcrumb');
   if (issue.parent_id && issue.parent_key) {
@@ -185,6 +183,15 @@ async function openDrawer(issueId) {
   $('drawerType').textContent = typeLabel(issue.type);
   applyTypeBadgeStyle($('drawerType'), issue.type || 'task');
   setDrawerTitleValue(issue.title || '');
+  // The browser tab title, set from the issue actually fetched above -- not
+  // read back from the DOM after a fixed delay (see init.js's boot path,
+  // which used to be the only place this was ever set at all). Every ticket
+  // opened via openIssuePage/openDrawer funnels through here, so switching
+  // from one ticket straight to another now updates the tab title every
+  // time, instead of leaving the FIRST ticket opened this session showing in
+  // the tab (and in a copied/shared browser-history entry) while the URL and
+  // page content had already moved on to a different one.
+  document.title = (issue.key ? issue.key + ' · ' : '') + (issue.title || 'Issue') + ' — SprintBoard';
   // Render description - convert plain text to HTML safely
   var descText = issue.description || '';
   var fixDescText = issue.fix_description || '';
@@ -238,6 +245,17 @@ async function openDrawer(issueId) {
   // reflected an admin's actual configured priority values for the space.
   $('drawerPriority').innerHTML = buildBuiltinSelectOptionsHtml('priority', issue.space_id, issue.priority, null);
   $('drawerPriority').value = issue.priority || 'medium';
+
+  // Reveal the drawer only now, AFTER the fields above are already showing
+  // THIS issue — not before. body.issue-page's CSS forces #issueDrawer
+  // visible with !important, overriding its `hidden` attribute entirely, so
+  // doing this any earlier (it used to run before any of the fields above
+  // were touched) made whatever ticket was rendered into the drawer LAST
+  // time flash up first, for the whole duration of the fetch above, every
+  // time a ticket was opened from a page where the drawer had been hidden
+  // (as opposed to switching directly from one open ticket to another, which
+  // the loadingOverlay cover at the top of this function already handles).
+  document.body.classList.add('issue-page'); void document.body.offsetHeight; var dp = document.querySelector('.drawer-panel'); if(dp){ dp.style.position='fixed'; dp.style.inset='0'; dp.style.width='100vw'; dp.style.maxWidth='100vw'; dp.style.height='100vh'; dp.style.zIndex='99999'; dp.style.display='flex'; dp.style.flexDirection='column'; } $('issueDrawer').removeAttribute('hidden');
 
   var spaceId = issue.space_id || S.currentSpace;
   // Always fetch fresh members from DB so newly-added members show immediately
