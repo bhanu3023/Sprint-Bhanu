@@ -1498,6 +1498,54 @@ body.light .board-col {
 }
 
 /* ------------------------------------------------------------
+   COMBINATION UPGRADERS
+   ------------------------------------------------------------ */
+.combination-upgraders-groups {
+  max-height: 55vh;
+  overflow-y: auto;
+}
+.cu-group + .cu-group {
+  margin-top: 18px;
+}
+.cu-group-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+.cu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cu-row:last-child {
+  border-bottom: none;
+}
+.cu-combo-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cu-input {
+  width: 240px;
+  flex-shrink: 0;
+}
+.cu-status {
+  width: 70px;
+  flex-shrink: 0;
+  font-size: 11px;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------
    BULK ISSUE IMPORT (CSV)
    ------------------------------------------------------------ */
 .bulk-issue-actions {

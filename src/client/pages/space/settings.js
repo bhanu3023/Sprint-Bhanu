@@ -659,6 +659,11 @@ function paintSettingsCustomFields(space) {
     var applyBtn = (f.is_builtin || !isOrgAdminUser())
       ? ''
       : '<button class="btn btn-outline btn-sm cf-apply-all-btn" data-field-id="' + f.id + '" data-field-name="' + escAttr(f.name) + '" title="Add this field to every other board that doesn\'t already have one with this name">Apply to all boards</button> ';
+    // Only the Combination field has per-value assignments to manage — every
+    // other field's "options" are just a plain list with nothing to assign.
+    var upgradersBtn = isCombinationField(f)
+      ? '<button class="btn btn-outline btn-sm cf-upgraders-btn" data-field-id="' + f.id + '" title="Assign an Upgrader to each combination">Upgraders</button> '
+      : '';
     // Everything shown in the row is searchable, plus field_key and the raw
     // option values \u2014 so "slack", "multi_select", "built-in", "required" or an
     // option that got truncated in the Options column all still match.
@@ -682,6 +687,7 @@ function paintSettingsCustomFields(space) {
       '<td class="text-muted text-sm">' + esc(optionsDisplay) + '</td>' +
       '<td>' +
         '<button class="btn btn-outline btn-sm cf-edit-btn" data-field-id="' + f.id + '">Edit</button> ' +
+        upgradersBtn +
         applyBtn +
         deleteBtn +
       '</td>' +
@@ -713,6 +719,15 @@ function paintSettingsCustomFields(space) {
       var fieldId = btn.dataset.fieldId;
       var field = fields.find(function (f) { return f.id == fieldId; });
       if (field) openCustomFieldModal(field);
+    });
+  });
+
+  // Upgraders buttons (Combination field only)
+  qsa('.cf-upgraders-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var fieldId = btn.dataset.fieldId;
+      var field = fields.find(function (f) { return f.id == fieldId; });
+      if (field) openCombinationUpgradersModal(field);
     });
   });
 

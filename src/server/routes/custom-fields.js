@@ -104,7 +104,25 @@ app.put('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {
   const upd = buildDynamicUpdate('custom_fields', body, 2);
   if (!upd) return res.status(400).json({ error: 'Nothing to update' });
   const r = await q(`UPDATE custom_fields SET ${upd.set} WHERE id=$1 RETURNING *`, [req.params.id, ...upd.vals]);
-  res.json(r.rows[0]);
+  const updated = r.rows[0];
+
+  // Combination options just changed — drop any Upgrader assignment for a
+  // combination value that no longer exists, so editing/removing a
+  // combination here (the textarea editor above) can never leave a stale,
+  // invisible assignment behind. New/still-present combinations are
+  // untouched, so this never disturbs an existing assignment that is still
+  // valid.
+  if (body.options !== undefined && isCombinationFieldRow(updated)) {
+    const flat = combinationFlatOptions(updated);
+    await q(
+      flat.length
+        ? 'DELETE FROM combination_upgraders WHERE field_id=$1 AND NOT (combination = ANY($2))'
+        : 'DELETE FROM combination_upgraders WHERE field_id=$1',
+      flat.length ? [updated.id, flat] : [updated.id]
+    );
+  }
+
+  res.json(updated);
 }));
 
 // Copy a custom field's definition (name/type/options/required/show_in) onto
@@ -147,6 +165,82 @@ app.put('/api/issues/:id/field-values/:fieldId', requireAuth, wrap(async (req, r
   if (!(await denyUnlessCanAct(q, req.user, res, spaceId, 'issue.update'))) return;
   await upsertIssueFieldValue(issueId, fieldId, req.body.value, req.user.id);
   res.json({ ok: true });
+}));
+
+// ── Combination "Upgrader" assignment ──────────────────────
+// The person who handles a given Source-Destination combination, independent
+// of the combination options themselves — see combination_upgraders
+// (migration 022). Keyed by the exact combination string, not by product
+// type, so a combination that happens to appear under more than one product
+// type group shares one assignment.
+function isCombinationFieldRow(field) {
+  return !!field && (field.field_key === 'combination' || String(field.name || '').toLowerCase().trim() === 'combination');
+}
+function combinationFlatOptions(field) {
+  let raw = field.options;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (_) { raw = null; } }
+  if (raw && raw.v === 2 && Array.isArray(raw.flat)) return raw.flat;
+  return Array.isArray(raw) ? raw : [];
+}
+
+// GET is member-level (custom_field.read) — seeing who is responsible for a
+// combination is useful to the whole team, not just whoever can edit it.
+app.get('/api/custom-fields/:id/upgraders', requireAuth, wrap(async (req, res) => {
+  const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
+  if (!field) return res.status(404).json({ error: 'Field not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, field.space_id, 'custom_field.read'))) return;
+  if (!isCombinationFieldRow(field)) return res.status(400).json({ error: 'This field is not the Combination field' });
+  const r = await q(
+    `SELECT cu.combination, cu.user_id, u.name AS user_name, u.email AS user_email, cu.updated_at
+     FROM combination_upgraders cu LEFT JOIN users u ON u.id = cu.user_id
+     WHERE cu.field_id=$1 ORDER BY cu.combination`,
+    [field.id]
+  );
+  res.json(r.rows);
+}));
+
+// PUT is site_admin tier (custom_field.manage) — same gate as editing the
+// Combination field's options themselves. Body: { combination, email } —
+// email blank/omitted clears the assignment. The target must be an ACTIVE
+// member of THIS field's space: "select from the space, or type their
+// email" both resolve against the same member list, so a typo or someone
+// outside the space fails clearly instead of silently assigning a stranger.
+app.put('/api/custom-fields/:id/upgraders', requireAuth, wrap(async (req, res) => {
+  const field = (await q('SELECT * FROM custom_fields WHERE id=$1', [req.params.id])).rows[0];
+  if (!field) return res.status(404).json({ error: 'Field not found' });
+  if (!(await denyUnlessCanAct(q, req.user, res, field.space_id, 'custom_field.manage'))) return;
+  if (!isCombinationFieldRow(field)) return res.status(400).json({ error: 'This field is not the Combination field' });
+
+  const combination = String(req.body.combination || '').trim();
+  if (!combination) return res.status(400).json({ error: 'combination is required' });
+  // Defense in depth: the client only ever offers combinations from the
+  // field's own current options, but never trust that blindly — an
+  // assignment against a value that isn't (or is no longer) configured would
+  // be silently invisible everywhere the options list drives the UI.
+  if (combinationFlatOptions(field).indexOf(combination) === -1) {
+    return res.status(400).json({ error: '"' + combination + '" is not one of this field\'s configured combinations' });
+  }
+
+  const emailRaw = req.body.email != null ? String(req.body.email).trim() : '';
+  if (!emailRaw) {
+    await q('DELETE FROM combination_upgraders WHERE field_id=$1 AND combination=$2', [field.id, combination]);
+    return res.json({ combination, user_id: null });
+  }
+
+  const member = (await q(
+    `SELECT u.id, u.name, u.email FROM space_members sm JOIN users u ON u.id=sm.user_id
+     WHERE sm.space_id=$1 AND u.is_active=true AND LOWER(u.email)=LOWER($2)`,
+    [field.space_id, emailRaw]
+  )).rows[0];
+  if (!member) return res.status(400).json({ error: '"' + emailRaw + '" is not an active member of this space' });
+
+  await q(
+    `INSERT INTO combination_upgraders(id, field_id, combination, user_id, updated_at, updated_by)
+     VALUES($1,$2,$3,$4,NOW(),$5)
+     ON CONFLICT (field_id, combination) DO UPDATE SET user_id=$4, updated_at=NOW(), updated_by=$5`,
+    [uid(), field.id, combination, member.id, req.user.id]
+  );
+  res.json({ combination, user_id: member.id, user_name: member.name, user_email: member.email });
 }));
 
 app.delete('/api/custom-fields/:id', requireAuth, wrap(async (req, res) => {

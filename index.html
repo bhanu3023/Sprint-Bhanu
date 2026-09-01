@@ -1254,6 +1254,30 @@
     </div>
   </div>
 
+  <!-- Combination Upgraders Modal -->
+  <div id="modal-combination-upgraders" data-hj-suppress class="modal" hidden>
+    <div class="modal-backdrop" onclick="closeCombinationUpgradersModal()"></div>
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-header">
+        <h3>Assign Upgraders — Combination</h3>
+        <button type="button" class="btn-icon modal-close" onclick="closeCombinationUpgradersModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text2);margin:0 0 14px">
+          The <strong>Upgrader</strong> is the person responsible for a given combination. Pick one from
+          <strong id="cuSpaceName"></strong>'s members, or type their email — leave blank for
+          <strong>None</strong>. Changes save automatically as you leave each field.
+        </p>
+        <input type="text" class="input" id="cuFilterInput" placeholder="Search combinations…" style="margin-bottom:12px">
+        <datalist id="cuMembersList"></datalist>
+        <div id="cuGroupsContainer" class="combination-upgraders-groups"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick="closeCombinationUpgradersModal()">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add User to Space Modal -->
   <div id="modal-invite-member" data-hj-suppress class="modal" hidden>
     <div class="modal-backdrop" onclick="closeModal('modal-invite-member')"></div>
@@ -1527,6 +1551,7 @@
   <script src="src/client/crud/sprint.js"></script>
   <script src="src/client/crud/issue.js"></script>
   <script src="src/client/crud/bulk-issue.js"></script>
+  <script src="src/client/crud/combination-upgraders.js"></script>
   <script src="src/client/components/worklog-modal.js"></script>
   <script src="src/client/components/notifications.js"></script>
   <script src="src/client/event-bindings.js"></script>
