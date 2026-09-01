@@ -825,6 +825,26 @@ async function ensureCombinationFieldMeta(spaceId) {
   return null;
 }
 
+// Refreshed on every render (never cached beyond one render call) so an
+// upgrader an admin just changed in Space Settings shows up next time this
+// picker opens, rather than whatever was true the first time this space's
+// Combination field was looked at this session. Stored directly on the meta
+// object already threaded through buildProductTypeComboPickerHtml ->
+// buildCombinationCheckboxListHtml, so no other function signature needs to
+// change to make the value available where it's actually rendered.
+async function ensureCombinationUpgradersLoaded(meta) {
+  if (!meta || !meta.id) return meta;
+  try {
+    var rows = await api('/api/custom-fields/' + meta.id + '/upgraders', 'GET', null, { silent: true });
+    var map = {};
+    (rows || []).forEach(function (r) { map[r.combination] = r; });
+    meta.__upgradersByCombo = map;
+  } catch (_) {
+    meta.__upgradersByCombo = meta.__upgradersByCombo || {};
+  }
+  return meta;
+}
+
 function renderIssueProductTypeSets(spaceId) {
   var group = $('issueCombinationGroup');
   var container = $('issueCombinationField');
@@ -872,8 +892,10 @@ function renderIssueProductTypeSets(spaceId) {
       if (productTypeGroup) productTypeGroup.hidden = !spaceHasProductTypeField(spaceId, 'create');
       return;
     }
-    container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta, spaceId);
-    bindProductTypeComboPicker(container, meta, { stateKey: '_issuePtComboSel' });
+    return ensureCombinationUpgradersLoaded(meta).then(function () {
+      container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta, spaceId);
+      bindProductTypeComboPicker(container, meta, { stateKey: '_issuePtComboSel' });
+    });
   });
 }
 
@@ -941,6 +963,7 @@ async function renderDrawerProductTypeSets(issueId, spaceId, cfValues, productTy
   }
 
   _drawerPtComboSel = parsePtComboSelection(productType, combinationVal);
+  await ensureCombinationUpgradersLoaded(meta);
   container.innerHTML = buildProductTypeComboPickerHtml(_drawerPtComboSel, meta, spaceId);
   bindProductTypeComboPicker(container, meta, {
     stateKey: '_drawerPtComboSel',
@@ -1311,6 +1334,13 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
   if (!comboTypes.length) {
     return '<p class="pt-combo-hint">Select a product type above to see combinations.</p>';
   }
+  // Set by ensureCombinationUpgradersLoaded right before this picker is built
+  // (Create Issue: renderIssueProductTypeSets; drawer: renderDrawerProductTypeSets)
+  // -- both call sites share this same rendering code, so showing the
+  // Upgrader here covers both surfaces at once. Silently shows nothing for a
+  // combination with none assigned, rather than a "No upgrader" label on
+  // every one of a space's 70+ rows.
+  var upgraders = (meta && meta.__upgradersByCombo) || {};
   var html = '';
   comboTypes.forEach(function (type) {
     var combos = getCombinationsForProductType(type, meta).filter(function (c) {
@@ -1321,10 +1351,14 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
       '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
+      var upgrader = upgraders[c];
+      var upgraderHtml = (upgrader && upgrader.user_name)
+        ? '<span class="pt-combo-upgrader"> — Upgrader: ' + esc(upgrader.user_name) + '</span>'
+        : '';
       // title carries the full value — labels are single-line with an ellipsis.
       return '<label class="pt-combo-check" title="' + escAttr(c) + '">' +
         '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + escAttr(c) + '"' + (checked ? ' checked' : '') + '>' +
-        '<span class="pt-combo-check-label">' + esc(c) + '</span></label>';
+        '<span class="pt-combo-check-label">' + esc(c) + upgraderHtml + '</span></label>';
     }).join('');
     html += '</div>';
   });
