@@ -682,15 +682,43 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   // with each grouped issue enriched with resolved assignee/reporter names
   // so the client's per-sprint drill-down (ticket, assigned to, raised by)
   // needs no further lookups. A bug is filed under every combination it
-  // names — the field is stored as a multi_select, even though the picker
-  // UI only ever offers one at a time — so a comma-joined value counts once
-  // per combination rather than being silently collapsed into one bucket.
+  // names, so a value naming more than one combination counts once per
+  // combination rather than being silently collapsed into one bucket.
+  //
+  // The stored value is NOT always a bare string. Picking more than one
+  // combination (or one combination alongside more than one Product Type)
+  // serializes the whole selection as JSON — {"v":2,"productTypes":[...],
+  // "combinations":[...]}, or the older {"v":1,"sets":[{productType,
+  // combinations}]} — see serializePtComboSelection/parsePtComboSelection in
+  // drawer-panels.js, which this mirrors. Treating that JSON as a bare
+  // comma-joined string (the original version of this code did) split the
+  // JSON's own syntax apart into garbage rows: {"v":2, "productTypes":
+  // ["Message"], "combinations":["Chat - Slack" and "Chat - Team"]} each
+  // showing up as their own bogus "combination".
+  function parseCombinationFieldStoredValue(raw) {
+    if (!raw) return [];
+    const trimmed = String(raw).trim();
+    if (trimmed.charAt(0) === '{') {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && parsed.v === 2) {
+          return Array.isArray(parsed.combinations) ? parsed.combinations.filter(Boolean) : [];
+        }
+        if (parsed && parsed.v === 1 && Array.isArray(parsed.sets)) {
+          const out = [];
+          parsed.sets.forEach(s => (s.combinations || []).forEach(c => { if (c && out.indexOf(c) === -1) out.push(c); }));
+          return out;
+        }
+        return [];
+      } catch (_) { return []; }
+    }
+    return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  }
   let bugsByCombination = null;
   if (combinationField) {
     const grouped = {};
     bugRows.forEach(r => {
-      const raw = bugCombinationByIssueId[r.id];
-      const combos = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const combos = parseCombinationFieldStoredValue(bugCombinationByIssueId[r.id]);
       const keys = combos.length ? combos : ['No Combination'];
       const enriched = {
         ...r,
