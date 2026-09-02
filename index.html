@@ -133,6 +133,22 @@
               <div id="notifList" data-hj-suppress class="notif-list"></div>
             </div>
           </div>
+          <div class="notif-btn-wrap">
+            <button class="btn-icon topbar-notif-btn" id="draftsBtn" aria-label="Drafts" title="Drafts" style="position:relative;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6"/>
+              </svg>
+              <span class="notif-badge" id="draftsBadge" aria-hidden="true" hidden>0</span>
+            </button>
+            <!-- Drafts Panel -->
+            <div id="draftsPanel" class="notif-panel" hidden>
+              <div class="notif-panel-header">
+                <h3>Drafts</h3>
+              </div>
+              <div id="draftsList" data-hj-suppress class="notif-list"></div>
+            </div>
+          </div>
           <button class="btn btn-primary btn-sm" id="createIssueBtn">+ Create Issue</button>
           <!-- Profile avatar + dropdown -->
           <div style="position:relative" id="topbarProfileWrap">
@@ -1194,7 +1210,7 @@
              re-evaluated every time that selection changes, in
              _onIssueSpaceChange. -->
         <button type="button" class="btn btn-secondary" id="bulkCreateIssueBtn" onclick="openBulkIssueModal()" hidden style="margin-right:auto">Bulk Create…</button>
-        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-issue')">Cancel</button>
+        <button type="button" class="btn btn-secondary" onclick="window._handleCreateIssueCancelClick()">Cancel</button>
         <button class="btn btn-primary" id="issueSubmitBtn" type="submit" form="issueForm">Save</button>
       </div>
     </div>
@@ -1550,6 +1566,7 @@
   <script src="src/client/crud/space.js"></script>
   <script src="src/client/crud/sprint.js"></script>
   <script src="src/client/crud/issue.js"></script>
+  <script src="src/client/crud/issue-draft.js"></script>
   <script src="src/client/crud/bulk-issue.js"></script>
   <script src="src/client/crud/combination-upgraders.js"></script>
   <script src="src/client/components/worklog-modal.js"></script>

@@ -260,7 +260,7 @@ for (const bad of MALFORMED) {
     // Tier B — issue free text at scale
     'allWorkTable', 'backlogContent', 'sprintBoard', 'yourWorkContent',
     'calendarGrid', 'reportContent', 'globalReportContent', 'mbrTabContent',
-    'prmContent', 'summaryWidgets', 'favIssues', 'notifList', 'globalSearchDrop',
+    'prmContent', 'summaryWidgets', 'favIssues', 'notifList', 'draftsList', 'globalSearchDrop',
     // Modals carrying data that is not ours
     'modal-issue', 'modal-invite-member', 'modal-worklog', 'modal-confirm',
     'modal-invite-user', 'modal-reset-pw', 'modal-bulk-issue', 'modal-combination-upgraders'

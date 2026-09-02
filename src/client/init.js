@@ -49,6 +49,7 @@ async function init() {
     renderSidebar();
     // navigateTo home handled below after issue param check
     loadNotifications();
+    if (typeof loadIssueDraftsList === 'function') loadIssueDraftsList();
 
     $('loadingOverlay').setAttribute('hidden', '');
     $('app').removeAttribute('hidden');

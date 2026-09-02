@@ -698,6 +698,17 @@ body.light .topbar {
 .notif-item-time { font-size: 11px; color: var(--text3); margin-top: 4px; }
 .notif-item-dot { width: 8px; height: 8px; border-radius: 50%; background: #0129AC; flex-shrink: 0; margin-top: 8px; }
 
+.draft-item-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text3);
+  font-size: 15px;
+  align-self: flex-start;
+}
+.draft-item-delete:hover { background: var(--bg4, rgba(0,0,0,0.06)); color: var(--red, #dc2626); }
+
 .notif-badge {
   position: absolute;
   top: -2px;

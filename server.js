@@ -16,6 +16,7 @@ require('./src/server/routes/org');
 require('./src/server/routes/spaces');
 require('./src/server/routes/sprints');
 require('./src/server/routes/issues');
+require('./src/server/routes/issue-drafts');
 require('./src/server/routes/comments');
 require('./src/server/routes/worklogs');
 require('./src/server/routes/roadmap');
