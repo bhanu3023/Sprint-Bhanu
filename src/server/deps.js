@@ -7,7 +7,8 @@ const {
   buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin,
   UPDATE_WHITELIST, validateSpaceRoleAssignment, canRemoveSpaceMember, getSpaceMemberRole,
   getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId,
-  getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed
+  getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed,
+  normalizeSpaceRole
 } = require('./lib/permissions');
 const { seedBuiltinIssueFields, getConfiguredOptions } = require('./lib/builtin-issue-fields');
 const { uid } = require('./core');
@@ -43,4 +44,4 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 
-module.exports = { validateSchemaReadOnly, logProductTeamCombinationStatus, logDuplicateKeyWarning, runMigrations, buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin, UPDATE_WHITELIST, validateSpaceRoleAssignment, canRemoveSpaceMember, getSpaceMemberRole, getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId, getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed, seedBuiltinIssueFields, getConfiguredOptions, isBuiltinSelectValueAllowed, startRetentionSweeper, retentionDays, purgeIssueCascade, purgeIssueRows, completeSprint, startSprintAutoCompleter, https, oauthStates, upsertIssueFieldValue };
+module.exports = { validateSchemaReadOnly, logProductTeamCombinationStatus, logDuplicateKeyWarning, runMigrations, buildDynamicUpdate, canActInSpace, denyUnlessCanAct, requireOrgAdmin, isOrgAdmin, UPDATE_WHITELIST, validateSpaceRoleAssignment, canRemoveSpaceMember, getSpaceMemberRole, getIssueSpaceId, getSprintSpaceId, getCommentIssueSpaceId, getCustomFieldSpaceId, getFilterSpaceId, getSpaceMemberRecord, getMemberSpaceIds, getVisibleSpaceIds, pickAllowed, normalizeSpaceRole, seedBuiltinIssueFields, getConfiguredOptions, isBuiltinSelectValueAllowed, startRetentionSweeper, retentionDays, purgeIssueCascade, purgeIssueRows, completeSprint, startSprintAutoCompleter, https, oauthStates, upsertIssueFieldValue };
