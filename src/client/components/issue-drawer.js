@@ -260,15 +260,29 @@ async function openDrawer(issueId) {
   var spaceId = issue.space_id || S.currentSpace;
   // Always fetch fresh members from DB so newly-added members show immediately
   // Build member list: fetch fresh from DB, fall back to cached
+  //
+  // PERFORMANCE: this used to be a lone `await`, with ensureSpaceFieldsLoaded
+  // (below) only starting once it resolved -- two sequential network round
+  // trips back to back before the drawer had rendered anything, on every
+  // single ticket open (subtasks and linked tickets included, since they all
+  // funnel through this same function via openIssuePage). Neither call
+  // depends on the other's result, so they now run concurrently -- the
+  // members fetch on a fast connection no longer adds its own full round
+  // trip on top of the (often already-cached) custom-fields load.
   var freshMembers = [];
+  var membersResult = null;
   try {
-    var fetchedMembers = await api('/api/spaces/' + spaceId + '/members');
-    if (fetchedMembers && fetchedMembers.length) {
-      freshMembers = fetchedMembers.map(function(m) {
-        return { id: m.user_id, name: m.name, email: m.email, color: m.color, avatar_url: m.avatar_url };
-      });
-    }
-  } catch(_) {}
+    var results = await Promise.all([
+      api('/api/spaces/' + spaceId + '/members').catch(function () { return null; }),
+      ensureSpaceFieldsLoaded(spaceId)
+    ]);
+    membersResult = results[0];
+  } catch (_) {}
+  if (membersResult && membersResult.length) {
+    freshMembers = membersResult.map(function(m) {
+      return { id: m.user_id, name: m.name, email: m.email, color: m.color, avatar_url: m.avatar_url };
+    });
+  }
   if (!freshMembers.length) freshMembers = getSpaceMembers(spaceId);
   if (!freshMembers.length) freshMembers = S.data.users || [];
 
@@ -355,9 +369,18 @@ async function openDrawer(issueId) {
   var actBody = $('activitySectionBody');
   if (actBody) actBody.dataset.activeTab = 'comments';
   renderDrawerActivity(issue);
-  await ensureSpaceFieldsLoaded(issue.space_id || S.currentSpace);
-  await renderDrawerCustomFields(issue.custom_field_values || [], issue.id, issue.space_id || S.currentSpace);
-  await renderDrawerCombinationField(issue.id, issue.space_id || S.currentSpace, issue.custom_field_values || [], issue.product_type || '');
+  // ensureSpaceFieldsLoaded already ran (in parallel with the members fetch,
+  // above) by the time execution reaches here. The two renders below write to
+  // separate DOM containers and don't depend on each other's output — the
+  // combination one in particular always makes its own network call
+  // (ensureCombinationUpgradersLoaded, deliberately never cached, so a
+  // just-changed Upgrader shows up immediately) — so running them
+  // concurrently means that call's latency is no longer added on top of
+  // custom-fields rendering instead of overlapping it.
+  await Promise.all([
+    renderDrawerCustomFields(issue.custom_field_values || [], issue.id, issue.space_id || S.currentSpace),
+    renderDrawerCombinationField(issue.id, issue.space_id || S.currentSpace, issue.custom_field_values || [], issue.product_type || '')
+  ]);
   applyBuiltinFieldVisibility(issue.space_id || S.currentSpace, $('issueDrawer'), 'drawer');
   renderDrawerAttachments(issue.attachments || []);
 
