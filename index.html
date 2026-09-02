@@ -1081,11 +1081,11 @@
 
   <!-- Create/Edit Issue Modal -->
   <div id="modal-issue" data-hj-suppress class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('modal-issue')"></div>
+    <div class="modal-backdrop" onclick="window._handleCreateIssueCancelClick()"></div>
     <div class="modal-dialog modal-dialog-lg">
       <div class="modal-header">
         <h3 id="issueModalTitle">Create Issue</h3>
-        <button type="button" class="btn-icon modal-close" onclick="closeModal('modal-issue')">✕</button>
+        <button type="button" class="btn-icon modal-close" onclick="window._handleCreateIssueCancelClick()">✕</button>
       </div>
       <div class="modal-body">
         <form id="issueForm">

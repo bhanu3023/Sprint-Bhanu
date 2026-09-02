@@ -5,9 +5,11 @@
 // Whatever is typed into the Create Issue form is autosaved (debounced) as
 // soon as any field actually carries content, so a refresh, an accidental
 // close, or just walking away mid-form never loses it. A prompt to keep or
-// discard the draft only appears when the user clicks Cancel — closing via
-// the × button or the backdrop leaves the already-autosaved draft exactly
-// where autosave put it, no prompt needed there.
+// discard the draft appears however the modal is closed WITHOUT submitting
+// (Cancel, the × button, and the backdrop all route through the same
+// window._handleCreateIssueCancelClick, wired in index.html) — actually
+// submitting the form is the only path that skips it, since a successful
+// create deletes the draft outright instead of asking.
 //
 // _currentIssueDraftId identifies the ONE draft the currently-open modal
 // session is attached to: null until the first autosave creates one (POST),
@@ -147,7 +149,10 @@ async function deleteCurrentIssueDraft() {
   });
 })();
 
-// ── Cancel button — the one place a prompt is shown ──────────────────────
+// ── Any non-submit way of closing the modal ───────────────────────────────
+// Wired to Cancel, the × button, AND the backdrop click (index.html) — every
+// way of leaving the form without actually creating the ticket shows the
+// same keep-or-discard prompt when there is something to keep.
 window._handleCreateIssueCancelClick = async function () {
   await flushIssueDraftAutosave();
   if (!_currentIssueDraftId) { closeModal('modal-issue'); return; }
