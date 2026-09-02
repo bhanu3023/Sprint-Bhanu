@@ -1528,9 +1528,10 @@ body.light .board-col {
 }
 .cu-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 6px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--border);
 }
 /* When the trailing .cu-row-error actually has something to show, the
@@ -1552,22 +1553,131 @@ body.light .board-col {
 }
 .cu-combo-label {
   flex: 1;
-  min-width: 0;
+  min-width: 120px;
   font-size: 13px;
   color: var(--text1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cu-input {
-  width: 240px;
+.cu-row-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* One of these per configured role, side by side — width is fixed rather
+   than flex so 2-3 roles line up into tidy columns instead of each row
+   negotiating its own widths independently. */
+.cu-role-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 168px;
   flex-shrink: 0;
 }
+.cu-role-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.cu-role-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cu-input {
+  width: 100%;
+  min-width: 0;
+}
 .cu-status {
-  width: 70px;
   flex-shrink: 0;
-  font-size: 11px;
-  text-align: right;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Role management chips above the combination list. */
+.cu-roles-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cu-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text1);
+}
+.cu-role-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.cu-role-chip-remove:hover {
+  background: var(--red, #dc2626);
+  color: #fff;
+}
+.cu-role-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cu-role-add input {
+  width: 130px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text1);
+}
+.cu-role-add button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Bulk-assign toolbar — appears once at least one combination is checked. */
+.cu-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-faint, rgba(1,41,172,0.06));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.cu-bulk-bar select,
+.cu-bulk-bar input {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.cu-bulk-bar-count {
+  font-weight: 700;
+  color: var(--text1);
+  margin-right: auto;
 }
 
 /* ------------------------------------------------------------
@@ -3860,6 +3970,44 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
 .pt-combo-upgrader strong {
   font-weight: 700;
 }
+/* Wraps the role <select> + its Upgrader badge together on the same line,
+   under the combination name -- only rendered for a checked row (see
+   buildCombinationCheckboxListHtml), same as .pt-combo-upgrader alone used
+   to be before roles existed. stopPropagation on the wrapping <span> in the
+   markup keeps clicking the select from also toggling the row's checkbox. */
+.pt-combo-role-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  white-space: nowrap;
+}
+.pt-combo-role-row .pt-combo-upgrader {
+  display: inline;
+  margin-top: 0;
+}
+/* The base `select { width: 100% }` rule (FORM ELEMENTS, above) was stretching
+   this to fill the whole row regardless of which option was picked -- "Backend"
+   and "Frontend" rendered the exact same oversized box. width: auto lets it
+   size to its own selected option's text instead, min-width only guards
+   against a very short role name (e.g. "QA") looking cramped. */
+.pt-combo-role-select {
+  width: auto;
+  min-width: 96px;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg3);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pt-combo-role-select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
 .pt-type-list .pt-combo-check-label {
   white-space: nowrap;
 }
@@ -4892,6 +5040,16 @@ body.light .yw-tab-badge {
   background: var(--bg2);
   white-space: nowrap;
 }
+/* `.yw-filter-panel` below is `position: absolute` and needs ITS OWN <th> as
+   the positioned containing block -- Your Work's own table gets that for free
+   from `.yw-table thead th`'s `position: sticky` (higher specificity, so it
+   still wins there), but a plain <th class="yw-th-filter"> with no `.yw-table`
+   ancestor (the MBR Bugs-by-Combination table reuses this same filter
+   pattern without adopting the whole .yw-table class) had no positioned
+   ancestor at all, so the panel positioned against the nearest ancestor that
+   DID have one -- however far up the DOM that happened to be -- instead of
+   sitting under its own trigger button. */
+.yw-th-filter { position: relative; }
 .yw-th-filter-wrap {
   display: inline-flex;
   align-items: center;

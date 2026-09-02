@@ -403,6 +403,24 @@ function getCreateRequiredErrors(spaceId) {
     }
   });
 
+  // Combination's Role picker is a separate opt-in requirement from the
+  // generic required-fields loop above (isCombinationField rows are skipped
+  // there — the combo picker isn't a plain [data-cf-id] element). A role is
+  // always effectively PICKED once a combination is checked (the <select>
+  // defaults to Backend, see defaultUpgraderRoleKey in drawer-panels.js), so
+  // "role required" in practice means "at least one combination must be
+  // checked" for this type — an unchecked combo has no role attached at all.
+  var comboMeta = productTypeMode(spaceId, 'create') === 'combo' ? findCombinationFieldMeta(spaceId) : null;
+  if (comboMeta && roleRequiredForType(comboMeta, selectedType)) {
+    var comboSel = _issuePtComboSel || emptyPtComboSelection();
+    if (!comboSel.combinations || !comboSel.combinations.length) {
+      var comboEl = $('issueCombinationField');
+      if (comboEl && !isCreateFieldHidden(comboEl)) {
+        errors.push({ label: 'Combination Role', el: comboEl, focusEl: comboEl });
+      }
+    }
+  }
+
   // Title is required regardless of the stored flag (it's the locked built-in,
   // and NOT NULL in the DB). Covers spaces whose built-in rows predate the
   // registry and so have no Title row to iterate.
@@ -465,6 +483,16 @@ function markCreateRequiredLabels(spaceId) {
     var group = input && input.closest('.form-group');
     addStar(group && group.querySelector('.form-label'));
   });
+
+  // Combination's Role star lives on its own section title, not a
+  // [data-cf-id] element (see buildProductTypeComboPickerHtml), so it needs
+  // its own re-add here too rather than falling out of the loop above.
+  if (productTypeMode(spaceId, 'create') === 'combo') {
+    var comboMeta = findCombinationFieldMeta(spaceId);
+    if (comboMeta && roleRequiredForType(comboMeta, selectedType)) {
+      addStar(modal.querySelector('#issueCombinationField .pt-combo-section:last-child .pt-combo-section-title'));
+    }
+  }
 }
 
 function formatFieldShowIn(field) {
@@ -588,6 +616,38 @@ function syncRequiredTypesVisibility() {
   var group = $('customFieldRequiredTypesGroup');
   var req = $('customFieldRequired');
   if (group) group.hidden = !(req && req.checked);
+}
+
+// ── "Require an Upgrader Role" for Combination fields, same shape as the
+// required-types feature above but with the OPPOSITE default: an empty/unset
+// list means the role picker is never required (this is a brand-new, opt-in
+// setting — no existing space should suddenly gain a required field it never
+// configured), whereas required_types' empty list means "required for all".
+function renderRoleRequiredTypeChoices(selected, spaceId) {
+  var box = $('customFieldRoleRequiredTypes');
+  if (!box) return;
+  var choices = getIssueTypeOptionsForSpace(spaceId || S.currentSpace);
+  var sel = normalizeTypeList(selected);
+  box.innerHTML = choices.map(function (c) {
+    var on = sel.indexOf(c.v) >= 0;
+    return '<label><input type="checkbox" class="cf-role-req-type" value="' + escAttr(c.v) + '"' +
+      (on ? ' checked' : '') + '> ' + esc(c.l) + '</label>';
+  }).join('');
+}
+
+function readRoleRequiredTypesFromForm() {
+  var box = $('customFieldRoleRequiredTypes');
+  if (!box) return [];
+  return Array.prototype.slice.call(box.querySelectorAll('.cf-role-req-type'))
+    .filter(function (c) { return c.checked; })
+    .map(function (c) { return c.value; });
+}
+
+function roleRequiredForType(field, type) {
+  if (!field) return false;
+  var types = normalizeTypeList(field.upgrader_role_required_types);
+  if (!types.length) return false;                // unset = never required
+  return types.indexOf(String(type || '').toLowerCase().trim()) >= 0;
 }
 
 function formatRequiredForTypes(field) {

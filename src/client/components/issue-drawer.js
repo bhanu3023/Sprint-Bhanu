@@ -153,6 +153,13 @@ async function openDrawer(issueId) {
   // (The loading overlay is deliberately left alone here -- whichever request
   // IS current owns hiding it, at its own success or failure point below.)
   if (S.drawerIssueId !== issueId) return;
+  // window._drawerIssueData used to stay unset until the first 15s live-sync
+  // poll (below) overwrote it -- every other reader of it (autoSave's field
+  // patch, the team-change handler, currentComboIssueType) already assumed
+  // it was populated from the moment the drawer opened. Set it here, from
+  // the very fetch this function just made, so that assumption is actually
+  // true immediately rather than for everything except the first ~15s.
+  window._drawerIssueData = issue;
   // Fallback for openIssuePage's same mount call — only needed when the issue
   // wasn't already in the local cache at click time, so its space_id wasn't
   // known synchronously yet.

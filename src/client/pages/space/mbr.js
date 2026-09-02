@@ -113,6 +113,90 @@ window._setMbrSprintWindow = function (val) {
   if (_mbrData) renderMBROverview($('mbrTabContent'), _mbrData);
 };
 
+// ── In-header column filters for the "Bugs by Combination" table, same
+// dropdown-in-the-<th> pattern as Your Work's _ywBuildFilterTh (reusing its
+// yw-th-filter/yw-filter-trigger/yw-filter-panel/yw-filter-opt CSS), but with
+// its own state -- this table isn't part of Your Work and filters combination
+// GROUPS (one row per combination+role), not individual issues.
+if (!S.mbrComboFilters) S.mbrComboFilters = { combination: [], productType: [], role: [], upgrader: [] };
+
+function _mbrComboFilterValue(row, key) {
+  if (key === 'combination') return row.combination;
+  if (key === 'productType') return row.product_type || '__none__';
+  if (key === 'role') return row.role || '__none__';
+  if (key === 'upgrader') return row.upgrader_email || '__none__';
+}
+function _mbrComboFilterLabel(row, key) {
+  if (key === 'combination') return row.combination;
+  if (key === 'productType') return row.product_type || 'No Product Type';
+  if (key === 'role') return row.role_name || 'No Role';
+  if (key === 'upgrader') return row.upgrader_name || 'Unassigned';
+}
+function _mbrGetComboFilterOpts(key, rows) {
+  var seen = {}, opts = [];
+  (rows || []).forEach(function (row) {
+    var v = _mbrComboFilterValue(row, key);
+    if (seen[v]) return;
+    seen[v] = true;
+    opts.push({ v: v, l: _mbrComboFilterLabel(row, key) });
+  });
+  opts.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return opts;
+}
+function _mbrApplyComboFilters(rows) {
+  var f = S.mbrComboFilters || {};
+  return (rows || []).filter(function (row) {
+    return ['combination', 'productType', 'role', 'upgrader'].every(function (key) {
+      var sel = f[key];
+      if (!sel || !sel.length) return true;
+      return sel.indexOf(_mbrComboFilterValue(row, key)) >= 0;
+    });
+  });
+}
+function _mbrAnyComboFilterActive() {
+  var f = S.mbrComboFilters || {};
+  return ['combination', 'productType', 'role', 'upgrader'].some(function (key) { return f[key] && f[key].length; });
+}
+function _mbrBuildComboFilterTh(key, label, rows) {
+  var sel = (S.mbrComboFilters[key] || []);
+  var active = sel.length > 0;
+  var opts = _mbrGetComboFilterOpts(key, rows);
+  var panel = opts.map(function (o) {
+    var chk = sel.indexOf(o.v) >= 0 ? ' checked' : '';
+    return '<label class="yw-filter-opt"><input type="checkbox" value="' + escAttr(String(o.v)) + '"' + chk +
+      ' onchange="window._mbrComboFilterCheck(\'' + key + '\',this)"> ' + esc(o.l) + '</label>';
+  }).join('');
+  if (!panel) panel = '<div class="yw-filter-opt" style="color:var(--text3);cursor:default">No options</div>';
+  return '<th class="yw-th-filter" style="text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">' +
+    '<div class="yw-th-filter-wrap">' +
+      '<span>' + esc(label) + '</span>' +
+      '<button type="button" class="yw-filter-trigger' + (active ? ' active' : '') + '" onclick="window._mbrToggleComboFilter(\'' + key + '\',event)" aria-label="Filter ' + esc(label) + '">' +
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>' +
+      '</button>' +
+      '<div class="yw-filter-panel" id="mbr-combo-filter-' + key + '" hidden onclick="event.stopPropagation()">' + panel + '</div>' +
+    '</div></th>';
+}
+window._mbrToggleComboFilter = function (key, ev) {
+  if (ev) ev.stopPropagation();
+  var panel = $('mbr-combo-filter-' + key);
+  if (!panel) return;
+  var open = panel.hidden;
+  document.querySelectorAll('.yw-filter-panel').forEach(function (p) { p.hidden = true; });
+  panel.hidden = !open;
+};
+// The combo table lives on the Comparison Trends tab (renderMBRComparison),
+// not Overview -- re-render that same tab, not always Overview.
+window._mbrComboFilterCheck = function (key, cb) {
+  var arr = S.mbrComboFilters[key] || (S.mbrComboFilters[key] = []);
+  if (cb.checked) { if (arr.indexOf(cb.value) < 0) arr.push(cb.value); }
+  else { var idx = arr.indexOf(cb.value); if (idx >= 0) arr.splice(idx, 1); }
+  renderMBRComparison($('mbrTabContent'), _mbrData);
+};
+window._mbrClearComboFilters = function () {
+  S.mbrComboFilters = { combination: [], productType: [], role: [], upgrader: [] };
+  renderMBRComparison($('mbrTabContent'), _mbrData);
+};
+
 function renderMBROverview(c, data) {
   var allSprints = (data && data.sprints) || [];
 
@@ -343,9 +427,10 @@ function renderMBRComparison(c, data) {
   // the Assignee/Reporter tables above, each per-sprint NUMBER is directly
   // clickable (no intermediate trend-chart hop) since what's wanted here is
   // the ticket/assignee/reporter list for that exact cell, not a trend line.
-  var bugsByCombination = data.bugs_by_combination;
+  var bugsByCombinationRaw = data.bugs_by_combination;
+  var bugsByCombination = Array.isArray(bugsByCombinationRaw) ? _mbrApplyComboFilters(bugsByCombinationRaw) : bugsByCombinationRaw;
   var comboSectionHtml = '';
-  if (Array.isArray(bugsByCombination)) {
+  if (Array.isArray(bugsByCombinationRaw)) {
     var comboCols = sprints.slice(Math.max(0, sprints.length - 8));
     var comboColTruncNote = sprints.length > 8
       ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns.</p>' : '';
@@ -370,23 +455,35 @@ function renderMBRComparison(c, data) {
           var upgraderHtml = combo.upgrader_name
             ? esc(combo.upgrader_name)
             : '<strong style="color:var(--text3)">undefined</strong>';
+          var ptHtml = combo.product_type ? esc(combo.product_type) : '<span style="color:var(--text3)">—</span>';
+          var roleHtml = combo.role_name ? esc(combo.role_name) : '<span style="color:var(--text3)">—</span>';
           return '<tr style="border-bottom:1px solid var(--border)">' +
             '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + esc(combo.combination) + '</td>' +
+            '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + ptHtml + '</td>' +
+            '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + roleHtml + '</td>' +
             '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + upgraderHtml + '</td>' +
             cells +
             '<td style="padding:8px 12px;text-align:right;font-weight:700;color:#0052cc;cursor:pointer" onclick="window._showReportIssues(\'' + totalKey + '\')" title="Click to see all tickets for this combination">' + combo.total_count + '</td>' +
           '</tr>';
         }).join('')
-      : '<tr><td colspan="' + (comboCols.length + 3) + '" style="padding:16px;color:var(--text3);text-align:center">No bugs raised against any combination across these sprints</td></tr>';
+      : '<tr><td colspan="' + (comboCols.length + 4) + '" style="padding:16px;color:var(--text3);text-align:center">' +
+          (bugsByCombinationRaw.length ? 'No rows match the current filters. <button type="button" class="btn btn-link btn-sm" onclick="window._mbrClearComboFilters()">Clear filters</button>' : 'No bugs raised against any combination across these sprints') +
+        '</td></tr>';
+
+    var comboToolbarHtml = _mbrAnyComboFilterActive()
+      ? '<div class="yw-table-toolbar"><button type="button" class="btn btn-outline btn-sm yw-clear-all-btn" onclick="window._mbrClearComboFilters()">&#10005; Clear all</button></div>'
+      : '';
 
     comboSectionHtml =
       '<h4 style="margin:24px 0 4px;font-size:13px">Bugs by Combination, Upgrader — Sprint-wise</h4>' +
       '<p style="font-size:11px;color:var(--text3);margin:0 0 8px">Click any number to see the ticket, who it\'s assigned to, and who raised it.</p>' +
-      comboColTruncNote +
+      comboColTruncNote + comboToolbarHtml +
       '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
       '<thead><tr>' +
-      '<th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Combination</th>' +
-      '<th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Upgrader</th>' +
+      _mbrBuildComboFilterTh('combination', 'Combination', bugsByCombinationRaw) +
+      _mbrBuildComboFilterTh('productType', 'Product Type', bugsByCombinationRaw) +
+      _mbrBuildComboFilterTh('role', 'Role', bugsByCombinationRaw) +
+      _mbrBuildComboFilterTh('upgrader', 'Upgrader', bugsByCombinationRaw) +
       comboHeaderCols +
       '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th>' +
       '</tr></thead><tbody>' + comboBodyRows + '</tbody></table></div>';

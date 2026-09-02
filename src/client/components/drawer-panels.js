@@ -835,14 +835,37 @@ async function ensureCombinationFieldMeta(spaceId) {
 async function ensureCombinationUpgradersLoaded(meta) {
   if (!meta || !meta.id) return meta;
   try {
-    var rows = await api('/api/custom-fields/' + meta.id + '/upgraders', 'GET', null, { silent: true });
+    var results = await Promise.all([
+      api('/api/custom-fields/' + meta.id + '/upgraders', 'GET', null, { silent: true }),
+      api('/api/custom-fields/' + meta.id + '/upgrader-roles', 'GET', null, { silent: true })
+    ]);
+    var rows = results[0], roles = results[1];
+    // Nested by role now (one combination can have an upgrader per role) --
+    // was a flat combination->row map before roles existed at all.
     var map = {};
-    (rows || []).forEach(function (r) { map[r.combination] = r; });
+    (rows || []).forEach(function (r) {
+      if (!map[r.combination]) map[r.combination] = {};
+      map[r.combination][r.role] = r;
+    });
     meta.__upgradersByCombo = map;
+    meta.__roles = roles || [];
   } catch (_) {
     meta.__upgradersByCombo = meta.__upgradersByCombo || {};
+    meta.__roles = meta.__roles || [];
   }
   return meta;
+}
+
+// Which role a checked combination should show/save when the user hasn't
+// picked one explicitly yet. 'backend' is where every pre-existing single-
+// Upgrader assignment lives (migration 024 backfilled it that way), so
+// defaulting there instead of to meta.__roles[0] means an old ticket that
+// never had a role concept keeps showing the same Upgrader it always did.
+function defaultUpgraderRoleKey(meta) {
+  var roles = (meta && meta.__roles) || [];
+  if (!roles.length) return '';
+  var backend = roles.filter(function (r) { return r.key === 'backend'; })[0];
+  return backend ? backend.key : roles[0].key;
 }
 
 function renderIssueProductTypeSets(spaceId) {
@@ -1178,7 +1201,7 @@ var PRODUCT_TYPE_CHECKBOX_OPTIONS = [
 ];
 
 function emptyPtComboSelection() {
-  return { productTypes: [], combinations: [] };
+  return { productTypes: [], combinations: [], roles: {} };
 }
 
 function parsePtComboSelection(productType, combinationValue) {
@@ -1186,6 +1209,15 @@ function parsePtComboSelection(productType, combinationValue) {
   if (combinationValue && String(combinationValue).trim().charAt(0) === '{') {
     try {
       var parsed = JSON.parse(combinationValue);
+      // v3 adds a per-combination Role tag (Frontend/Backend/etc) on top of v2 --
+      // read as its own branch rather than folding into v2 so a v2 payload
+      // (no roles concept at all) keeps parsing exactly as it always did.
+      if (parsed && parsed.v === 3) {
+        sel.productTypes = (parsed.productTypes || []).slice();
+        sel.combinations = (parsed.combinations || []).slice();
+        sel.roles = (parsed.roles && typeof parsed.roles === 'object') ? Object.assign({}, parsed.roles) : {};
+        return sel;
+      }
       if (parsed && parsed.v === 2) {
         sel.productTypes = (parsed.productTypes || []).slice();
         sel.combinations = (parsed.combinations || []).slice();
@@ -1260,8 +1292,22 @@ function serializePtComboSelection(sel) {
   // The JSON form is only actually needed when there's more than one REAL
   // combination to store, or exactly one combination that needs to say which
   // of several product types it belongs to.
+  // Roles trimmed to only the combinations actually still selected -- an
+  // unchecked combo's leftover role tag from a previous selection must not
+  // resurface if it's ever re-checked later in the same session.
+  var roles = {};
+  var hasRole = false;
+  combos.forEach(function (c) {
+    var r = sel.roles && sel.roles[c];
+    if (r) { roles[c] = r; hasRole = true; }
+  });
   var combinationValue = null;
-  if (combos.length > 1 || (combos.length === 1 && types.length > 1)) {
+  if (hasRole) {
+    // Any role tag present at all needs the JSON envelope to carry it, even
+    // for a single combination under a single product type that would
+    // otherwise have stayed a plain string.
+    combinationValue = JSON.stringify({ v: 3, productTypes: types, combinations: combos, roles: roles });
+  } else if (combos.length > 1 || (combos.length === 1 && types.length > 1)) {
     combinationValue = JSON.stringify({ v: 2, productTypes: types, combinations: combos });
   } else if (combos.length === 1) {
     combinationValue = combos[0];
@@ -1328,7 +1374,26 @@ function getIssuePriorityOptionsForSpace(spaceId) {
   return vals.map(function (v) { return { v: v, l: cap(v) }; });
 }
 
-function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, filter) {
+// The issue type currently in play, from whichever surface is open --
+// Create Issue has a live #issueType select; the drawer edits an
+// already-created issue with no such select, so it reads the type off the
+// issue data the drawer already fetched. Used to gate the Role UI below on
+// roleRequiredForType, per instruction: show the Role picker only for issue
+// types that actually require it, otherwise show plain Combination with no
+// Role/Upgrader UI at all.
+function currentComboIssueType() {
+  // #issueType lives permanently in the DOM (just hidden when the modal is
+  // closed), so its mere existence can't be the check -- checking it first
+  // unconditionally made the DRAWER always read the Create Issue modal's
+  // stale leftover value instead of the actual open ticket's own type.
+  var createModal = $('modal-issue');
+  var typeEl = $('issueType');
+  if (typeEl && createModal && !createModal.hidden) return typeEl.value;
+  if (window._drawerIssueData) return window._drawerIssueData.type;
+  return typeEl ? typeEl.value : '';
+}
+
+function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, filter, selectedRoles) {
   filter = (filter || '').trim();
   var comboTypes = getComboTypesFromSelection(selectedTypes);
   if (!comboTypes.length) {
@@ -1344,6 +1409,12 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
   // Upgrader assigned, so a missing assignment reads as a real, visible gap
   // rather than nothing having rendered at all.
   var upgraders = (meta && meta.__upgradersByCombo) || {};
+  var roleOptions = (meta && meta.__roles) || [];
+  // Role/Upgrader UI only appears for issue types the admin actually marked
+  // as requiring a Role (upgrader_role_required_types) -- every other type
+  // shows plain Combination with nothing else, per instruction.
+  var roleUiEnabled = typeof roleRequiredForType === 'function' && roleRequiredForType(meta, currentComboIssueType());
+  var selRoles = (selectedRoles && typeof selectedRoles === 'object') ? selectedRoles : {};
   var html = '';
   comboTypes.forEach(function (type) {
     var combos = getCombinationsForProductType(type, meta).filter(function (c) {
@@ -1354,19 +1425,36 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
       '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
-      var upgraderHtml = '';
-      if (checked) {
-        var upgrader = upgraders[c];
-        // The email's local part (before "@"), not the display name -- e.g.
-        // "abhinav.surattu" for abhinav.surattu@cloudfuze.com, whatever the
-        // actual domain happens to be.
-        var upgraderId = (upgrader && upgrader.user_email) ? upgrader.user_email.split('@')[0] : 'undefined';
-        upgraderHtml = '<span class="pt-combo-upgrader">Upgrader: <strong>' + esc(upgraderId) + '</strong></span>';
+      var extraHtml = '';
+      // Nothing extra renders at all unless this issue TYPE actually requires
+      // a Role -- a type that doesn't just shows the plain combination, same
+      // as before Roles existed.
+      if (checked && roleUiEnabled) {
+        var upgradersForCombo = upgraders[c] || {};
+        if (roleOptions.length) {
+          var roleKey = selRoles[c] || defaultUpgraderRoleKey(meta);
+          var upgrader = upgradersForCombo[roleKey];
+          var upgraderId = (upgrader && upgrader.user_email) ? upgrader.user_email.split('@')[0] : 'undefined';
+          var roleSelectHtml = '<select class="pt-combo-role-select" data-combo="' + escAttr(c) + '">' +
+            roleOptions.map(function (r) {
+              return '<option value="' + escAttr(r.key) + '"' + (r.key === roleKey ? ' selected' : '') + '>' + esc(r.name) + '</option>';
+            }).join('') + '</select>';
+          extraHtml = '<span class="pt-combo-role-row" onclick="event.stopPropagation()">' + roleSelectHtml +
+            '<span class="pt-combo-upgrader">Upgrader: <strong>' + esc(upgraderId) + '</strong></span></span>';
+        } else {
+          // Field has no roles configured at all (shouldn't normally happen
+          // now that migration 024 seeds Frontend/Backend, but a field an
+          // admin stripped down to zero roles falls back to the old flat
+          // lookup rather than showing a broken picker).
+          var flatUpgrader = upgradersForCombo.backend || upgradersForCombo[Object.keys(upgradersForCombo)[0]];
+          var flatId = (flatUpgrader && flatUpgrader.user_email) ? flatUpgrader.user_email.split('@')[0] : 'undefined';
+          extraHtml = '<span class="pt-combo-upgrader">Upgrader: <strong>' + esc(flatId) + '</strong></span>';
+        }
       }
       // title carries the full value — labels are single-line with an ellipsis.
       return '<label class="pt-combo-check" title="' + escAttr(c) + '">' +
         '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + escAttr(c) + '"' + (checked ? ' checked' : '') + '>' +
-        '<span class="pt-combo-check-label">' + esc(c) + upgraderHtml + '</span></label>';
+        '<span class="pt-combo-check-label">' + esc(c) + extraHtml + '</span></label>';
     }).join('');
     html += '</div>';
   });
@@ -1380,6 +1468,12 @@ function buildProductTypeComboPickerHtml(sel, meta, spaceId) {
   var fieldId = meta && meta.id ? meta.id : '';
   sel = sel || emptyPtComboSelection();
   var ptOptions = getProductTypeOptionsForSpace(spaceId || (meta && meta.space_id));
+  // Only the Create Issue form has an #issueType select to read here (the
+  // drawer edits an already-created issue, where a role-required rule has
+  // nothing left to block) -- absent there, this simply never shows the star.
+  var typeEl = $('issueType');
+  var roleReq = typeEl && typeof roleRequiredForType === 'function' && roleRequiredForType(meta, typeEl.value);
+  var comboTitle = 'Combinations' + (roleReq ? ' <span class="cf-req-star" style="color:var(--red)">*</span>' : '');
   return '<div class="pt-combo-picker" data-field-id="' + esc(fieldId) + '">' +
     '<div class="pt-combo-section">' +
       '<div class="pt-combo-section-title">Product Type</div>' +
@@ -1388,7 +1482,7 @@ function buildProductTypeComboPickerHtml(sel, meta, spaceId) {
       '</div>' +
     '</div>' +
     '<div class="pt-combo-section">' +
-      '<div class="pt-combo-section-title">Combinations</div>' +
+      '<div class="pt-combo-section-title">' + comboTitle + '</div>' +
       '<div class="pt-combo-panel">' +
         '<div class="pt-combo-panel-toolbar">' +
           '<div class="pt-combo-search-wrap">' +
@@ -1397,7 +1491,7 @@ function buildProductTypeComboPickerHtml(sel, meta, spaceId) {
           '</div>' +
         '</div>' +
         '<div class="pt-combo-checklist pt-combo-list">' +
-          buildCombinationCheckboxListHtml(sel.productTypes, sel.combinations, meta, '') +
+          buildCombinationCheckboxListHtml(sel.productTypes, sel.combinations, meta, '', sel.roles) +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -1458,10 +1552,26 @@ function bindProductTypeComboPicker(container, meta, config) {
     var search = container.querySelector('.pt-combo-search');
     if (!list) return;
     var filter = search ? search.value : '';
-    list.innerHTML = buildCombinationCheckboxListHtml(sel.productTypes, sel.combinations, meta, filter);
+    list.innerHTML = buildCombinationCheckboxListHtml(sel.productTypes, sel.combinations, meta, filter, sel.roles);
     list.querySelectorAll('.pt-combo-cb').forEach(function (cb) {
       cb.addEventListener('change', readComboCheckboxes);
     });
+    list.querySelectorAll('.pt-combo-role-select').forEach(function (s) {
+      s.addEventListener('change', readRoleSelect);
+    });
+  }
+
+  function readRoleSelect(ev) {
+    var target = ev.target;
+    var combo = target.dataset.combo;
+    if (!combo) return;
+    sel.roles = sel.roles || {};
+    sel.roles[combo] = target.value;
+    // Re-render just to refresh the Upgrader badge next to this role picker --
+    // same "don't leave it a click stale" reasoning readComboCheckboxes above
+    // already follows for the checkbox itself.
+    refreshComboList();
+    notify();
   }
 
   container.querySelectorAll('.pt-type-cb').forEach(function (cb) {
@@ -1493,6 +1603,9 @@ function readPtComboSelectionFromContainer(container) {
   });
   container.querySelectorAll('.pt-combo-cb:checked').forEach(function (cb) {
     sel.combinations.push(cb.value);
+  });
+  container.querySelectorAll('.pt-combo-role-select').forEach(function (s) {
+    if (s.dataset.combo) sel.roles[s.dataset.combo] = s.value;
   });
   return sel;
 }

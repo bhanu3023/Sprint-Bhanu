@@ -234,7 +234,15 @@ document.addEventListener('DOMContentLoaded', function () {
       if (typeSel && !typeSel._reqTypeBound) {
         typeSel._reqTypeBound = true;
         typeSel.addEventListener('change', function () {
-          markCreateRequiredLabels(($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace);
+          var typeSpaceId = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace;
+          markCreateRequiredLabels(typeSpaceId);
+          // The Combinations picker's Role UI is gated on THIS type
+          // (roleRequiredForType, see buildCombinationCheckboxListHtml) --
+          // unlike the plain custom fields above, it holds no typed text to
+          // lose, so a full re-render is safe and is the only way the
+          // Role select/Upgrader badge appears or disappears on a type
+          // switch instead of only on the next checkbox click.
+          renderIssueProductTypeSets(typeSpaceId);
         });
       }
     }

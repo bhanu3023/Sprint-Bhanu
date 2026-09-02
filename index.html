@@ -1278,11 +1278,16 @@
       </div>
       <div class="modal-body">
         <p style="font-size:13px;color:var(--text2);margin:0 0 14px">
-          The <strong>Upgrader</strong> is the person responsible for a given combination. Pick one from
-          <strong id="cuSpaceName"></strong>'s members, or type their email — leave blank for
+          An <strong>Upgrader</strong> is the person responsible for a given combination, one per role below.
+          Pick from <strong id="cuSpaceName"></strong>'s members, or type their email — leave blank for
           <strong>None</strong>. Changes save automatically as you leave each field.
         </p>
+        <div class="form-group">
+          <label class="form-label">Upgrader roles</label>
+          <div id="cuRolesBar" class="cu-roles-bar"></div>
+        </div>
         <input type="text" class="input" id="cuFilterInput" placeholder="Search combinations…" style="margin-bottom:12px">
+        <div id="cuBulkBar" class="cu-bulk-bar" hidden></div>
         <datalist id="cuMembersList"></datalist>
         <div id="cuGroupsContainer" class="combination-upgraders-groups"></div>
       </div>
@@ -1370,6 +1375,17 @@
             <div id="customFieldRequiredTypes" style="display:flex;gap:16px;flex-wrap:wrap"></div>
             <p style="font-size:12px;color:var(--text2);margin:8px 0 0">
               Tick every type that must have this field filled in. Types left unticked can be saved without it.
+            </p>
+          </div>
+          <!-- Combination-only: which issue types must have an Upgrader ROLE picked
+               (Frontend/Backend/etc, see the roles bar in the Assign Upgraders modal).
+               Separate opt-in setting from Required above — leaving every box
+               unticked (the default) means a role is never required for this field. -->
+          <div class="form-group" id="customFieldRoleRequiredGroup" hidden>
+            <label class="form-label">Require a Role for which issue types?</label>
+            <div id="customFieldRoleRequiredTypes" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+            <p style="font-size:12px;color:var(--text2);margin:8px 0 0">
+              Tick a type to require picking an Upgrader role (Frontend/Backend/etc) before saving a ticket of that type. Leave all unticked to never require it.
             </p>
           </div>
           <div class="form-group" id="customFieldShowInGroup">
