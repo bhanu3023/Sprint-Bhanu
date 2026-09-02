@@ -1233,7 +1233,53 @@ body.light .backlog-lane-header { background: #f7f8fa; }
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, padding-left 0.12s ease;
+  position: relative;
+}
+
+/* Backlog multi-select: the checkbox overlays the row's own left padding
+   rather than joining the 7-column grid above, so turning select mode on/off
+   never has to touch that grid (see backlogRow's own comment on why). Only
+   .bl-selectable rows (the ungrouped Backlog lane) ever get bl-select-mode. */
+.backlog-row.bl-select-mode { padding-left: 34px; }
+/* Hidden by default -- the <input> is always in the markup for every
+   selectable row (backlogRow renders it whenever `selectable` is true,
+   independent of select mode being on), so visibility has to be gated in
+   CSS rather than by leaving the element out of the DOM. Only a row that
+   ALSO carries .bl-select-mode (added once double-click turns select mode
+   on) reveals it. */
+.bl-row-checkbox { display: none; }
+.backlog-row.bl-select-mode .bl-row-checkbox {
+  display: block;
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.backlog-row.bl-row-selected { background: var(--accent-bg); }
+.backlog-row.bl-row-selected:hover { background: var(--accent-bg); }
+
+.bl-select-toolbar { gap: 10px; }
+.bl-select-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  white-space: nowrap;
+}
+.bl-select-cancel { color: var(--text3); }
+
+/* The "pick a planning sprint" popup reuses .yw-filter-panel's own visuals
+   (border/shadow/radius) but is appended to <body> and positioned fixed at
+   the clicked button's own coordinates, rather than living inside a
+   position:relative <th> the way the header filters do. */
+.bl-planning-picker {
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .bl-cell { min-width: 0; display: flex; align-items: center; }

@@ -47,6 +47,15 @@ function renderBacklog() {
     var points = sprintIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
     var collapsed = sp.status === 'completed';
 
+    // Multi-select is offered on active and planning lanes only -- a
+    // completed sprint is closed history (see isClosedLane below) with
+    // nowhere sensible to bulk-move ITS tickets from. Pruned the same way
+    // the Backlog lane's own selection is, so an id that moved/left this
+    // sprint since it was checked can't silently "stay selected".
+    var laneKey = (sp.status === 'active' || sp.status === 'planning') ? sp.id : null;
+    if (laneKey) _blPruneLaneState(laneKey, sprintIssues.map(function (iss) { return iss.id; }));
+    var laneToolbarInner = laneKey ? _blLaneToolbarHtml(laneKey, sp.status, sp.id) : null;
+
     // Header reads as title, then dimmed meta, then actions — instead of one
     // flat run of inline text. Meta items get real dividers so "4 issues" and
     // "29 pts" no longer run together.
@@ -71,17 +80,26 @@ function renderBacklog() {
         '<span class="lane-meta-item">' + points + ' pts</span>' +
       '</span>' +
       '</div>' +
-      '<div class="lane-header-actions">';
+      '<div class="lane-header-actions' + (laneToolbarInner ? ' bl-select-toolbar' : '') + '"' +
+      (laneToolbarInner ? ' onclick="event.stopPropagation()"' : '') + '>';
 
-    if (sp.status === 'planning' && canManageSprints) {
-      html += '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();window._startSprint(\'' + sp.id + '\')">Start Sprint</button>';
-    }
-    if (sp.status === 'active' && canManageSprints) {
-      html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._completeSprint(\'' + sp.id + '\')">Complete</button>';
-    }
-    if (canManageSprints) {
-      html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._openSprintModal(\'' + sp.id + '\')">Edit</button>' +
-        '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._deleteSprint(\'' + sp.id + '\')">Delete</button>';
+    if (laneToolbarInner) {
+      // While actively selecting, the sprint-management buttons (Start/
+      // Complete/Edit/Delete) step aside for the move toolbar rather than
+      // cluttering the header alongside it -- Delete in particular has no
+      // business being one accidental click away from a bulk-select flow.
+      html += laneToolbarInner;
+    } else {
+      if (sp.status === 'planning' && canManageSprints) {
+        html += '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();window._startSprint(\'' + sp.id + '\')">Start Sprint</button>';
+      }
+      if (sp.status === 'active' && canManageSprints) {
+        html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._completeSprint(\'' + sp.id + '\')">Complete</button>';
+      }
+      if (canManageSprints) {
+        html += '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._openSprintModal(\'' + sp.id + '\')">Edit</button>' +
+          '<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();window._deleteSprint(\'' + sp.id + '\')">Delete</button>';
+      }
     }
     // A completed sprint is closed history: its velocity is frozen at completion
     // and the Spillover / Scope Change / Sprint Summary reports read its live
@@ -97,7 +115,7 @@ function renderBacklog() {
         ' ondrop="window._dropToSprint(event,\'' + sp.id + '\')"') + '>';
 
     for (var bi = 0; bi < sprintIssues.length; bi++) {
-      html += backlogRow(sprintIssues[bi]);
+      html += backlogRow(sprintIssues[bi], laneKey);
     }
     if (!isClosedLane) {
       html += '<div class="backlog-add-row"><button type="button" class="backlog-add-btn" onclick="window._addIssueToSprint(\'' + sp.id + '\')">' +
@@ -158,6 +176,17 @@ function renderBacklog() {
   // Backlog shows a points total too, so its header matches the sprint lanes.
   var backlogPoints = backlogIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
 
+  // Multi-select for the Backlog lane, same laneKey-based system the active/
+  // planning lanes above use ('backlog' is the literal laneKey here since
+  // there's no real sprint id for it) -- Done/completed lanes still don't
+  // offer bulk-move, there's nowhere meaningful to send an already-finished
+  // or already-historical ticket. Pruned the same way those lanes are.
+  _blPruneLaneState('backlog', backlogIssues.map(function (iss) { return iss.id; }));
+  var blToolbarInner = _blLaneToolbarHtml('backlog', 'backlog', null);
+  var blToolbarHtml = blToolbarInner
+    ? '<div class="lane-header-actions bl-select-toolbar" onclick="event.stopPropagation()">' + blToolbarInner + '</div>'
+    : '';
+
   html += '<div class="backlog-lane">' +
     '<div class="backlog-lane-header" onclick="window._toggleBacklogLane(this)">' +
     '<div class="lane-header-left">' +
@@ -169,14 +198,14 @@ function renderBacklog() {
       '<span class="lane-meta-item">' + backlogIssues.length + (backlogIssues.length === 1 ? ' issue' : ' issues') + '</span>' +
       '<span class="lane-meta-item">' + backlogPoints + ' pts</span>' +
     '</span>' +
-    '</div></div>' +
+    '</div>' + blToolbarHtml + '</div>' +
     '<div class="backlog-lane-body" data-sprint-drop="null" ' +
     'ondragover="event.preventDefault();event.currentTarget.classList.add(\'drag-over\')" ' +
     'ondragleave="window._laneDragLeave(event)" ' +
     'ondrop="window._dropToSprint(event,null)">';
 
   for (var bk = 0; bk < backlogIssues.length; bk++) {
-    html += backlogRow(backlogIssues[bk]);
+    html += backlogRow(backlogIssues[bk], 'backlog');
   }
   html += '<div class="backlog-add-row"><button type="button" class="backlog-add-btn" onclick="window._addIssueToSprint(null)">' +
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
@@ -218,7 +247,15 @@ function renderBacklog() {
   $('backlogContent').innerHTML = html;
 }
 
-function backlogRow(iss) {
+// `laneKey` identifies which lane this row belongs to for multi-select
+// purposes -- the real sprint id for an active/planning lane, the literal
+// string 'backlog' for the ungrouped Backlog lane, or falsy (undefined/null)
+// for a Done-lane or completed-sprint row, which never gets a checkbox at
+// all: a completed sprint's tickets are closed history, and a Done-without-
+// a-sprint ticket has nowhere meaningful for "move to sprint" to send it.
+// Selection state is kept PER LANE (window._blSelect[laneKey]) so checking
+// tickets in one sprint's lane doesn't bleed into another's.
+function backlogRow(iss, laneKey) {
   var assignee = findUser(iss.assignee_id);
   var isSubtask = iss.type === 'subtask';
   var parentInfo = '';
@@ -226,13 +263,37 @@ function backlogRow(iss) {
     var parent = S.data.issues.find(function(i){ return i.id === iss.parent_id; });
     if (parent) parentInfo = '<span class="subtask-parent-ref" title="Subtask of ' + esc(parent.key) + '">' + esc(parent.key) + ' &rsaquo;</span> ';
   }
+  var selectable = !!laneKey;
+  var laneState = selectable ? _blLaneState(laneKey) : null;
+  var blSelectMode = !!(laneState && laneState.mode);
+  var isChecked = !!(laneState && laneState.ids[iss.id]);
+  // Double-click enters select mode (and checks the double-clicked row);
+  // once in select mode, a plain click anywhere on the row toggles its own
+  // checkbox instead of opening the issue -- opening the issue is only the
+  // click behaviour OUTSIDE select mode. Both handlers are no-ops for a
+  // non-selectable row (Done/completed lanes keep their original single click).
+  var rowClickJs = selectable
+    ? 'window._blRowClick(event,\'' + laneKey + '\',\'' + iss.id + '\')'
+    : 'openIssuePage(\'' + iss.id + '\')';
+  var rowDblClickJs = selectable ? ' ondblclick="window._blEnterSelectMode(event,\'' + laneKey + '\',\'' + iss.id + '\')"' : '';
+  var checkboxHtml = selectable
+    ? '<input type="checkbox" class="bl-row-checkbox" onclick="event.stopPropagation()" ' +
+      'onchange="window._blCheckboxChange(\'' + laneKey + '\',\'' + iss.id + '\',this)"' + (isChecked ? ' checked' : '') + '>'
+    : '';
   // .backlog-row is a CSS grid, so every row must emit the SAME number of cells
   // in the SAME order or the columns stop lining up. That means: the parent
   // reference lives inside the title cell rather than being its own cell, and
   // story points render an empty cell when unset instead of being skipped.
-  return '<div class="backlog-row' + (isSubtask ? ' backlog-row-subtask' : '') + '" draggable="true" data-issue-id="' + iss.id + '" ' +
-    'ondragstart="event.dataTransfer.setData(\'text/plain\',\'' + iss.id + '\')" ' +
-    'onclick="openIssuePage(\'' + iss.id + '\')">' +
+  // The checkbox is deliberately NOT one of those grid cells -- it's an
+  // absolutely-positioned overlay in the row's own left padding (see
+  // .bl-row-checkbox in styles.css), so adding/removing it never touches the
+  // 7-column grid every lane's rows already have to agree on.
+  return '<div class="backlog-row' + (isSubtask ? ' backlog-row-subtask' : '') +
+    (selectable ? ' bl-selectable' : '') + (blSelectMode ? ' bl-select-mode' : '') + (isChecked ? ' bl-row-selected' : '') +
+    '" draggable="true" data-issue-id="' + iss.id + '" ' +
+    'ondragstart="event.dataTransfer.setData(\'text/plain\',\'' + iss.id + '\')"' + rowDblClickJs + ' ' +
+    'onclick="' + rowClickJs + '">' +
+    checkboxHtml +
     '<span class="bl-cell bl-type">' + typeIcon(iss.type) + '</span>' +
     '<span class="bl-cell issue-key bl-key">' + esc(issueKeyStr(iss)) + '</span>' +
     '<span class="bl-cell bl-title" title="' + escAttr(iss.title) + '">' + parentInfo + esc(iss.title) + '</span>' +
@@ -305,6 +366,216 @@ function isSprintClosed(sprintId) {
   var sp = (S.data.sprints || []).find(function (s) { return s.id === sprintId; });
   return !!sp && sp.status === 'completed';
 }
+
+// ── Backlog/Active/Planning multi-select + bulk move ─────────────────────
+// Moving tickets one at a time by drag is slow once there are more than a
+// handful to move. Double-clicking a row in the Backlog lane, the Active
+// Sprint lane, or any Planning Sprint lane turns on checkboxes for every row
+// in THAT lane (each lane keeps its own independent selection -- see
+// _blLaneState) so several can be picked at once, then "Move to Backlog" /
+// "Move to Active Sprint" / "Move to Sprint Planning" beside that lane's own
+// header move all of them in one go -- whichever of the three doesn't match
+// the lane they're already in. Available to every space member, same as
+// dragging a single card already is -- server-side `issue.move` is
+// member-tier (see .claude/rules/permission-matrix.md), and this reuses that
+// exact per-issue endpoint rather than inventing a stricter bulk permission.
+// Completed sprints and the Done-without-a-sprint lane get none of this --
+// see backlogRow's own comment on `laneKey`.
+
+// laneKey -> { mode: bool, ids: {issueId: true} }. 'backlog' is the literal
+// key for the ungrouped Backlog lane; every other lane uses its real sprint id.
+function _blLaneState(laneKey) {
+  if (!window._blSelect) window._blSelect = {};
+  return window._blSelect[laneKey] || (window._blSelect[laneKey] = { mode: false, ids: {} });
+}
+
+// Drops any selected id that isn't in `validIds` any more (moved out of this
+// lane, deleted, filtered out) -- run once per lane on every render so a
+// stale checked id can't silently "select" something the user can no longer
+// see in that lane.
+function _blPruneLaneState(laneKey, validIds) {
+  if (!window._blSelect || !window._blSelect[laneKey]) return;
+  var state = window._blSelect[laneKey];
+  var idSet = {};
+  validIds.forEach(function (id) { idSet[id] = true; });
+  Object.keys(state.ids).forEach(function (id) { if (!idSet[id]) delete state.ids[id]; });
+}
+
+window._blEnterSelectMode = function (event, laneKey, issueId) {
+  if (event) event.preventDefault();
+  // A real double-click always fires TWO 'click' events before 'dblclick' --
+  // without this, _blRowClick's very first click already called
+  // openIssuePage and navigated away before this handler ever got a chance
+  // to turn select mode on, which is exactly why double-click looked like it
+  // "just opens the ticket": the click beat the dblclick to it every time.
+  if (window._blPendingOpenTimer) {
+    clearTimeout(window._blPendingOpenTimer);
+    window._blPendingOpenTimer = null;
+  }
+  var state = _blLaneState(laneKey);
+  state.mode = true;
+  state.ids[issueId] = true;
+  renderBacklog();
+};
+
+window._blRowClick = function (event, laneKey, issueId) {
+  var state = _blLaneState(laneKey);
+  if (state.mode) {
+    if (state.ids[issueId]) delete state.ids[issueId];
+    else state.ids[issueId] = true;
+    renderBacklog();
+    return;
+  }
+  // Not in select mode yet, so this click might be the first half of a
+  // double-click rather than a real single click -- the browser has no way
+  // to know which until the dblclick timeout expires. Delay the navigation
+  // just long enough for a following dblclick (see _blEnterSelectMode above)
+  // to cancel it; a genuine single click still opens the ticket, just ~1
+  // frame-cycle later than before, which reads as instant.
+  if (window._blPendingOpenTimer) clearTimeout(window._blPendingOpenTimer);
+  window._blPendingOpenTimer = setTimeout(function () {
+    window._blPendingOpenTimer = null;
+    openIssuePage(issueId);
+  }, 280);
+};
+
+window._blCheckboxChange = function (laneKey, issueId, cb) {
+  var state = _blLaneState(laneKey);
+  if (cb.checked) state.ids[issueId] = true;
+  else delete state.ids[issueId];
+  renderBacklog();
+};
+
+window._blExitSelectMode = function (laneKey) {
+  var state = _blLaneState(laneKey);
+  state.mode = false;
+  state.ids = {};
+  renderBacklog();
+};
+
+// Builds the "N selected / Move to ... / Cancel" markup for one lane's
+// header, or null when that lane isn't currently in select mode (the caller
+// then falls back to its normal header buttons). `kind` is 'backlog',
+// 'active' or 'planning' -- whichever this lane itself already is, so its
+// own kind is never offered as a move target. `ownSprintId` (null for the
+// Backlog lane) excludes a planning lane from offering itself as a "Sprint
+// Planning" target when it's the only one.
+function _blLaneToolbarHtml(laneKey, kind, ownSprintId) {
+  var state = _blLaneState(laneKey);
+  if (!state.mode) return null;
+  var count = Object.keys(state.ids).length;
+  function moveBtn(label, targetKind, cls) {
+    return '<button type="button" class="btn btn-sm ' + cls + '" ' + (count ? '' : 'disabled') +
+      ' onclick="window._blMoveSelected(\'' + targetKind + '\',\'' + laneKey + '\',event)">' + esc(label) + '</button>';
+  }
+  var btns = '';
+  if (kind !== 'backlog') btns += moveBtn('Move to Backlog', 'backlog', 'btn-outline');
+  if (kind !== 'active') {
+    var hasActive = getSpaceSprints(S.currentSpace).some(function (sp) { return sp.status === 'active'; });
+    if (hasActive) btns += moveBtn('Move to Active Sprint', 'active', 'btn-primary');
+  }
+  var otherPlanning = getSpaceSprints(S.currentSpace).filter(function (sp) {
+    return sp.status === 'planning' && sp.id !== ownSprintId;
+  });
+  if (otherPlanning.length) btns += moveBtn('Move to Sprint Planning', 'planning', 'btn-outline');
+  return '<span class="bl-select-count">' + count + ' selected</span>' + btns +
+    '<button type="button" class="btn btn-sm btn-outline bl-select-cancel" onclick="window._blExitSelectMode(\'' + laneKey + '\')">Cancel</button>';
+}
+
+// kind: 'backlog' always resolves to the single synthetic "no sprint" target;
+// 'active' finds the space's one active sprint directly (sprint-lifecycle.md
+// guarantees at most one per space, and it's never this lane's own kind since
+// _blLaneToolbarHtml doesn't offer it there); 'planning' moves straight into
+// the only OTHER planning sprint if there's exactly one, or opens a small
+// picker if there's more than one -- there's no single obvious target to
+// guess between.
+window._blMoveSelected = function (kind, laneKey, event) {
+  var state = _blLaneState(laneKey);
+  var ids = Object.keys(state.ids);
+  if (!ids.length) return;
+  if (kind === 'backlog') {
+    _blPerformMove(ids, { id: null, name: 'the Backlog' }, laneKey);
+    return;
+  }
+  var ownSprintId = laneKey === 'backlog' ? null : laneKey;
+  var sprints = getSpaceSprints(S.currentSpace).filter(function (sp) {
+    return sp.status === kind && sp.id !== ownSprintId;
+  });
+  if (!sprints.length) {
+    toast('No ' + kind + ' sprint in this space to move into.', 'error');
+    return;
+  }
+  if (kind === 'active' || sprints.length === 1) {
+    _blPerformMove(ids, sprints[0], laneKey);
+    return;
+  }
+  _blShowPlanningPicker(sprints, ids, event, laneKey);
+};
+
+function _blPerformMove(ids, sprint, laneKey) {
+  Promise.all(ids.map(function (id) {
+    return api('/api/issues/' + id + '/move', 'PUT', { sprint_id: sprint.id, position: 0 }, { silent: true })
+      .then(function () { return { id: id, ok: true }; })
+      .catch(function (e) { return { id: id, ok: false, err: e }; });
+  })).then(function (results) {
+    var okCount = results.filter(function (r) { return r.ok; }).length;
+    var failed = results.filter(function (r) { return !r.ok; });
+    var state = _blLaneState(laneKey);
+    state.mode = false;
+    state.ids = {};
+    return refreshData().then(function () {
+      renderBacklog();
+      if (okCount) {
+        toast(okCount + (okCount === 1 ? ' issue' : ' issues') + ' moved to ' + sprint.name);
+      }
+      if (failed.length) {
+        toast(failed.length + (failed.length === 1 ? ' issue' : ' issues') + ' failed to move — ' + errorReason(failed[0].err), 'error');
+      }
+    });
+  });
+}
+
+// Reuses the same trigger/panel visual language as the MBR/Your Work header
+// filters (yw-filter-trigger, yw-filter-panel, yw-filter-opt) so a small
+// "pick one of several" popup looks like an existing pattern rather than a
+// one-off. Anchored to the "Move to Sprint Planning" button that was just
+// clicked, found via the live click event.
+function _blShowPlanningPicker(sprints, ids, event, laneKey) {
+  var existing = document.getElementById('blPlanningPicker');
+  if (existing) existing.remove();
+  var btn = event && event.target && event.target.closest ? event.target.closest('button') : null;
+  if (!btn) return;
+  var panel = document.createElement('div');
+  panel.id = 'blPlanningPicker';
+  panel.className = 'yw-filter-panel bl-planning-picker';
+  panel.innerHTML = sprints.map(function (sp) {
+    return '<div class="yw-filter-opt" onclick="window._blPickPlanningSprint(\'' + sp.id + '\')">' + esc(sp.name) + '</div>';
+  }).join('');
+  panel.style.position = 'fixed';
+  var rect = btn.getBoundingClientRect();
+  panel.style.top = (rect.bottom + 4) + 'px';
+  panel.style.left = rect.left + 'px';
+  document.body.appendChild(panel);
+  window._blPlanningPickerIds = ids;
+  window._blPlanningPickerSprints = sprints;
+  window._blPlanningPickerLaneKey = laneKey;
+  setTimeout(function () {
+    document.addEventListener('click', _blDismissPlanningPicker, { once: true });
+  }, 0);
+}
+
+function _blDismissPlanningPicker() {
+  var el = document.getElementById('blPlanningPicker');
+  if (el) el.remove();
+}
+
+window._blPickPlanningSprint = function (sprintId) {
+  _blDismissPlanningPicker();
+  var sprint = (window._blPlanningPickerSprints || []).find(function (s) { return s.id === sprintId; });
+  var ids = window._blPlanningPickerIds || [];
+  var laneKey = window._blPlanningPickerLaneKey;
+  if (sprint && ids.length) _blPerformMove(ids, sprint, laneKey);
+};
 
 window._addIssueToSprint = function (sprintId) {
   if (isSprintClosed(sprintId)) {
