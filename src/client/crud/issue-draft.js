@@ -156,7 +156,10 @@ async function deleteCurrentIssueDraft() {
 window._handleCreateIssueCancelClick = async function () {
   await flushIssueDraftAutosave();
   if (!_currentIssueDraftId) { closeModal('modal-issue'); return; }
-  var keep = await confirmDialog('Save this ticket as a draft so you can finish it later?');
+  // forceChoice: this decision (keep the autosaved draft or throw it away)
+  // has to be a real answer, not an accidental backdrop click or × press --
+  // Confirm/Discard are the only two ways out of this particular prompt.
+  var keep = await confirmDialog('Save this ticket as a draft so you can finish it later?', { noLabel: 'Discard', forceChoice: true });
   if (!keep) await deleteCurrentIssueDraft();
   closeModal('modal-issue');
 };

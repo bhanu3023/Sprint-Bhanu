@@ -603,15 +603,31 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     sprints.filter(sp => sp.status === 'completed')
       .flatMap(sp => [...(sp.developer_ids || []), ...(sp.qa_ids || [])])
   )];
-  const members = rosterIds.length
-    ? (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [rosterIds])).rows
+  // A spillover issue's assignee is not guaranteed to be on the sprint's own
+  // Developer/QA roster (that roster and an issue's Assignee field are two
+  // separate things) — resolving names ONLY for rosterIds left anyone else
+  // hardcoded as the literal string 'Unknown' below, even though they are a
+  // real, known user. Fetching every spillover assignee's name too (still
+  // ONE query, still keyed off real ids) fixes that without touching which
+  // rows get seeded up front or in what order.
+  const spilloverAssigneeIds = completedSprintRows.flatMap(sp => sp.spillover_issues.map(i => i.assignee_id)).filter(Boolean);
+  const nameIds = [...new Set([...rosterIds, ...spilloverAssigneeIds])];
+  const members = nameIds.length
+    ? (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [nameIds])).rows
     : [];
+  const userNameById = {};
+  members.forEach(u => { userNameById[u.id] = u; });
   const byUser = {};
-  members.forEach(u => { byUser[u.id] = { name: u.name, color: u.color, per_sprint: {} }; });
+  rosterIds.forEach(id => {
+    if (userNameById[id]) byUser[id] = { name: userNameById[id].name, color: userNameById[id].color, per_sprint: {} };
+  });
   completedSprintRows.forEach(sp => {
     sp.spillover_issues.forEach(i => {
       if (!i.assignee_id) return;
-      if (!byUser[i.assignee_id]) byUser[i.assignee_id] = { name: 'Unknown', color: '#6b7280', per_sprint: {} };
+      if (!byUser[i.assignee_id]) {
+        const u2 = userNameById[i.assignee_id];
+        byUser[i.assignee_id] = { name: u2 ? u2.name : 'Unknown', color: (u2 && u2.color) || '#6b7280', per_sprint: {} };
+      }
       const u = byUser[i.assignee_id];
       const ps = (u.per_sprint[sp.id] = u.per_sprint[sp.id] || { sprint_id: sp.id, sprint_name: sp.name, points: 0, count: 0, issues: [] });
       ps.points += Number(i.story_points) || 0;

@@ -254,29 +254,19 @@ function richTextHasMeaningfulChange(originalHtml, currentHtml) {
   return richTextMediaSignature(originalHtml) !== richTextMediaSignature(currentHtml);
 }
 
-function updateDrawerDescEditorState(editorId, originalHtml) {
-  var map = {
-    drawerDesc: { btns: 'drawerDescBtns', save: 'drawerDescSave' },
-    drawerFixDesc: { btns: 'drawerFixDescBtns', save: 'drawerFixDescSave' }
-  };
-  var cfg = map[editorId];
-  if (!cfg) return;
-  var el = $(editorId);
-  var btns = $(cfg.btns);
-  var saveBtn = $(cfg.save);
-  if (!el || !btns || !saveBtn) return;
-  var changed = richTextHasMeaningfulChange(originalHtml || '', el.innerHTML);
+// Description/Fix Description no longer have a Save button — they autosave
+// on blur (issue-drawer.js) — so this just shows the Cancel row while the
+// field is focused/being edited. Its own dirty-check is still done where it
+// matters: commitDrawerDesc/FixDesc (issue-drawer.js) skip the actual save
+// when richTextHasMeaningfulChange says nothing changed, and Cancel simply
+// reverts to originalHtml regardless of whether anything did.
+function updateDrawerDescEditorState(editorId) {
+  var map = { drawerDesc: 'drawerDescBtns', drawerFixDesc: 'drawerFixDescBtns' };
+  var btnsId = map[editorId];
+  if (!btnsId) return;
+  var btns = $(btnsId);
+  if (!btns) return;
   btns.style.display = 'flex';
-  // Dimmed look only — never the native `disabled` attribute. A browser never
-  // dispatches click on a disabled button at all, so if this recompute (fired
-  // from onfocus/oninput/a blur-triggered auto-linkify pass) landed disabled=true
-  // in the same gesture as a click on Save, that click would be silently
-  // swallowed before the handler below ever ran — no error, no save, the only
-  // visible effect being the description losing focus. The click handler
-  // re-checks richTextHasMeaningfulChange itself, so it stays a correct no-op
-  // when there is truly nothing to save; it just can never be a SILENT one.
-  saveBtn.style.opacity = changed ? '1' : '0.45';
-  saveBtn.style.cursor = changed ? 'pointer' : 'not-allowed';
 }
 
 function markDrawerDescDirty(editorId) {

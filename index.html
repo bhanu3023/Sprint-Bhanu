@@ -770,8 +770,7 @@
                     <div id="drawerDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a description..."></div>
                   </div>
                   <div id="drawerDescBtns" class="drawer-editor-actions" style="display:none">
-                    <button type="button" id="drawerDescSave" class="btn btn-primary btn-sm">Save</button>
-                    <button type="button" id="drawerDescCancel" class="btn btn-secondary btn-sm">Cancel</button>
+                    <button type="button" id="drawerDescCancel" class="btn btn-secondary">Cancel</button>
                   </div>
                 </div>
                 <div class="drawer-detail-row" data-builtin-field="fix_description">
@@ -797,8 +796,7 @@
                     <div id="drawerFixDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a fix description..."></div>
                   </div>
                   <div id="drawerFixDescBtns" class="drawer-editor-actions" style="display:none">
-                    <button type="button" id="drawerFixDescSave" class="btn btn-primary btn-sm">Save</button>
-                    <button type="button" id="drawerFixDescCancel" class="btn btn-secondary btn-sm">Cancel</button>
+                    <button type="button" id="drawerFixDescCancel" class="btn btn-secondary">Cancel</button>
                   </div>
                 </div>
               </div>
@@ -1436,17 +1434,17 @@
 
   <!-- Confirm Dialog -->
   <div id="modal-confirm" data-hj-suppress class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('modal-confirm')"></div>
+    <div class="modal-backdrop" onclick="window._dismissConfirmDialog()"></div>
     <div class="modal-dialog modal-dialog-sm">
       <div class="modal-header">
         <h3>Confirm</h3>
-        <button class="btn-icon modal-close" onclick="closeModal('modal-confirm')">✕</button>
+        <button class="btn-icon modal-close" id="confirmCloseBtn" onclick="window._dismissConfirmDialog()">✕</button>
       </div>
       <div class="modal-body">
         <p id="confirmMsg">Are you sure?</p>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="confirmNo" onclick="closeModal('modal-confirm')">Cancel</button>
+        <button class="btn btn-secondary" id="confirmNo">Cancel</button>
         <button class="btn btn-danger" id="confirmYes">Confirm</button>
       </div>
     </div>

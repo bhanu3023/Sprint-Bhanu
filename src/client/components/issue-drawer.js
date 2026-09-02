@@ -30,18 +30,16 @@ function getDrawerTitleValue() {
 }
 
 // #drawerTitle is static markup that outlives every drawer open, so its listeners
-// are bound once (rebinding stacked duplicates). It therefore must NOT capture an
-// autoSave: the closure it captured on the first open kept saving to that first
-// ticket, so editing any later ticket's title silently overwrote the first one's
-// — and patched the wrong row in the local cache too. Resolve the save target at
-// typing time instead, via _activeDrawerAutoSave.
+// are bound once (rebinding stacked duplicates). It therefore must NOT capture a
+// save function or a baseline value directly: a closure captured on the first
+// open kept saving to that first ticket, so editing any later ticket's title
+// silently overwrote the first one's — and patched the wrong row in the local
+// cache too. Resolve both the save target AND the "did this actually change"
+// baseline at blur time instead, via the module-level pointers below.
 function bindDrawerTitleField() {
   var el = $('drawerTitle');
   if (!el || el._titleBound) return;
   el._titleBound = true;
-  var autoSave = function (field, value) {
-    if (_activeDrawerAutoSave) _activeDrawerAutoSave(field, value);
-  };
 
   el.addEventListener('input', function () {
     var noBreaks = stripTitleNewlines(el.value);
@@ -51,7 +49,8 @@ function bindDrawerTitleField() {
       el.selectionStart = el.selectionEnd = Math.min(pos, noBreaks.length);
     }
     resizeDrawerTitleField();
-    if (noBreaks.trim()) autoSave('title', noBreaks);
+    // Deliberately no save call here — typing itself never touches the
+    // network. See the blur handler below for when a save actually happens.
   });
 
   el.addEventListener('keydown', function (e) {
@@ -74,11 +73,21 @@ function bindDrawerTitleField() {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
+  // Saves on blur ONLY — not per keystroke, not on a timer. Fires whenever
+  // focus actually leaves the field: clicking elsewhere in the drawer,
+  // tabbing away, or a programmatic .blur() from flushFocusedDrawerField()
+  // (refreshing, switching tabs, opening a different ticket, or closing the
+  // drawer — see that function). Skipped entirely when the value hasn't
+  // actually changed since the last save, so re-focusing and blurring again
+  // with no edits in between is a silent no-op, not a redundant PUT.
   el.addEventListener('blur', function () {
     var clean = finalizeIssueTitle(el.value);
     if (el.value !== clean) el.value = clean;
     resizeDrawerTitleField();
-    if (clean) autoSave('title', clean);
+    if (clean && clean !== _activeDrawerTitleOriginal && _activeDrawerSaveFieldNow) {
+      var saveFn = _activeDrawerSaveFieldNow;
+      saveFn('title', clean).then(function () { _activeDrawerTitleOriginal = clean; }).catch(function () {});
+    }
   });
 }
 
@@ -95,6 +104,13 @@ async function openDrawer(issueId) {
   var loadingOverlay = $('drawerLoadingOverlay');
   var switchingTickets = drawerEl && !drawerEl.hasAttribute('hidden') && S.drawerIssueId !== issueId;
   if (switchingTickets && loadingOverlay) loadingOverlay.removeAttribute('hidden');
+  // A title/description/fix-description edit can still be sitting focused
+  // and unsaved in the PREVIOUS ticket at the exact moment a different one
+  // (a subtask, a linked issue, the parent breadcrumb) is opened -- none of
+  // that switches focus away first on its own. Force it to blur (and so
+  // save, via the same logic a genuine blur already triggers) before this
+  // function goes on to fetch and render the new ticket's own data.
+  if (switchingTickets) flushFocusedDrawerField();
 
   // Save current location for back button - detect allwork from URL/view
   var currentTab = S.currentTab;
@@ -482,6 +498,33 @@ window.openDrawer = openDrawer;
 // through this rather than capturing an autoSave, or they keep saving to the
 // first ticket ever opened. See bindDrawerTitleField.
 var _activeDrawerAutoSave = null;
+// Same reasoning, for title's immediate (non-debounced) blur-triggered save —
+// saveFieldNow itself, and the pre-edit value to compare against so a blur
+// with no actual change is a no-op. Both reassigned fresh in bindDrawerEdits
+// on every drawer open.
+var _activeDrawerSaveFieldNow = null;
+var _activeDrawerTitleOriginal = '';
+
+// Title, Description and Fix Description all save on blur only (see
+// bindDrawerTitleField and the onblur handlers bindDrawerEdits attaches to
+// #drawerDesc/#drawerFixDesc) — never per keystroke, never on a timer. That
+// leaves one gap: a field can still be FOCUSED, mid-edit, with unsaved
+// content, at the exact moment the tab is hidden (refresh, tab switch, app
+// minimize), a different ticket is opened, or the drawer is closed — none of
+// which naturally fire a blur on their own. Calling the browser's own
+// .blur() on whatever is currently focused reuses the exact same
+// already-correct save logic instead of duplicating it a third time, and
+// naturally does nothing when the focused element isn't one of these three
+// fields (or nothing is focused at all).
+function flushFocusedDrawerField() {
+  var active = document.activeElement;
+  if (active && (active.id === 'drawerTitle' || active.id === 'drawerDesc' || active.id === 'drawerFixDesc')) {
+    active.blur();
+  }
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) flushFocusedDrawerField();
+});
 
 // ── @mention autocomplete ──────────────────────────────────
 // Parameterized on `el` (rather than closing over one hardcoded element) so it
@@ -772,6 +815,10 @@ function bindDrawerEdits(issue) {
   var issueKey = issueKeyStr(issue);
   var pending = {};
   var _saveTimer = null;
+  // Title's baseline for "did this actually change" -- read by the bind-once
+  // blur handler in bindDrawerTitleField via the module pointer, since that
+  // handler can't capture a fresh local var itself.
+  _activeDrawerTitleOriginal = issue.title || '';
 
   function autoSave(field, value) {
     pending[field] = value;
@@ -827,6 +874,9 @@ function bindDrawerEdits(issue) {
       throw e;
     }
   }
+  // Point the once-bound title blur handler at THIS drawer's save, same
+  // reasoning as _activeDrawerAutoSave above.
+  _activeDrawerSaveFieldNow = saveFieldNow;
 
 
   var _drawerStatusPrevious = issue.status || 'To Do';
@@ -966,7 +1016,7 @@ function bindDrawerEdits(issue) {
   // Save with no error and no visible cause — reported as "editing the
   // description doesn't save".
   $('drawerDesc').onfocus = function() {
-    updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
+    updateDrawerDescEditorState('drawerDesc');
   };
 
   // Open links inside contenteditable description.
@@ -985,68 +1035,53 @@ function bindDrawerEdits(issue) {
     descEl.addEventListener('mousedown', openLink);
     descEl.addEventListener('click', openLink);
   })();
-  var drawerDescSaveBtn = $('drawerDescSave');
   var drawerDescCancelBtn = $('drawerDescCancel');
-  // Clicking Save/Cancel while the description is still focused fires a
+  // Clicking Cancel while the description is still focused fires a
   // mousedown -> blur -> mouseup -> click sequence, and that blur is what
   // makes the toolbar above collapse (display:none) via the delegated
   // focusin/focusout handler in admin-settings.js -- a real reflow that
   // shifts everything below the editor upward WHILE the click is still in
   // flight. If the mouseup lands after that shift, it can miss the button
-  // entirely: nothing happens, no error, the edited text is still sitting
-  // there unsaved, and the toolbar is just gone -- reported live as "first
-  // click does nothing, second click saves." preventDefault() on mousedown
-  // stops the browser's default focus-change action, so the description
-  // never blurs mid-click and the layout never moves under the cursor -- the
-  // exact technique this file already uses for the toolbar buttons and the
-  // mention-autocomplete list, applied here too.
-  if (drawerDescSaveBtn) drawerDescSaveBtn.onmousedown = function (e) { e.preventDefault(); };
+  // entirely -- reported live back when there was still a Save button here
+  // too ("first click does nothing, second click saves"). preventDefault()
+  // on mousedown stops the browser's default focus-change action, so the
+  // description never blurs mid-click and the layout never moves under the
+  // cursor -- the exact technique this file already uses for the toolbar
+  // buttons and the mention-autocomplete list, applied here too.
   if (drawerDescCancelBtn) drawerDescCancelBtn.onmousedown = function (e) { e.preventDefault(); };
-  if(drawerDescSaveBtn) drawerDescSaveBtn.onclick = async function(e) {
-    e.preventDefault(); e.stopPropagation();
+  // The actual save, run by the blur-triggered autosave below (there is no
+  // Save button any more — saving is implicit, the same as Title). A no-op
+  // when nothing has actually changed since the last save, so a stray blur
+  // never fires a redundant PUT.
+  async function commitDrawerDesc() {
     var descEl = $('drawerDesc');
-    if (!richTextHasMeaningfulChange(_drawerDescOriginal, descEl.innerHTML)) return;
-    drawerDescSaveBtn.disabled = true;
-    drawerDescSaveBtn.textContent = 'Saving...';
-    try {
-      var imgs = descEl.querySelectorAll('img[src^="data:"],img[src^="blob:"]');
-      for (var i = 0; i < imgs.length; i++) {
-        try {
-          var resp = await fetch(imgs[i].src);
-          var blob = await resp.blob();
-          var fd = new FormData();
-          fd.append('files', blob, 'desc-img-' + Date.now() + '.png');
-          var up = await fetch('/api/upload-temp', { method:'POST', headers:{'Authorization':'Bearer '+getAuthToken()}, body:fd });
-          var upJson = await up.json();
-          if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
-        } catch(ex) { console.error('img upload failed', ex); }
-      }
-      // descEl.innerHTML still carries the LIVE session token baked into every
-      // desc-inline-img src (fileApiUrl() puts it there so the image is visible
-      // while editing) — stripping it here mirrors getDescriptionHtmlForSave(),
-      // which the Create Issue path already uses. Without this, the stored
-      // description keeps today's token forever; augmentFileUrlsInHtml() then
-      // appends a SECOND ?t=... on every later render (its regex stops at the
-      // first "?", so it can't tell the URL already has one), producing a
-      // malformed src that always 401s — the exact "screenshot goes broken
-      // after saving" bug, and re-pasting the same image then reports it as
-      // already attached because the broken <img> is still sitting in the DOM.
-      await saveFieldNow('description', stripFileAuthTokensFromHtml(descEl.innerHTML.trim()));
-      _drawerDescOriginal = descEl.innerHTML;
-      window._drawerDescOriginalHtml = _drawerDescOriginal;
-      var b = $('drawerDescBtns'); if(b) b.style.display='none';
-      // The mousedown guard above keeps descEl focused (and its toolbar
-      // visible) all the way through the click, on purpose -- so the "editing
-      // is done" visual (border and toolbar gone) has to be triggered
-      // explicitly now, instead of happening for free via blur.
-      descEl.blur();
-    } finally {
-      drawerDescSaveBtn.disabled = false;
-      drawerDescSaveBtn.textContent = 'Save';
-      drawerDescSaveBtn.style.opacity = '1';
-      drawerDescSaveBtn.style.cursor = 'pointer';
+    if (!descEl || !richTextHasMeaningfulChange(_drawerDescOriginal, descEl.innerHTML)) return;
+    var imgs = descEl.querySelectorAll('img[src^="data:"],img[src^="blob:"]');
+    for (var i = 0; i < imgs.length; i++) {
+      try {
+        var resp = await fetch(imgs[i].src);
+        var blob = await resp.blob();
+        var fd = new FormData();
+        fd.append('files', blob, 'desc-img-' + Date.now() + '.png');
+        var up = await fetch('/api/upload-temp', { method:'POST', headers:{'Authorization':'Bearer '+getAuthToken()}, body:fd });
+        var upJson = await up.json();
+        if (upJson && upJson.files && upJson.files[0]) imgs[i].src = upJson.files[0].url;
+      } catch(ex) { console.error('img upload failed', ex); }
     }
-  };
+    // descEl.innerHTML still carries the LIVE session token baked into every
+    // desc-inline-img src (fileApiUrl() puts it there so the image is visible
+    // while editing) — stripping it here mirrors getDescriptionHtmlForSave(),
+    // which the Create Issue path already uses. Without this, the stored
+    // description keeps today's token forever; augmentFileUrlsInHtml() then
+    // appends a SECOND ?t=... on every later render (its regex stops at the
+    // first "?", so it can't tell the URL already has one), producing a
+    // malformed src that always 401s — the exact "screenshot goes broken
+    // after saving" bug, and re-pasting the same image then reports it as
+    // already attached because the broken <img> is still sitting in the DOM.
+    await saveFieldNow('description', stripFileAuthTokensFromHtml(descEl.innerHTML.trim()));
+    _drawerDescOriginal = descEl.innerHTML;
+    window._drawerDescOriginalHtml = _drawerDescOriginal;
+  }
   if(drawerDescCancelBtn) drawerDescCancelBtn.onclick = function() {
     $('drawerDesc').innerHTML = _drawerDescOriginal;
     window._drawerDescOriginalHtml = _drawerDescOriginal;
@@ -1054,7 +1089,22 @@ function bindDrawerEdits(issue) {
     $('drawerDesc').blur();
   };
   $('drawerDesc').oninput = function () {
-    updateDrawerDescEditorState('drawerDesc', _drawerDescOriginal);
+    updateDrawerDescEditorState('drawerDesc');
+  };
+  // Autosave: fires on every blur that ISN'T the programmatic .blur() call
+  // Cancel makes above (Cancel already reverts to _drawerDescOriginal before
+  // calling it, so commitDrawerDesc() sees no change and returns immediately)
+  // — genuinely walking away is the only case this does anything for. Also
+  // reached by flushFocusedDrawerField() forcing a blur before the tab is
+  // hidden, a different ticket opens, or the drawer closes. Blurring always
+  // means "not editing this any more", whether or not there was actually
+  // something to save, so the Cancel row is hidden here too -- previously
+  // only the (now-removed) Save button's own click handler did that, so
+  // walking away left Cancel visibly stuck on screen forever.
+  $('drawerDesc').onblur = function () {
+    commitDrawerDesc().finally(function () {
+      var b = $('drawerDescBtns'); if (b) b.style.display = 'none';
+    });
   };
   var _drawerFixDescOriginal = $('drawerFixDesc') ? $('drawerFixDesc').innerHTML : (issue.fix_description || '');
   window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
@@ -1062,33 +1112,20 @@ function bindDrawerEdits(issue) {
   // Same fix as drawerDesc above — don't rebaseline the "original" snapshot
   // on every focus, only on drawer-open and after a successful save.
   $('drawerFixDesc').onfocus = function() {
-    updateDrawerDescEditorState('drawerFixDesc', _drawerFixDescOriginal);
+    updateDrawerDescEditorState('drawerFixDesc');
   };
-  var fixSaveBtn = $('drawerFixDescSave');
   var fixCancelBtn = $('drawerFixDescCancel');
-  // Same fix as drawerDescSave/Cancel above, same reason.
-  if (fixSaveBtn) fixSaveBtn.onmousedown = function (e) { e.preventDefault(); };
+  // Same fix as drawerDescCancel above, same reason.
   if (fixCancelBtn) fixCancelBtn.onmousedown = function (e) { e.preventDefault(); };
-  if(fixSaveBtn) fixSaveBtn.onclick = async function(e) {
-    e.preventDefault(); e.stopPropagation();
+  // Same shared-commit-function reasoning as commitDrawerDesc above.
+  async function commitDrawerFixDesc() {
     var fixEl = $('drawerFixDesc');
-    if (!richTextHasMeaningfulChange(_drawerFixDescOriginal, fixEl.innerHTML)) return;
-    fixSaveBtn.disabled = true;
-    fixSaveBtn.textContent = 'Saving...';
-    try {
-      // Same token-stripping fix as the description save above.
-      await saveFieldNow('fix_description', stripFileAuthTokensFromHtml(fixEl.innerHTML.trim()));
-      _drawerFixDescOriginal = fixEl.innerHTML;
-      window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
-      var b = $('drawerFixDescBtns'); if(b) b.style.display='none';
-      fixEl.blur();
-    } finally {
-      fixSaveBtn.disabled = false;
-      fixSaveBtn.textContent = 'Save';
-      fixSaveBtn.style.opacity = '1';
-      fixSaveBtn.style.cursor = 'pointer';
-    }
-  };
+    if (!fixEl || !richTextHasMeaningfulChange(_drawerFixDescOriginal, fixEl.innerHTML)) return;
+    // Same token-stripping fix as the description save above.
+    await saveFieldNow('fix_description', stripFileAuthTokensFromHtml(fixEl.innerHTML.trim()));
+    _drawerFixDescOriginal = fixEl.innerHTML;
+    window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
+  }
   if(fixCancelBtn) fixCancelBtn.onclick = function() {
     $('drawerFixDesc').innerHTML = _drawerFixDescOriginal;
     window._drawerFixDescOriginalHtml = _drawerFixDescOriginal;
@@ -1096,7 +1133,14 @@ function bindDrawerEdits(issue) {
     $('drawerFixDesc').blur();
   };
   $('drawerFixDesc').oninput = function () {
-    updateDrawerDescEditorState('drawerFixDesc', _drawerFixDescOriginal);
+    updateDrawerDescEditorState('drawerFixDesc');
+  };
+  // Autosave on genuine blur, same reasoning (including hiding the Cancel
+  // row regardless of outcome) as drawerDesc's above.
+  $('drawerFixDesc').onblur = function () {
+    commitDrawerFixDesc().finally(function () {
+      var b = $('drawerFixDescBtns'); if (b) b.style.display = 'none';
+    });
   };
 
   // Expose pending to the global save handler (fallback)

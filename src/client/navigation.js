@@ -9,6 +9,11 @@
 var DEFAULT_PAGE_TITLE = document.title;
 
 function _closeIssueDrawer() {
+  // Same reasoning as openDrawer's own flushFocusedDrawerField() call: a
+  // title/description/fix-description edit can still be sitting focused and
+  // unsaved at the exact moment the drawer closes (Back, the close button,
+  // closeIssueFromAllWork), which never fires a blur on its own.
+  if (typeof flushFocusedDrawerField === 'function') flushFocusedDrawerField();
   document.body.classList.remove('issue-page');
   var drawer = $('issueDrawer');
   if (drawer) drawer.setAttribute('hidden', '');
