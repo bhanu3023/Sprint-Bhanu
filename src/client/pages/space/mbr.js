@@ -117,28 +117,41 @@ window._setMbrSprintWindow = function (val) {
 // dropdown-in-the-<th> pattern as Your Work's _ywBuildFilterTh (reusing its
 // yw-th-filter/yw-filter-trigger/yw-filter-panel/yw-filter-opt CSS), but with
 // its own state -- this table isn't part of Your Work and filters combination
-// GROUPS (one row per combination+role), not individual issues.
-if (!S.mbrComboFilters) S.mbrComboFilters = { combination: [], productType: [], role: [], upgrader: [] };
+// GROUPS (one row per combination), not individual issues.
+if (!S.mbrComboFilters) S.mbrComboFilters = { combination: [], productType: [], upgrader: [] };
 
-function _mbrComboFilterValue(row, key) {
-  if (key === 'combination') return row.combination;
-  if (key === 'productType') return row.product_type || '__none__';
-  if (key === 'role') return row.role || '__none__';
-  if (key === 'upgrader') return row.upgrader_email || '__none__';
+// 'upgrader' filters on ANY of the combination's assigned upgraders (a
+// combination can have several, one per role) -- a row matches if the
+// selected person is assigned to at least one of them.
+function _mbrComboFilterValues(row, key) {
+  if (key === 'combination') return [row.combination];
+  if (key === 'productType') return [row.product_type || '__none__'];
+  if (key === 'upgrader') {
+    var emails = (row.upgraders || []).filter(function (u) { return u.user_email; }).map(function (u) { return u.user_email; });
+    return emails.length ? emails : ['__none__'];
+  }
+  return [];
 }
-function _mbrComboFilterLabel(row, key) {
-  if (key === 'combination') return row.combination;
-  if (key === 'productType') return row.product_type || 'No Product Type';
-  if (key === 'role') return row.role_name || 'No Role';
-  if (key === 'upgrader') return row.upgrader_name || 'Unassigned';
+function _mbrComboFilterLabels(row, key) {
+  if (key === 'combination') return [row.combination];
+  if (key === 'productType') return [row.product_type || 'No Product Type'];
+  if (key === 'upgrader') {
+    var named = (row.upgraders || []).filter(function (u) { return u.user_name; });
+    if (!named.length) return ['Unassigned'];
+    return named.map(function (u) { return u.user_name; });
+  }
+  return [];
 }
 function _mbrGetComboFilterOpts(key, rows) {
   var seen = {}, opts = [];
   (rows || []).forEach(function (row) {
-    var v = _mbrComboFilterValue(row, key);
-    if (seen[v]) return;
-    seen[v] = true;
-    opts.push({ v: v, l: _mbrComboFilterLabel(row, key) });
+    var vals = _mbrComboFilterValues(row, key);
+    var labels = _mbrComboFilterLabels(row, key);
+    vals.forEach(function (v, i) {
+      if (seen[v]) return;
+      seen[v] = true;
+      opts.push({ v: v, l: labels[i] || labels[0] });
+    });
   });
   opts.sort(function (a, b) { return a.l.localeCompare(b.l); });
   return opts;
@@ -146,16 +159,17 @@ function _mbrGetComboFilterOpts(key, rows) {
 function _mbrApplyComboFilters(rows) {
   var f = S.mbrComboFilters || {};
   return (rows || []).filter(function (row) {
-    return ['combination', 'productType', 'role', 'upgrader'].every(function (key) {
+    return ['combination', 'productType', 'upgrader'].every(function (key) {
       var sel = f[key];
       if (!sel || !sel.length) return true;
-      return sel.indexOf(_mbrComboFilterValue(row, key)) >= 0;
+      var vals = _mbrComboFilterValues(row, key);
+      return sel.some(function (s) { return vals.indexOf(s) >= 0; });
     });
   });
 }
 function _mbrAnyComboFilterActive() {
   var f = S.mbrComboFilters || {};
-  return ['combination', 'productType', 'role', 'upgrader'].some(function (key) { return f[key] && f[key].length; });
+  return ['combination', 'productType', 'upgrader'].some(function (key) { return f[key] && f[key].length; });
 }
 function _mbrBuildComboFilterTh(key, label, rows) {
   var sel = (S.mbrComboFilters[key] || []);
@@ -193,8 +207,42 @@ window._mbrComboFilterCheck = function (key, cb) {
   renderMBRComparison($('mbrTabContent'), _mbrData);
 };
 window._mbrClearComboFilters = function () {
-  S.mbrComboFilters = { combination: [], productType: [], role: [], upgrader: [] };
+  S.mbrComboFilters = { combination: [], productType: [], upgrader: [] };
   renderMBRComparison($('mbrTabContent'), _mbrData);
+};
+
+// The "Show" button's popup -- lists every configured Role and its Upgrader
+// for one combination at once, since the Upgrader cell can no longer show a
+// single name (a ticket doesn't declare which role it's for any more). Same
+// visual pattern as the Backlog page's planning-sprint picker: a small panel
+// appended to <body>, positioned at the clicked button's own coordinates,
+// dismissed on the next click anywhere else.
+window._mbrShowUpgraderPopup = function (safeKey, event) {
+  var existing = document.getElementById('mbrUpgraderPopup');
+  if (existing) existing.remove();
+  var btn = event && event.target && event.target.closest ? event.target.closest('button') : null;
+  if (!btn) return;
+  var upgraders = (window._mbrUpgraderPopupData && window._mbrUpgraderPopupData[safeKey]) || [];
+  var panel = document.createElement('div');
+  panel.id = 'mbrUpgraderPopup';
+  panel.className = 'yw-filter-panel mbr-upgrader-popup';
+  panel.innerHTML = upgraders.length
+    ? upgraders.map(function (u) {
+        var name = u.user_name ? esc(u.user_name) : '<span style="color:var(--text3)">undefined</span>';
+        return '<div class="yw-filter-opt" style="cursor:default"><strong>' + esc(u.role_name) + ':</strong> ' + name + '</div>';
+      }).join('')
+    : '<div class="yw-filter-opt" style="color:var(--text3);cursor:default">No roles configured</div>';
+  panel.style.position = 'fixed';
+  var rect = btn.getBoundingClientRect();
+  panel.style.top = (rect.bottom + 4) + 'px';
+  panel.style.left = rect.left + 'px';
+  document.body.appendChild(panel);
+  setTimeout(function () {
+    document.addEventListener('click', function dismiss() {
+      var el = document.getElementById('mbrUpgraderPopup');
+      if (el) el.remove();
+    }, { once: true });
+  }, 0);
 };
 
 function renderMBROverview(c, data) {
@@ -452,21 +500,24 @@ function renderMBRComparison(c, data) {
           var totalKey = 'mbr_combo_total_' + safeKey;
           var allIssues = combo.per_sprint.reduce(function (acc, p) { return acc.concat(p.issues); }, []);
           window._reportDrillData[totalKey] = { label: combo.combination + ' — All Sprints', issues: allIssues, showReporter: true };
-          var upgraderHtml = combo.upgrader_name
-            ? esc(combo.upgrader_name)
-            : '<strong style="color:var(--text3)">undefined</strong>';
           var ptHtml = combo.product_type ? esc(combo.product_type) : '<span style="color:var(--text3)">—</span>';
-          var roleHtml = combo.role_name ? esc(combo.role_name) : '<span style="color:var(--text3)">—</span>';
+          // The Upgrader cell is a "Show" button rather than one name --
+          // a combination can have several Upgraders (one per configured
+          // Role), and no single one of them is "the" answer any more now
+          // that a ticket doesn't declare which role it's for. The popup
+          // itself lists every configured role and its Upgrader at once.
+          window._mbrUpgraderPopupData = window._mbrUpgraderPopupData || {};
+          window._mbrUpgraderPopupData[safeKey] = combo.upgraders || [];
+          var upgraderHtml = '<button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();window._mbrShowUpgraderPopup(\'' + escAttr(safeKey) + '\',event)">Show</button>';
           return '<tr style="border-bottom:1px solid var(--border)">' +
             '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + esc(combo.combination) + '</td>' +
             '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + ptHtml + '</td>' +
-            '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + roleHtml + '</td>' +
             '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + upgraderHtml + '</td>' +
             cells +
             '<td style="padding:8px 12px;text-align:right;font-weight:700;color:#0052cc;cursor:pointer" onclick="window._showReportIssues(\'' + totalKey + '\')" title="Click to see all tickets for this combination">' + combo.total_count + '</td>' +
           '</tr>';
         }).join('')
-      : '<tr><td colspan="' + (comboCols.length + 4) + '" style="padding:16px;color:var(--text3);text-align:center">' +
+      : '<tr><td colspan="' + (comboCols.length + 3) + '" style="padding:16px;color:var(--text3);text-align:center">' +
           (bugsByCombinationRaw.length ? 'No rows match the current filters. <button type="button" class="btn btn-link btn-sm" onclick="window._mbrClearComboFilters()">Clear filters</button>' : 'No bugs raised against any combination across these sprints') +
         '</td></tr>';
 
@@ -482,7 +533,6 @@ function renderMBRComparison(c, data) {
       '<thead><tr>' +
       _mbrBuildComboFilterTh('combination', 'Combination', bugsByCombinationRaw) +
       _mbrBuildComboFilterTh('productType', 'Product Type', bugsByCombinationRaw) +
-      _mbrBuildComboFilterTh('role', 'Role', bugsByCombinationRaw) +
       _mbrBuildComboFilterTh('upgrader', 'Upgrader', bugsByCombinationRaw) +
       comboHeaderCols +
       '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th>' +

@@ -1282,6 +1282,14 @@ body.light .backlog-lane-header { background: #f7f8fa; }
   overflow-y: auto;
 }
 
+/* Same "popup appended to body" pattern as .bl-planning-picker above, for the
+   MBR combo table's "Show" (Upgraders) button. */
+.mbr-upgrader-popup {
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
 .bl-cell { min-width: 0; display: flex; align-items: center; }
 .bl-type { justify-content: center; }
 .bl-key { font-size: 11px; font-weight: 700; color: var(--accent); white-space: nowrap; }
@@ -4016,43 +4024,22 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
 .pt-combo-upgrader strong {
   font-weight: 700;
 }
-/* Wraps the role <select> + its Upgrader badge together on the same line,
-   under the combination name -- only rendered for a checked row (see
-   buildCombinationCheckboxListHtml), same as .pt-combo-upgrader alone used
-   to be before roles existed. stopPropagation on the wrapping <span> in the
-   markup keeps clicking the select from also toggling the row's checkbox. */
-.pt-combo-role-row {
+/* One line per configured role, under the combination name -- only rendered
+   for a checked row (see buildCombinationCheckboxListHtml). Purely
+   informational (no picker any more): every role shows its own Upgrader at
+   once instead of one at a time behind a dropdown. */
+.pt-combo-role-list {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 6px;
-  white-space: nowrap;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
 }
-.pt-combo-role-row .pt-combo-upgrader {
-  display: inline;
-  margin-top: 0;
+.pt-combo-role-item {
+  color: var(--accent);
+  font-size: 0.85em;
 }
-/* The base `select { width: 100% }` rule (FORM ELEMENTS, above) was stretching
-   this to fill the whole row regardless of which option was picked -- "Backend"
-   and "Frontend" rendered the exact same oversized box. width: auto lets it
-   size to its own selected option's text instead, min-width only guards
-   against a very short role name (e.g. "QA") looking cramped. */
-.pt-combo-role-select {
-  width: auto;
-  min-width: 96px;
-  font-size: 12px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg3);
-  color: var(--text);
-  font-weight: 600;
-  cursor: pointer;
-}
-.pt-combo-role-select:focus {
-  border-color: var(--accent);
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-bg);
+.pt-combo-role-item strong {
+  font-weight: 700;
 }
 .pt-type-list .pt-combo-check-label {
   white-space: nowrap;

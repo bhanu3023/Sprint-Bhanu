@@ -563,14 +563,6 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
       });
     }
   }
-  const roleNameByKey = {};
-  upgraderRoleRows.forEach(r => { roleNameByKey[r.key] = r.name; });
-  // Every pre-existing single-Upgrader assignment (and any bug ticket that
-  // never went through the new role picker at all) lives under 'backend' --
-  // migration 024 backfilled the data that way and defaultUpgraderRoleKey in
-  // drawer-panels.js picks it client-side for the same reason.
-  const DEFAULT_UPGRADER_ROLE = 'backend';
-
   const doneBySprintId = {};
   doneRows.forEach(r => { (doneBySprintId[r.sprint_id] = doneBySprintId[r.sprint_id] || []).push(r); });
   const spilloverBySprintId = {};
@@ -742,78 +734,74 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   // JSON's own syntax apart into garbage rows: {"v":2, "productTypes":
   // ["Message"], "combinations":["Chat - Slack" and "Chat - Team"]} each
   // showing up as their own bogus "combination".
-  // Returns [{combination, role}] -- role defaults to DEFAULT_UPGRADER_ROLE
-  // for every shape that predates roles entirely (v1, v2, plain string) and
-  // for a v3 combination with no entry of its own in `roles` (a ticket can
-  // pick some combinations' roles and leave others on the default).
+  // Returns combination name strings. A ticket no longer declares a Role
+  // (the per-ticket Role picker was removed), so a v3 payload's "roles" key
+  // is simply ignored here -- same as parsePtComboSelection's own client-side
+  // read of it, see drawer-panels.js.
   function parseCombinationFieldStoredValue(raw) {
     if (!raw) return [];
     const trimmed = String(raw).trim();
     if (trimmed.charAt(0) === '{') {
       try {
         const parsed = JSON.parse(trimmed);
-        if (parsed && parsed.v === 3) {
-          const roles = (parsed.roles && typeof parsed.roles === 'object') ? parsed.roles : {};
-          return Array.isArray(parsed.combinations)
-            ? parsed.combinations.filter(Boolean).map(c => ({ combination: c, role: roles[c] || DEFAULT_UPGRADER_ROLE }))
-            : [];
-        }
-        if (parsed && parsed.v === 2) {
-          return Array.isArray(parsed.combinations)
-            ? parsed.combinations.filter(Boolean).map(c => ({ combination: c, role: DEFAULT_UPGRADER_ROLE }))
-            : [];
+        if (parsed && (parsed.v === 2 || parsed.v === 3)) {
+          return Array.isArray(parsed.combinations) ? parsed.combinations.filter(Boolean) : [];
         }
         if (parsed && parsed.v === 1 && Array.isArray(parsed.sets)) {
           const out = [];
           const seen = {};
           parsed.sets.forEach(s => (s.combinations || []).forEach(c => {
-            if (c && !seen[c]) { seen[c] = true; out.push({ combination: c, role: DEFAULT_UPGRADER_ROLE }); }
+            if (c && !seen[c]) { seen[c] = true; out.push(c); }
           }));
           return out;
         }
         return [];
       } catch (_) { return []; }
     }
-    return trimmed.split(',').map(s => s.trim()).filter(Boolean).map(c => ({ combination: c, role: DEFAULT_UPGRADER_ROLE }));
+    return trimmed.split(',').map(s => s.trim()).filter(Boolean);
   }
   let bugsByCombination = null;
   if (combinationField) {
     const grouped = {};
     bugRows.forEach(r => {
       const combos = parseCombinationFieldStoredValue(bugCombinationByIssueId[r.id]);
-      const keys = combos.length ? combos : [{ combination: 'No Combination', role: null }];
+      // Grouped by combination alone -- dedupe in case old data names the
+      // same combination more than once (a leftover v3 payload could).
+      const comboNames = combos.length ? [...new Set(combos)] : ['No Combination'];
       const enriched = {
         ...r,
         assignee_name: (bugUserMap[r.assignee_id] && bugUserMap[r.assignee_id].name) || null,
         reporter_name: (bugUserMap[r.reporter_id] && bugUserMap[r.reporter_id].name) || null
       };
-      keys.forEach(ck => {
-        // Grouped by combination+role together -- the same combination can
-        // carry a different role on different tickets (one Frontend bug and
-        // one Backend bug against "Chat - Slack" are two different rows here,
-        // each with its own Upgrader), not collapsed into one bucket the way
-        // a plain per-combination grouping would.
-        const groupKey = ck.combination + '::' + (ck.role || '');
-        const g = (grouped[groupKey] = grouped[groupKey] || { combination: ck.combination, role: ck.role, per_sprint: {} });
+      comboNames.forEach(name => {
+        const g = (grouped[name] = grouped[name] || { combination: name, per_sprint: {} });
         const ps = (g.per_sprint[r.sprint_id] = g.per_sprint[r.sprint_id] || { sprint_id: r.sprint_id, sprint_name: sprintNameById[r.sprint_id] || '', count: 0, issues: [] });
         ps.count += 1;
         ps.issues.push(enriched);
       });
     });
-    bugsByCombination = Object.keys(grouped).map(groupKey => {
-      const g = grouped[groupKey];
+    bugsByCombination = Object.keys(grouped).map(name => {
+      const g = grouped[name];
       const perSprintArr = Object.values(g.per_sprint);
-      const upgrader = g.role ? (upgraderByComboRole[g.combination] && upgraderByComboRole[g.combination][g.role]) : null;
-      // Product Type is a fact about the combination itself, not the group's
-      // role -- looked up once regardless of which role this row is for.
       const productType = productTypeByCombination[g.combination] || null;
+      // Every configured role for the field gets an entry here, whether or
+      // not it has an Upgrader assigned yet, so the client's "show all
+      // roles" popup always lists the full set rather than only the ones
+      // someone happened to assign.
+      const upgradersForCombo = upgraderByComboRole[g.combination] || {};
+      const upgraders = upgraderRoleRows.map(roleRow => {
+        const u = upgradersForCombo[roleRow.key];
+        return {
+          role_key: roleRow.key,
+          role_name: roleRow.name,
+          user_name: (u && u.user_name) || null,
+          user_email: (u && u.user_email) || null
+        };
+      });
       return {
         combination: g.combination,
-        role: g.role,
-        role_name: g.role ? (roleNameByKey[g.role] || (g.role.charAt(0).toUpperCase() + g.role.slice(1))) : null,
         product_type: productType,
-        upgrader_name: (upgrader && upgrader.user_name) || null,
-        upgrader_email: (upgrader && upgrader.user_email) || null,
+        upgraders,
         total_count: perSprintArr.reduce((s, p) => s + p.count, 0),
         per_sprint: perSprintArr
       };

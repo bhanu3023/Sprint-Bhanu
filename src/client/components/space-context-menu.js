@@ -168,7 +168,6 @@ function openCustomFieldModal(field) {
     $('customFieldType').value = field.field_type || field.type || 'text';
     $('customFieldRequired').checked = !!(field.is_required || field.required);
     renderRequiredTypeChoices(field.required_types, field.space_id);
-    renderRoleRequiredTypeChoices(field.upgrader_role_required_types, field.space_id);
     writeShowInToForm(field);
     if (isCombo) {
       $('customFieldOptions').value = '';
@@ -184,7 +183,6 @@ function openCustomFieldModal(field) {
     $('customFieldType').value = 'text';
     $('customFieldRequired').checked = false;
     renderRequiredTypeChoices([]);
-    renderRoleRequiredTypeChoices([]);
     $('customFieldOptions').value = '';
     if ($('customFieldShowInCreate')) $('customFieldShowInCreate').checked = true;
     if ($('customFieldShowInDrawer')) $('customFieldShowInDrawer').checked = true;
@@ -203,7 +201,6 @@ function openCustomFieldModal(field) {
     $('customFieldType').disabled = !!isBuiltin;
   }
   if ($('customFieldShowInGroup')) $('customFieldShowInGroup').hidden = false;
-  if ($('customFieldRoleRequiredGroup')) $('customFieldRoleRequiredGroup').hidden = !isCombo;
   syncRequiredTypesVisibility();
   var reqBox = $('customFieldRequired');
   if (reqBox && !reqBox._reqTypesBound) {
@@ -910,8 +907,6 @@ $('customFieldForm').addEventListener('submit', async function (e) {
   // Only meaningful when Required is on; sent as [] otherwise so turning Required
   // off also clears any stale type list.
   var requiredTypes = required ? readRequiredTypesFromForm() : [];
-  // Combination-only, independent of Required above — [] means "never required".
-  var roleRequiredTypes = isComboField ? readRoleRequiredTypesFromForm() : [];
   var options;
   if (isComboField) {
     options = buildCombinationOptionsFromEditor();
@@ -954,7 +949,6 @@ $('customFieldForm').addEventListener('submit', async function (e) {
       } else {
         payload = { name: name, field_type: type, is_required: required, options: options, show_in: showIn, required_types: requiredTypes };
       }
-      if (isComboField) payload.upgrader_role_required_types = roleRequiredTypes;
       await api('/api/custom-fields/' + id, 'PUT', payload);
       await refreshData();
       await refreshAllCustomFields();
