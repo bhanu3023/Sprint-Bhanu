@@ -2,6 +2,22 @@
 // ═══════════════════════════════════════════════════════════
 // BACKLOG TAB
 // ═══════════════════════════════════════════════════════════
+
+// The numeric suffix of an issue key ("PTM-42" -> 42), used to order every
+// lane (Backlog, each Sprint, Done-without-a-sprint) by ticket number instead
+// of created_at -- the two aren't always the same thing once bulk-import or a
+// restored ticket is in the mix, and ticket number is what's actually asked
+// for here. Falls back to -1 (sorts last) for a row with no parseable
+// number at all, rather than throwing or silently using NaN comparisons.
+function issueKeyNumber(iss) {
+  var key = issueKeyStr(iss);
+  var m = /-(\d+)$/.exec(String(key || ''));
+  return m ? parseInt(m[1], 10) : -1;
+}
+function issueKeyNumberDesc(a, b) {
+  return issueKeyNumber(b) - issueKeyNumber(a);
+}
+
 function renderBacklog() {
   var sprints = getSpaceSprints(S.currentSpace);
   var allSpaceIssues = getSpaceIssues(S.currentSpace);
@@ -40,10 +56,7 @@ function renderBacklog() {
         return iss.title.toLowerCase().indexOf(searchTerm) >= 0 || issueKeyStr(iss).toLowerCase().indexOf(searchTerm) >= 0;
       });
     }
-    // Sort by created_at descending (newest first like Jira)
-    sprintIssues = sprintIssues.slice().sort(function(a, b) {
-      return new Date(b.created_at) - new Date(a.created_at);
-    });
+    sprintIssues = sprintIssues.slice().sort(issueKeyNumberDesc);
     var points = sprintIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
     var collapsed = sp.status === 'completed';
 
@@ -173,6 +186,8 @@ function renderBacklog() {
     backlogIssues = backlogIssues.filter(matchesSearch);
     doneNoSprintIssues = doneNoSprintIssues.filter(matchesSearch);
   }
+  backlogIssues = backlogIssues.slice().sort(issueKeyNumberDesc);
+  doneNoSprintIssues = doneNoSprintIssues.slice().sort(issueKeyNumberDesc);
   // Backlog shows a points total too, so its header matches the sprint lanes.
   var backlogPoints = backlogIssues.reduce(function (sum, iss) { return sum + (iss.story_points || 0); }, 0);
 
