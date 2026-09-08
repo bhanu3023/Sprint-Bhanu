@@ -3,15 +3,35 @@
 // CONFIRM DIALOG
 // ═══════════════════════════════════════════════════════════
 var _confirmResolve = null;
-function confirmDialog(msg) {
+// forceChoice: hides the × and disables the backdrop-click dismiss, so the
+// ONLY way to leave the dialog is one of its two buttons -- for a prompt
+// where "closed some other way" needs to be a real, deliberate answer, not
+// an accidental default (e.g. discarding a draft should never be a stray
+// misclick). Reset to false as soon as this dialog resolves so it never
+// bleeds into a later, unrelated confirmDialog() call that didn't ask for it.
+var _confirmForceChoice = false;
+function confirmDialog(msg, opts) {
+  opts = opts || {};
   return new Promise(function (resolve) {
     $('confirmMsg').textContent = msg;
+    $('confirmYes').textContent = opts.yesLabel || 'Confirm';
+    $('confirmNo').textContent = opts.noLabel || 'Cancel';
+    _confirmForceChoice = !!opts.forceChoice;
+    var closeBtn = $('confirmCloseBtn');
+    if (closeBtn) closeBtn.hidden = _confirmForceChoice;
     openModal('modal-confirm');
     _confirmResolve = resolve;
-    $('confirmYes').onclick = function () { _confirmResolve = null; closeModal('modal-confirm'); resolve(true); };
-    $('confirmNo').onclick = function () { _confirmResolve = null; closeModal('modal-confirm'); resolve(false); };
+    $('confirmYes').onclick = function () { _confirmResolve = null; _confirmForceChoice = false; closeModal('modal-confirm'); resolve(true); };
+    $('confirmNo').onclick = function () { _confirmResolve = null; _confirmForceChoice = false; closeModal('modal-confirm'); resolve(false); };
   });
 }
+
+// Backdrop and × both route through this instead of calling closeModal
+// directly, so a forceChoice dialog can refuse to be dismissed that way.
+window._dismissConfirmDialog = function () {
+  if (_confirmForceChoice) return;
+  closeModal('modal-confirm');
+};
 
 // ═══════════════════════════════════════════════════════════
 // TYPED CONFIRM DIALOG

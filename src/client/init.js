@@ -49,6 +49,7 @@ async function init() {
     renderSidebar();
     // navigateTo home handled below after issue param check
     loadNotifications();
+    if (typeof loadIssueDraftsList === 'function') loadIssueDraftsList();
 
     $('loadingOverlay').setAttribute('hidden', '');
     $('app').removeAttribute('hidden');
@@ -163,12 +164,14 @@ async function init() {
             bootBackBtn.onclick = function () { goBackFromIssue(); };
           }
         }
+        // openDrawer itself now sets document.title directly from the fetched
+        // issue (see issue-drawer.js) -- this used to be the only place the
+        // title was ever set at all, via a 400ms guess at when drawerKey's
+        // text would be rendered, which is both fragile (a slow fetch could
+        // still lose the race) and only ever ran once per page load, so
+        // navigating from this ticket to a different one in-app left the
+        // FIRST ticket's title stuck in the tab forever.
         openDrawer(issueParam);
-        setTimeout(function() {
-          var key = $('drawerKey') && $('drawerKey').textContent;
-          var title = getDrawerTitleValue();
-          if (key || title) document.title = (key ? key + ' · ' : '') + (title || 'Issue') + ' — SprintBoard';
-        }, 400);
       }, 100);
     }
   } catch (e) {

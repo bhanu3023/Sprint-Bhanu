@@ -234,7 +234,8 @@ document.addEventListener('DOMContentLoaded', function () {
       if (typeSel && !typeSel._reqTypeBound) {
         typeSel._reqTypeBound = true;
         typeSel.addEventListener('change', function () {
-          markCreateRequiredLabels(($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace);
+          var typeSpaceId = ($('issueSpaceId') && $('issueSpaceId').value) || S.currentSpace;
+          markCreateRequiredLabels(typeSpaceId);
         });
       }
     }

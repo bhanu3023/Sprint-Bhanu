@@ -201,8 +201,8 @@ function renderNotifPanel() {
     return;
   }
   var sorted = notifs.slice().sort(function(a,b){ return new Date(b.created_at)-new Date(a.created_at); });
-  var tIcons = { comment_added:'&#128172;', issue_assigned:'&#128100;', status_changed:'&#128260;', priority_changed:'&#9889;', sprint_started:'&#128640;', sprint_completed:'&#9989;', issue_created:'&#128203;', mention:'@' };
-  var tColors = { comment_added:'#0129AC', issue_assigned:'#7c3aed', status_changed:'#059669', priority_changed:'#f59e0b', sprint_started:'#d97706', sprint_completed:'#059669', issue_created:'#0129AC', mention:'#dc2626' };
+  var tIcons = { comment_added:'&#128172;', issue_assigned:'&#128100;', reporter_assigned:'&#128221;', status_changed:'&#128260;', priority_changed:'&#9889;', sprint_started:'&#128640;', sprint_completed:'&#9989;', issue_created:'&#128203;', mention:'@', space_created:'&#127970;', space_member_added:'&#128101;', space_role_changed:'&#128737;', org_member_joined:'&#128075;' };
+  var tColors = { comment_added:'#0129AC', issue_assigned:'#7c3aed', reporter_assigned:'#0891b2', status_changed:'#059669', priority_changed:'#f59e0b', sprint_started:'#d97706', sprint_completed:'#059669', issue_created:'#0129AC', mention:'#dc2626', space_created:'#4f46e5', space_member_added:'#16a34a', space_role_changed:'#ea580c', org_member_joined:'#db2777' };
   var html = '';
   var limit = Math.min(sorted.length, 50);
   for (var i = 0; i < limit; i++) {

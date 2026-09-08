@@ -113,6 +113,138 @@ window._setMbrSprintWindow = function (val) {
   if (_mbrData) renderMBROverview($('mbrTabContent'), _mbrData);
 };
 
+// ── In-header column filters for the "Bugs by Combination" table, same
+// dropdown-in-the-<th> pattern as Your Work's _ywBuildFilterTh (reusing its
+// yw-th-filter/yw-filter-trigger/yw-filter-panel/yw-filter-opt CSS), but with
+// its own state -- this table isn't part of Your Work and filters combination
+// GROUPS (one row per combination), not individual issues.
+if (!S.mbrComboFilters) S.mbrComboFilters = { combination: [], productType: [], upgrader: [] };
+
+// 'upgrader' filters on ANY of the combination's assigned upgraders (a
+// combination can have several, one per role) -- a row matches if the
+// selected person is assigned to at least one of them.
+function _mbrComboFilterValues(row, key) {
+  if (key === 'combination') return [row.combination];
+  if (key === 'productType') return [row.product_type || '__none__'];
+  if (key === 'upgrader') {
+    var emails = (row.upgraders || []).filter(function (u) { return u.user_email; }).map(function (u) { return u.user_email; });
+    return emails.length ? emails : ['__none__'];
+  }
+  return [];
+}
+function _mbrComboFilterLabels(row, key) {
+  if (key === 'combination') return [row.combination];
+  if (key === 'productType') return [row.product_type || 'No Product Type'];
+  if (key === 'upgrader') {
+    var named = (row.upgraders || []).filter(function (u) { return u.user_name; });
+    if (!named.length) return ['Unassigned'];
+    return named.map(function (u) { return u.user_name; });
+  }
+  return [];
+}
+function _mbrGetComboFilterOpts(key, rows) {
+  var seen = {}, opts = [];
+  (rows || []).forEach(function (row) {
+    var vals = _mbrComboFilterValues(row, key);
+    var labels = _mbrComboFilterLabels(row, key);
+    vals.forEach(function (v, i) {
+      if (seen[v]) return;
+      seen[v] = true;
+      opts.push({ v: v, l: labels[i] || labels[0] });
+    });
+  });
+  opts.sort(function (a, b) { return a.l.localeCompare(b.l); });
+  return opts;
+}
+function _mbrApplyComboFilters(rows) {
+  var f = S.mbrComboFilters || {};
+  return (rows || []).filter(function (row) {
+    return ['combination', 'productType', 'upgrader'].every(function (key) {
+      var sel = f[key];
+      if (!sel || !sel.length) return true;
+      var vals = _mbrComboFilterValues(row, key);
+      return sel.some(function (s) { return vals.indexOf(s) >= 0; });
+    });
+  });
+}
+function _mbrAnyComboFilterActive() {
+  var f = S.mbrComboFilters || {};
+  return ['combination', 'productType', 'upgrader'].some(function (key) { return f[key] && f[key].length; });
+}
+function _mbrBuildComboFilterTh(key, label, rows) {
+  var sel = (S.mbrComboFilters[key] || []);
+  var active = sel.length > 0;
+  var opts = _mbrGetComboFilterOpts(key, rows);
+  var panel = opts.map(function (o) {
+    var chk = sel.indexOf(o.v) >= 0 ? ' checked' : '';
+    return '<label class="yw-filter-opt"><input type="checkbox" value="' + escAttr(String(o.v)) + '"' + chk +
+      ' onchange="window._mbrComboFilterCheck(\'' + key + '\',this)"> ' + esc(o.l) + '</label>';
+  }).join('');
+  if (!panel) panel = '<div class="yw-filter-opt" style="color:var(--text3);cursor:default">No options</div>';
+  return '<th class="yw-th-filter" style="text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">' +
+    '<div class="yw-th-filter-wrap">' +
+      '<span>' + esc(label) + '</span>' +
+      '<button type="button" class="yw-filter-trigger' + (active ? ' active' : '') + '" onclick="window._mbrToggleComboFilter(\'' + key + '\',event)" aria-label="Filter ' + esc(label) + '">' +
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>' +
+      '</button>' +
+      '<div class="yw-filter-panel" id="mbr-combo-filter-' + key + '" hidden onclick="event.stopPropagation()">' + panel + '</div>' +
+    '</div></th>';
+}
+window._mbrToggleComboFilter = function (key, ev) {
+  if (ev) ev.stopPropagation();
+  var panel = $('mbr-combo-filter-' + key);
+  if (!panel) return;
+  var open = panel.hidden;
+  document.querySelectorAll('.yw-filter-panel').forEach(function (p) { p.hidden = true; });
+  panel.hidden = !open;
+};
+// The combo table lives on the Comparison Trends tab (renderMBRComparison),
+// not Overview -- re-render that same tab, not always Overview.
+window._mbrComboFilterCheck = function (key, cb) {
+  var arr = S.mbrComboFilters[key] || (S.mbrComboFilters[key] = []);
+  if (cb.checked) { if (arr.indexOf(cb.value) < 0) arr.push(cb.value); }
+  else { var idx = arr.indexOf(cb.value); if (idx >= 0) arr.splice(idx, 1); }
+  renderMBRComparison($('mbrTabContent'), _mbrData);
+};
+window._mbrClearComboFilters = function () {
+  S.mbrComboFilters = { combination: [], productType: [], upgrader: [] };
+  renderMBRComparison($('mbrTabContent'), _mbrData);
+};
+
+// The "Show" button's popup -- lists every configured Role and its Upgrader
+// for one combination at once, since the Upgrader cell can no longer show a
+// single name (a ticket doesn't declare which role it's for any more). Same
+// visual pattern as the Backlog page's planning-sprint picker: a small panel
+// appended to <body>, positioned at the clicked button's own coordinates,
+// dismissed on the next click anywhere else.
+window._mbrShowUpgraderPopup = function (safeKey, event) {
+  var existing = document.getElementById('mbrUpgraderPopup');
+  if (existing) existing.remove();
+  var btn = event && event.target && event.target.closest ? event.target.closest('button') : null;
+  if (!btn) return;
+  var upgraders = (window._mbrUpgraderPopupData && window._mbrUpgraderPopupData[safeKey]) || [];
+  var panel = document.createElement('div');
+  panel.id = 'mbrUpgraderPopup';
+  panel.className = 'yw-filter-panel mbr-upgrader-popup';
+  panel.innerHTML = upgraders.length
+    ? upgraders.map(function (u) {
+        var name = u.user_name ? esc(u.user_name) : '<span style="color:var(--text3)">undefined</span>';
+        return '<div class="yw-filter-opt" style="cursor:default"><strong>' + esc(u.role_name) + ':</strong> ' + name + '</div>';
+      }).join('')
+    : '<div class="yw-filter-opt" style="color:var(--text3);cursor:default">No roles configured</div>';
+  panel.style.position = 'fixed';
+  var rect = btn.getBoundingClientRect();
+  panel.style.top = (rect.bottom + 4) + 'px';
+  panel.style.left = rect.left + 'px';
+  document.body.appendChild(panel);
+  setTimeout(function () {
+    document.addEventListener('click', function dismiss() {
+      var el = document.getElementById('mbrUpgraderPopup');
+      if (el) el.remove();
+    }, { once: true });
+  }, 0);
+};
+
 function renderMBROverview(c, data) {
   var allSprints = (data && data.sprints) || [];
 
@@ -182,19 +314,44 @@ function renderMBROverview(c, data) {
     '</div>';
 }
 
+// How many completed sprints Comparison Trends compares, editable via its own
+// selector at the top of the tab (Overview has an equivalent _mbrSprintWindow,
+// kept separate so switching one tab's window doesn't reset the other's).
+// 'all' shows everything.
+var _mbrComparisonSprintWindow = '5';
+window._setMbrComparisonSprintWindow = function (val) {
+  _mbrComparisonSprintWindow = val;
+  if (_mbrData) renderMBRComparison($('mbrTabContent'), _mbrData);
+};
+
 // Comparison Trends is scoped to CLOSED sprints only — an in-flight sprint
 // hasn't spilled anything yet, so it has no place in a spillover/committed
 // comparison (the Overview tab is where its live progress shows instead).
 function renderMBRComparison(c, data) {
-  var sprints = (data && data.completed_sprints) || [];
+  var allSprints = (data && data.completed_sprints) || [];
   var prevLast = (data && data.previous_vs_last) || { previous: null, last: null };
   var byUser = (data && data.spillover_by_user) || [];
 
-  if (!sprints.length) {
+  if (!allSprints.length) {
     c.innerHTML = '<div class="report-chart"><h4 style="margin:0 0 4px">Comparison Trends</h4>' +
       '<p class="placeholder-text">No completed sprints yet. Complete a sprint to see comparisons here.</p></div>';
     return;
   }
+
+  // How many completed sprints to compare, same selector pattern as the
+  // Overview tab's _mbrSprintWindow -- a separate variable because the two
+  // tabs are independently switchable and shouldn't reset each other's
+  // choice. previous_vs_last is deliberately NOT affected by this window: it
+  // is always the two most recent completed sprints, server-computed,
+  // regardless of how many sprints this tab is currently showing.
+  var sprints = _mbrComparisonSprintWindow === 'all' ? allSprints : allSprints.slice(Math.max(0, allSprints.length - Number(_mbrComparisonSprintWindow)));
+  var comparisonWindowLabel = _mbrComparisonSprintWindow === 'all' ? 'All Sprints' : 'Last ' + _mbrComparisonSprintWindow + ' Sprints';
+  var comparisonWindowSelectorHtml = '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:16px">' +
+    '<label style="font-size:12px;color:var(--text2)">Show:</label>' +
+    '<select class="input input-sm" onchange="window._setMbrComparisonSprintWindow(this.value)">' +
+    ['5', '10', '15', 'all'].map(function (v) {
+      return '<option value="' + v + '"' + (v === _mbrComparisonSprintWindow ? ' selected' : '') + '>' + (v === 'all' ? 'All sprints' : 'Last ' + v + ' sprints') + '</option>';
+    }).join('') + '</select></div>';
 
   function drill(key, label, issues) {
     window._reportDrillData[key] = { label: label, issues: (issues || []).filter(mbrHasPts), points: true };
@@ -246,7 +403,10 @@ function renderMBRComparison(c, data) {
   // they had no spillover), capped to the last 8 sprints as columns so it
   // stays readable. Click a row to see that user's full sprint-wise trend
   // as a chart, covering every completed sprint, not just the visible ones.
-  window._mbrUserTrendStore = { sprints: sprints, byUser: byUser };
+  // Fed with allSprints (not the windowed `sprints`), matching this popup's
+  // own documented contract just below -- it "covers every completed sprint"
+  // regardless of how many the table above is currently showing.
+  window._mbrUserTrendStore = { sprints: allSprints, byUser: byUser };
   var sprintCols = sprints.slice(Math.max(0, sprints.length - 8));
   var userTruncNote = sprints.length > 8
     ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns — click a user to see their full trend.</p>' : '';
@@ -269,7 +429,9 @@ function renderMBRComparison(c, data) {
   var bugSummary = data.bug_summary || { total_bugs: 0, open_bugs: 0, closed_bugs: 0 };
   var bugsByAssignee = data.bugs_by_assignee || [];
   var bugsByReporter = data.bugs_by_reporter || [];
-  window._mbrBugTrendStore = { sprints: sprints, byAssignee: bugsByAssignee, byReporter: bugsByReporter };
+  // Same reasoning as _mbrUserTrendStore above -- fed with allSprints so its
+  // popup still covers every completed sprint regardless of this tab's window.
+  window._mbrBugTrendStore = { sprints: allSprints, byAssignee: bugsByAssignee, byReporter: bugsByReporter };
 
   var bugChartHtml = mbrBarChart(sprints.map(function (sp) {
     var v = sp.bug_count || 0;
@@ -308,9 +470,79 @@ function renderMBRComparison(c, data) {
   var bugColTruncNote = sprints.length > 8
     ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns — click a user to see their full trend.</p>' : '';
 
+  // ── Bugs by Combination, Upgrader, Sprint-wise — last section on the page,
+  // only rendered when this space actually has a Combination field. Unlike
+  // the Assignee/Reporter tables above, each per-sprint NUMBER is directly
+  // clickable (no intermediate trend-chart hop) since what's wanted here is
+  // the ticket/assignee/reporter list for that exact cell, not a trend line.
+  var bugsByCombinationRaw = data.bugs_by_combination;
+  var bugsByCombination = Array.isArray(bugsByCombinationRaw) ? _mbrApplyComboFilters(bugsByCombinationRaw) : bugsByCombinationRaw;
+  var comboSectionHtml = '';
+  if (Array.isArray(bugsByCombinationRaw)) {
+    var comboCols = sprints.slice(Math.max(0, sprints.length - 8));
+    var comboColTruncNote = sprints.length > 8
+      ? '<p style="font-size:11px;color:var(--text3);margin:4px 0 12px">Showing the last 8 of ' + sprints.length + ' sprints as columns.</p>' : '';
+    var comboHeaderCols = comboCols.map(function (sp) {
+      return '<th title="' + escAttr(sp.name) + '" style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + esc(shortSprintLabel(sp.name)) + '</th>';
+    }).join('');
+    function comboCell(combo, safeKey, sp) {
+      var ps = combo.per_sprint.find(function (p) { return p.sprint_id === sp.id; });
+      var count = ps ? ps.count : 0;
+      if (!count) return '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--text3)">0</td>';
+      var key = 'mbr_combo_' + safeKey + '_' + sp.id;
+      window._reportDrillData[key] = { label: combo.combination + ' — ' + sp.name, issues: ps.issues, showReporter: true };
+      return '<td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:#0052cc;cursor:pointer" onclick="event.stopPropagation();window._showReportIssues(\'' + key + '\')" title="Click to see tickets, assignee and reporter">' + count + '</td>';
+    }
+    var comboBodyRows = bugsByCombination.length
+      ? bugsByCombination.map(function (combo) {
+          var safeKey = combo.combination.replace(/[^a-zA-Z0-9_-]/g, '_');
+          var cells = comboCols.map(function (sp) { return comboCell(combo, safeKey, sp); }).join('');
+          var totalKey = 'mbr_combo_total_' + safeKey;
+          var allIssues = combo.per_sprint.reduce(function (acc, p) { return acc.concat(p.issues); }, []);
+          window._reportDrillData[totalKey] = { label: combo.combination + ' — All Sprints', issues: allIssues, showReporter: true };
+          var ptHtml = combo.product_type ? esc(combo.product_type) : '<span style="color:var(--text3)">—</span>';
+          // The Upgrader cell is a "Show" button rather than one name --
+          // a combination can have several Upgraders (one per configured
+          // Role), and no single one of them is "the" answer any more now
+          // that a ticket doesn't declare which role it's for. The popup
+          // itself lists every configured role and its Upgrader at once.
+          window._mbrUpgraderPopupData = window._mbrUpgraderPopupData || {};
+          window._mbrUpgraderPopupData[safeKey] = combo.upgraders || [];
+          var upgraderHtml = '<button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();window._mbrShowUpgraderPopup(\'' + escAttr(safeKey) + '\',event)">Show</button>';
+          return '<tr style="border-bottom:1px solid var(--border)">' +
+            '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + esc(combo.combination) + '</td>' +
+            '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + ptHtml + '</td>' +
+            '<td style="padding:8px 12px;white-space:nowrap;font-size:12px">' + upgraderHtml + '</td>' +
+            cells +
+            '<td style="padding:8px 12px;text-align:right;font-weight:700;color:#0052cc;cursor:pointer" onclick="window._showReportIssues(\'' + totalKey + '\')" title="Click to see all tickets for this combination">' + combo.total_count + '</td>' +
+          '</tr>';
+        }).join('')
+      : '<tr><td colspan="' + (comboCols.length + 3) + '" style="padding:16px;color:var(--text3);text-align:center">' +
+          (bugsByCombinationRaw.length ? 'No rows match the current filters. <button type="button" class="btn btn-link btn-sm" onclick="window._mbrClearComboFilters()">Clear filters</button>' : 'No bugs raised against any combination across these sprints') +
+        '</td></tr>';
+
+    var comboToolbarHtml = _mbrAnyComboFilterActive()
+      ? '<div class="yw-table-toolbar"><button type="button" class="btn btn-outline btn-sm yw-clear-all-btn" onclick="window._mbrClearComboFilters()">&#10005; Clear all</button></div>'
+      : '';
+
+    comboSectionHtml =
+      '<h4 style="margin:24px 0 4px;font-size:13px">Bugs by Combination, Upgrader — Sprint-wise</h4>' +
+      '<p style="font-size:11px;color:var(--text3);margin:0 0 8px">Click any number to see the ticket, who it\'s assigned to, and who raised it.</p>' +
+      comboColTruncNote + comboToolbarHtml +
+      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr>' +
+      _mbrBuildComboFilterTh('combination', 'Combination', bugsByCombinationRaw) +
+      _mbrBuildComboFilterTh('productType', 'Product Type', bugsByCombinationRaw) +
+      _mbrBuildComboFilterTh('upgrader', 'Upgrader', bugsByCombinationRaw) +
+      comboHeaderCols +
+      '<th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border)">Total</th>' +
+      '</tr></thead><tbody>' + comboBodyRows + '</tbody></table></div>';
+  }
+
   c.innerHTML = '<div class="report-chart">' +
     '<h4 style="margin:0 0 4px">Comparison Trends</h4>' +
-    '<p style="font-size:12px;color:var(--text3);margin:0 0 20px">Sprint-over-sprint comparisons for this board — completed sprints only. Click any bar to see its tickets.</p>' +
+    '<p style="font-size:12px;color:var(--text3);margin:0 0 4px">Sprint-over-sprint comparisons for this board — showing ' + esc(comparisonWindowLabel) + ' (completed only). Click any bar to see its tickets.</p>' +
+    comparisonWindowSelectorHtml +
 
     '<h4 style="margin:0 0 8px;font-size:13px">Story Points — Committed vs Completed</h4>' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;font-size:11px;color:var(--text2)">' +
@@ -351,6 +583,7 @@ function renderMBRComparison(c, data) {
     '<h4 style="margin:24px 0 4px;font-size:13px">Bugs Created By, Sprint-wise</h4>' +
     bugColTruncNote +
     bugReporterTableHtml +
+    comboSectionHtml +
     '</div>';
 }
 
@@ -401,7 +634,11 @@ window._showMbrBugTrend = function (userId, kind) {
     if (ps && ps.count) {
       var key = 'mbr_bugtrend_' + kind + '_' + sp.id + '_' + userId;
       window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' (' + (kind === 'reporter' ? 'Reported' : 'Assigned') + ')', issues: ps.issues };
-      clickAttr = ' onclick="window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
+      // Closes this trend overlay before opening the shared drill popup on
+      // top of it -- otherwise clicking a ticket row in that popup navigates
+      // away (openIssuePage) but only ever closes ITSELF, leaving this trend
+      // overlay still in the DOM and visible over the issue page underneath.
+      clickAttr = ' onclick="var _o=document.getElementById(\'_mbrBugTrendOverlay\');if(_o)_o.remove();window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
     }
     return '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="transparent"' + clickAttr + '><title>' + esc(sp.name) + ': ' + v + ' bug' + (v === 1 ? '' : 's') + '</title></circle>' +
       '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + lineColor + '" stroke="var(--bg)" stroke-width="1.5" style="pointer-events:none"/>' +
@@ -481,7 +718,11 @@ window._showMbrUserTrend = function (userId) {
     if (ps && ps.points) {
       var key = 'mbr_ut_' + sp.id + '_' + userId;
       window._reportDrillData[key] = { label: sp.name + ' — ' + u.name + ' Spillover', issues: ps.issues.filter(mbrHasPts), points: true };
-      clickAttr = ' onclick="window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
+      // Closes this trend overlay before opening the shared drill popup on
+      // top of it -- otherwise clicking a ticket row in that popup navigates
+      // away (openIssuePage) but only ever closes ITSELF, leaving this trend
+      // overlay still in the DOM and visible over the issue page underneath.
+      clickAttr = ' onclick="var _o=document.getElementById(\'_mbrUserTrendOverlay\');if(_o)_o.remove();window._showReportIssues(\'' + key + '\')" style="cursor:pointer"';
     }
     return '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="transparent"' + clickAttr + '><title>' + esc(sp.name) + ': ' + v + ' pts</title></circle>' +
       '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + lineColor + '" stroke="var(--bg)" stroke-width="1.5" style="pointer-events:none"/>' +

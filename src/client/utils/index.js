@@ -54,7 +54,11 @@ var SANITISE_ALLOWED_ATTRS = {
   a: ['href', 'target', 'rel'],
   img: ['src', 'alt', 'title', 'class', 'width', 'height', 'style', 'data-url', 'data-fp'],
   div: ['style', 'class', 'contenteditable', 'data-url', 'data-fp'],
-  span: ['style', 'class'],
+  // contenteditable is allowed on span for the same reason it already is on
+  // div: a mention chip (<span class="mention-chip" contenteditable="false">)
+  // needs to stay a protected, non-editable island when a saved comment is
+  // reopened for editing, not silently lose that and become free text.
+  span: ['style', 'class', 'contenteditable'],
   p: ['style', 'class'],
   code: ['class'],
   pre: ['class'],
@@ -250,29 +254,19 @@ function richTextHasMeaningfulChange(originalHtml, currentHtml) {
   return richTextMediaSignature(originalHtml) !== richTextMediaSignature(currentHtml);
 }
 
-function updateDrawerDescEditorState(editorId, originalHtml) {
-  var map = {
-    drawerDesc: { btns: 'drawerDescBtns', save: 'drawerDescSave' },
-    drawerFixDesc: { btns: 'drawerFixDescBtns', save: 'drawerFixDescSave' }
-  };
-  var cfg = map[editorId];
-  if (!cfg) return;
-  var el = $(editorId);
-  var btns = $(cfg.btns);
-  var saveBtn = $(cfg.save);
-  if (!el || !btns || !saveBtn) return;
-  var changed = richTextHasMeaningfulChange(originalHtml || '', el.innerHTML);
+// Description/Fix Description no longer have a Save button — they autosave
+// on blur (issue-drawer.js) — so this just shows the Cancel row while the
+// field is focused/being edited. Its own dirty-check is still done where it
+// matters: commitDrawerDesc/FixDesc (issue-drawer.js) skip the actual save
+// when richTextHasMeaningfulChange says nothing changed, and Cancel simply
+// reverts to originalHtml regardless of whether anything did.
+function updateDrawerDescEditorState(editorId) {
+  var map = { drawerDesc: 'drawerDescBtns', drawerFixDesc: 'drawerFixDescBtns' };
+  var btnsId = map[editorId];
+  if (!btnsId) return;
+  var btns = $(btnsId);
+  if (!btns) return;
   btns.style.display = 'flex';
-  // Dimmed look only — never the native `disabled` attribute. A browser never
-  // dispatches click on a disabled button at all, so if this recompute (fired
-  // from onfocus/oninput/a blur-triggered auto-linkify pass) landed disabled=true
-  // in the same gesture as a click on Save, that click would be silently
-  // swallowed before the handler below ever ran — no error, no save, the only
-  // visible effect being the description losing focus. The click handler
-  // re-checks richTextHasMeaningfulChange itself, so it stays a correct no-op
-  // when there is truly nothing to save; it just can never be a SILENT one.
-  saveBtn.style.opacity = changed ? '1' : '0.45';
-  saveBtn.style.cursor = changed ? 'pointer' : 'not-allowed';
 }
 
 function markDrawerDescDirty(editorId) {
@@ -486,6 +480,56 @@ function highlightMentionsInCommentBody(body) {
   return html;
 }
 
+// Comments saved before mention chips were preserved as real markup (see
+// issue-drawer.js's drawerCommentSubmit) stored a mention as plain "@Name"
+// text -- and if the contenteditable also left behind so much as a trailing
+// <br> (routine for a browser-generated contenteditable body), that body then
+// contains an HTML tag, which sends it down bodyHtml()'s rich-HTML branch
+// instead of the plain-text one that calls highlightMentionsInCommentBody
+// above -- so the mention silently rendered as unstyled text forever, with no
+// way to tell it apart from someone just typing "@Name" as prose. Rather than
+// a one-off DB migration, this walks the ALREADY-SANITIZED HTML's own text
+// nodes (never touching a tag or attribute) and wraps any "@Name" match the
+// same way, so old and new comments alike render mentions consistently no
+// matter which branch they took. Skips text already inside a real
+// .mention-chip so a proper chip's own label is never re-wrapped.
+function highlightMentionsInSanitizedHtml(safeHtml) {
+  if (!safeHtml) return safeHtml;
+  var members = (window._drawerMembers || (S.data && S.data.users) || []).filter(function (m) { return m.name; });
+  if (!members.length) return safeHtml;
+  var sortedNames = members.map(function (m) { return m.name; }).sort(function (a, b) { return b.length - a.length; });
+  var pattern = new RegExp('@(' + sortedNames.map(function (n) { return n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|') + ')(?![\\w])', 'g');
+
+  var container = document.createElement('div');
+  container.innerHTML = safeHtml; // safe: safeHtml has already passed through sanitiseStoredHtml
+  var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
+  var toProcess = [];
+  var node;
+  while ((node = walker.nextNode())) {
+    if (node.parentElement && node.parentElement.closest('.mention-chip')) continue;
+    if (pattern.test(node.textContent)) toProcess.push(node);
+  }
+  toProcess.forEach(function (textNode) {
+    var text = textNode.textContent;
+    var frag = document.createDocumentFragment();
+    var lastIndex = 0;
+    var m;
+    pattern.lastIndex = 0;
+    while ((m = pattern.exec(text))) {
+      if (m.index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
+      var span = document.createElement('span');
+      span.style.color = '#0052cc';
+      span.style.fontWeight = '600';
+      span.textContent = '@' + m[1];
+      frag.appendChild(span);
+      lastIndex = m.index + m[0].length;
+    }
+    frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+    textNode.replaceWith(frag);
+  });
+  return container.innerHTML;
+}
+
 // Renders a stored comment body for the EDIT box, as opposed to bodyHtml()'s
 // read-only render further down. A pasted screenshot becomes a plain <img> with
 // nothing after it to inherit a style from — bodyHtml()'s version wraps the
@@ -501,8 +545,10 @@ function commentBodyToEditableHtml(body) {
     // see _saveComment's stripFileAuthTokensFromHtml). bodyHtml()'s read-only
     // render calls augmentFileUrlsInHtml for the same reason; without it here
     // the <img> in the edit box 401s and shows broken, even though Save/Cancel
-    // (which never touch src) work fine.
-    return augmentFileUrlsInHtml(safe);
+    // (which never touch src) work fine. Also highlights a plain "@Name" left
+    // over from before mention chips were preserved as real markup -- see
+    // highlightMentionsInSanitizedHtml.
+    return highlightMentionsInSanitizedHtml(augmentFileUrlsInHtml(safe));
   }
   var html = highlightMentionsInCommentBody(body);
   html = html.replace(/\[img:([^|\]]+)\|([^\]]+)\]/g, function(m, fname, url) {

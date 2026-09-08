@@ -133,6 +133,22 @@
               <div id="notifList" data-hj-suppress class="notif-list"></div>
             </div>
           </div>
+          <div class="notif-btn-wrap">
+            <button class="btn-icon topbar-notif-btn" id="draftsBtn" aria-label="Drafts" title="Drafts" style="position:relative;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6"/>
+              </svg>
+              <span class="notif-badge" id="draftsBadge" aria-hidden="true" hidden>0</span>
+            </button>
+            <!-- Drafts Panel -->
+            <div id="draftsPanel" class="notif-panel" hidden>
+              <div class="notif-panel-header">
+                <h3>Drafts</h3>
+              </div>
+              <div id="draftsList" data-hj-suppress class="notif-list"></div>
+            </div>
+          </div>
           <button class="btn btn-primary btn-sm" id="createIssueBtn">+ Create Issue</button>
           <!-- Profile avatar + dropdown -->
           <div style="position:relative" id="topbarProfileWrap">
@@ -754,8 +770,7 @@
                     <div id="drawerDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a description..."></div>
                   </div>
                   <div id="drawerDescBtns" class="drawer-editor-actions" style="display:none">
-                    <button type="button" id="drawerDescSave" class="btn btn-primary btn-sm">Save</button>
-                    <button type="button" id="drawerDescCancel" class="btn btn-secondary btn-sm">Cancel</button>
+                    <button type="button" id="drawerDescCancel" class="btn btn-secondary">Cancel</button>
                   </div>
                 </div>
                 <div class="drawer-detail-row" data-builtin-field="fix_description">
@@ -781,8 +796,7 @@
                     <div id="drawerFixDesc" class="drawer-desc jira-editor-body" contenteditable="true" data-placeholder="Add a fix description..."></div>
                   </div>
                   <div id="drawerFixDescBtns" class="drawer-editor-actions" style="display:none">
-                    <button type="button" id="drawerFixDescSave" class="btn btn-primary btn-sm">Save</button>
-                    <button type="button" id="drawerFixDescCancel" class="btn btn-secondary btn-sm">Cancel</button>
+                    <button type="button" id="drawerFixDescCancel" class="btn btn-secondary">Cancel</button>
                   </div>
                 </div>
               </div>
@@ -1065,11 +1079,11 @@
 
   <!-- Create/Edit Issue Modal -->
   <div id="modal-issue" data-hj-suppress class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('modal-issue')"></div>
+    <div class="modal-backdrop" onclick="window._handleCreateIssueCancelClick()"></div>
     <div class="modal-dialog modal-dialog-lg">
       <div class="modal-header">
         <h3 id="issueModalTitle">Create Issue</h3>
-        <button type="button" class="btn-icon modal-close" onclick="closeModal('modal-issue')">✕</button>
+        <button type="button" class="btn-icon modal-close" onclick="window._handleCreateIssueCancelClick()">✕</button>
       </div>
       <div class="modal-body">
         <form id="issueForm">
@@ -1194,7 +1208,7 @@
              re-evaluated every time that selection changes, in
              _onIssueSpaceChange. -->
         <button type="button" class="btn btn-secondary" id="bulkCreateIssueBtn" onclick="openBulkIssueModal()" hidden style="margin-right:auto">Bulk Create…</button>
-        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-issue')">Cancel</button>
+        <button type="button" class="btn btn-secondary" onclick="window._handleCreateIssueCancelClick()">Cancel</button>
         <button class="btn btn-primary" id="issueSubmitBtn" type="submit" form="issueForm">Save</button>
       </div>
     </div>
@@ -1250,6 +1264,35 @@
         <button type="button" class="btn btn-secondary" id="bulkIssueCancelBtn" onclick="closeBulkIssueModal()">Cancel</button>
         <button type="button" class="btn btn-primary" id="bulkIssueConfirmBtn" onclick="confirmBulkIssueCreate()" hidden disabled>Create Tickets</button>
         <button type="button" class="btn btn-primary" id="bulkIssueDoneBtn" onclick="finishBulkIssueImport()" hidden>Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Combination Upgraders Modal -->
+  <div id="modal-combination-upgraders" data-hj-suppress class="modal" hidden>
+    <div class="modal-backdrop" onclick="closeCombinationUpgradersModal()"></div>
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-header">
+        <h3>Assign Upgraders — Combination</h3>
+        <button type="button" class="btn-icon modal-close" onclick="closeCombinationUpgradersModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text2);margin:0 0 14px">
+          An <strong>Upgrader</strong> is the person responsible for a given combination, one per role below.
+          Pick from <strong id="cuSpaceName"></strong>'s members, or type their email — leave blank for
+          <strong>None</strong>. Changes save automatically as you leave each field.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Upgrader roles</label>
+          <div id="cuRolesBar" class="cu-roles-bar"></div>
+        </div>
+        <input type="text" class="input" id="cuFilterInput" placeholder="Search combinations…" style="margin-bottom:12px">
+        <div id="cuBulkBar" class="cu-bulk-bar" hidden></div>
+        <datalist id="cuMembersList"></datalist>
+        <div id="cuGroupsContainer" class="combination-upgraders-groups"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick="closeCombinationUpgradersModal()">Done</button>
       </div>
     </div>
   </div>
@@ -1396,17 +1439,17 @@
 
   <!-- Confirm Dialog -->
   <div id="modal-confirm" data-hj-suppress class="modal" hidden>
-    <div class="modal-backdrop" onclick="closeModal('modal-confirm')"></div>
+    <div class="modal-backdrop" onclick="window._dismissConfirmDialog()"></div>
     <div class="modal-dialog modal-dialog-sm">
       <div class="modal-header">
         <h3>Confirm</h3>
-        <button class="btn-icon modal-close" onclick="closeModal('modal-confirm')">✕</button>
+        <button class="btn-icon modal-close" id="confirmCloseBtn" onclick="window._dismissConfirmDialog()">✕</button>
       </div>
       <div class="modal-body">
         <p id="confirmMsg">Are you sure?</p>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="confirmNo" onclick="closeModal('modal-confirm')">Cancel</button>
+        <button class="btn btn-secondary" id="confirmNo">Cancel</button>
         <button class="btn btn-danger" id="confirmYes">Confirm</button>
       </div>
     </div>
@@ -1526,7 +1569,9 @@
   <script src="src/client/crud/space.js"></script>
   <script src="src/client/crud/sprint.js"></script>
   <script src="src/client/crud/issue.js"></script>
+  <script src="src/client/crud/issue-draft.js"></script>
   <script src="src/client/crud/bulk-issue.js"></script>
+  <script src="src/client/crud/combination-upgraders.js"></script>
   <script src="src/client/components/worklog-modal.js"></script>
   <script src="src/client/components/notifications.js"></script>
   <script src="src/client/event-bindings.js"></script>

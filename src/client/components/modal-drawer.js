@@ -56,6 +56,11 @@ function goBackToSavedPage() {
   document.body.classList.remove('issue-page');
   S.drawerIssueId = null;
   window._drawerPending = {};
+  // Same reset as _closeIssueDrawer() (navigation.js) -- this function closes
+  // the drawer inline instead of calling that shared one, so it needs its
+  // own copy of the same fix: otherwise leaving the ticket through THIS path
+  // left its title stuck in the tab.
+  document.title = DEFAULT_PAGE_TITLE;
   var pTab   = S._prevTab;
   var pSpace = S._prevSpace;
   var pView  = S._prevView;
@@ -157,7 +162,13 @@ function openIssuePage(issueId, opts) {
     var issueUrl = '/?issue=' + encodeURIComponent(issueKey) + (fromSlug ? '&from=' + fromSlug : '');
     window.history.pushState({ issueId: issueId, returnUrl: S._issueReturnUrl }, '', issueUrl);
   }
-  document.body.classList.add('issue-page');
+  // body.issue-page's CSS forces #issueDrawer visible with !important
+  // (overriding its `hidden` attribute), so adding this class HERE -- before
+  // openDrawer has fetched anything -- forced the still-hidden drawer
+  // visible immediately, showing whichever ticket was rendered into it last
+  // for the entire fetch. openDrawer itself adds this class only once the
+  // NEW ticket's own data is already in place (see the comment there), so
+  // the class-add belongs there, not here.
   openDrawer(issueId);
 }
 window.openIssuePage = openIssuePage;

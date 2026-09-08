@@ -13,8 +13,11 @@ async function createNotif({ user_id, space_id, type, title, body, link }) {
     await q('INSERT INTO notifications(id,user_id,space_id,type,title,body,link) VALUES($1,$2,$3,$4,$5,$6,$7)',
       [uid(), user_id, space_id || null, type, title, body || null, link || null]);
   } catch(e) { /* non-fatal */ }
-  // Send email for issue-related notifications
-  const emailTypes = ['issue_assigned', 'status_changed', 'comment_added', 'mention', 'priority_changed'];
+  // Send email for issue-related notifications. Admin/space housekeeping
+  // types (space_created, space_member_added, space_role_changed,
+  // org_member_joined) are deliberately excluded, matching the existing
+  // sprint_started/sprint_completed precedent -- in-app only, no email.
+  const emailTypes = ['issue_assigned', 'reporter_assigned', 'status_changed', 'comment_added', 'mention', 'priority_changed'];
   if (emailTypes.includes(type)) {
     try {
       const userRow = await q('SELECT email FROM users WHERE id=$1', [user_id]);

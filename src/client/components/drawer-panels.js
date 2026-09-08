@@ -379,7 +379,12 @@ function _renderActivityTab(tab, issue) {
         // design — see _saveComment) rather than the [img:name|url] markup the
         // bracket branch below handles. Without this, those images would never
         // get a token at all, on any render, ever.
-        return augmentFileUrlsInHtml(safe);
+        // A comment saved before mention chips were preserved as real markup
+        // (or one with a stray trailing <br>) can carry a PLAIN "@Name" string
+        // alongside an HTML tag, which is what routed it into this branch in
+        // the first place — highlight it the same way the plain-text branch
+        // below does, so it doesn't render as unstyled text forever.
+        return highlightMentionsInSanitizedHtml(augmentFileUrlsInHtml(safe));
       }
       var html = highlightMentionsInCommentBody(body);
       // fname is an UPLOADED FILENAME -- user-controlled -- and was
@@ -820,6 +825,37 @@ async function ensureCombinationFieldMeta(spaceId) {
   return null;
 }
 
+// Refreshed on every render (never cached beyond one render call) so an
+// upgrader an admin just changed in Space Settings shows up next time this
+// picker opens, rather than whatever was true the first time this space's
+// Combination field was looked at this session. Stored directly on the meta
+// object already threaded through buildProductTypeComboPickerHtml ->
+// buildCombinationCheckboxListHtml, so no other function signature needs to
+// change to make the value available where it's actually rendered.
+async function ensureCombinationUpgradersLoaded(meta) {
+  if (!meta || !meta.id) return meta;
+  try {
+    var results = await Promise.all([
+      api('/api/custom-fields/' + meta.id + '/upgraders', 'GET', null, { silent: true }),
+      api('/api/custom-fields/' + meta.id + '/upgrader-roles', 'GET', null, { silent: true })
+    ]);
+    var rows = results[0], roles = results[1];
+    // Nested by role now (one combination can have an upgrader per role) --
+    // was a flat combination->row map before roles existed at all.
+    var map = {};
+    (rows || []).forEach(function (r) {
+      if (!map[r.combination]) map[r.combination] = {};
+      map[r.combination][r.role] = r;
+    });
+    meta.__upgradersByCombo = map;
+    meta.__roles = roles || [];
+  } catch (_) {
+    meta.__upgradersByCombo = meta.__upgradersByCombo || {};
+    meta.__roles = meta.__roles || [];
+  }
+  return meta;
+}
+
 function renderIssueProductTypeSets(spaceId) {
   var group = $('issueCombinationGroup');
   var container = $('issueCombinationField');
@@ -867,8 +903,10 @@ function renderIssueProductTypeSets(spaceId) {
       if (productTypeGroup) productTypeGroup.hidden = !spaceHasProductTypeField(spaceId, 'create');
       return;
     }
-    container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta, spaceId);
-    bindProductTypeComboPicker(container, meta, { stateKey: '_issuePtComboSel' });
+    return ensureCombinationUpgradersLoaded(meta).then(function () {
+      container.innerHTML = buildProductTypeComboPickerHtml(_issuePtComboSel, meta, spaceId);
+      bindProductTypeComboPicker(container, meta, { stateKey: '_issuePtComboSel' });
+    });
   });
 }
 
@@ -936,6 +974,7 @@ async function renderDrawerProductTypeSets(issueId, spaceId, cfValues, productTy
   }
 
   _drawerPtComboSel = parsePtComboSelection(productType, combinationVal);
+  await ensureCombinationUpgradersLoaded(meta);
   container.innerHTML = buildProductTypeComboPickerHtml(_drawerPtComboSel, meta, spaceId);
   bindProductTypeComboPicker(container, meta, {
     stateKey: '_drawerPtComboSel',
@@ -1158,7 +1197,11 @@ function parsePtComboSelection(productType, combinationValue) {
   if (combinationValue && String(combinationValue).trim().charAt(0) === '{') {
     try {
       var parsed = JSON.parse(combinationValue);
-      if (parsed && parsed.v === 2) {
+      // v3 was a short-lived shape that also carried a per-combination Role
+      // tag; the role picker it supported was removed, so any already-stored
+      // v3 value is read the same as v2 -- productTypes/combinations only,
+      // its "roles" key simply ignored rather than needing its own branch.
+      if (parsed && (parsed.v === 2 || parsed.v === 3)) {
         sel.productTypes = (parsed.productTypes || []).slice();
         sel.combinations = (parsed.combinations || []).slice();
         return sel;
@@ -1306,6 +1349,20 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
   if (!comboTypes.length) {
     return '<p class="pt-combo-hint">Select a product type above to see combinations.</p>';
   }
+  // Set by ensureCombinationUpgradersLoaded right before this picker is built
+  // (Create Issue: renderIssueProductTypeSets; drawer: renderDrawerProductTypeSets)
+  // -- both call sites share this same rendering code, so showing the
+  // Upgrader here covers both surfaces at once. Shown only for a CHECKED
+  // combination, not every row in the list -- with 70+ combinations under one
+  // product type, showing it everywhere buried the one that actually
+  // matters. Every configured role is listed (not just one picked from a
+  // dropdown) -- this is purely informational, so whoever is choosing the
+  // combination can see who to loop in for either role without the ticket
+  // itself having to declare which one it's for. "undefined" (not blank)
+  // when a role has no Upgrader assigned, so a missing assignment reads as a
+  // real, visible gap rather than nothing having rendered at all.
+  var upgraders = (meta && meta.__upgradersByCombo) || {};
+  var roleOptions = (meta && meta.__roles) || [];
   var html = '';
   comboTypes.forEach(function (type) {
     var combos = getCombinationsForProductType(type, meta).filter(function (c) {
@@ -1316,10 +1373,29 @@ function buildCombinationCheckboxListHtml(selectedTypes, selectedCombos, meta, f
       '<div class="pt-combo-group-title">' + esc(getProductTypeLabel(type)) + '</div>';
     html += combos.map(function (c) {
       var checked = selectedCombos.indexOf(c) >= 0;
+      var extraHtml = '';
+      if (checked) {
+        var upgradersForCombo = upgraders[c] || {};
+        if (roleOptions.length) {
+          extraHtml = '<span class="pt-combo-role-list">' + roleOptions.map(function (r) {
+            var upgrader = upgradersForCombo[r.key];
+            var upgraderId = (upgrader && upgrader.user_email) ? upgrader.user_email.split('@')[0] : 'undefined';
+            return '<span class="pt-combo-role-item">' + esc(r.name) + ': <strong>' + esc(upgraderId) + '</strong></span>';
+          }).join('') + '</span>';
+        } else {
+          // Field has no roles configured at all (shouldn't normally happen
+          // now that migration 024 seeds Frontend/Backend, but a field an
+          // admin stripped down to zero roles falls back to the old flat
+          // lookup rather than showing nothing).
+          var flatUpgrader = upgradersForCombo.backend || upgradersForCombo[Object.keys(upgradersForCombo)[0]];
+          var flatId = (flatUpgrader && flatUpgrader.user_email) ? flatUpgrader.user_email.split('@')[0] : 'undefined';
+          extraHtml = '<span class="pt-combo-upgrader">Upgrader: <strong>' + esc(flatId) + '</strong></span>';
+        }
+      }
       // title carries the full value — labels are single-line with an ellipsis.
       return '<label class="pt-combo-check" title="' + escAttr(c) + '">' +
         '<input type="checkbox" class="pt-combo-cb-input pt-combo-cb" value="' + escAttr(c) + '"' + (checked ? ' checked' : '') + '>' +
-        '<span class="pt-combo-check-label">' + esc(c) + '</span></label>';
+        '<span class="pt-combo-check-label">' + esc(c) + extraHtml + '</span></label>';
     }).join('');
     html += '</div>';
   });
@@ -1395,6 +1471,14 @@ function bindProductTypeComboPicker(container, meta, config) {
       });
       sel.combinations = merged;
     }
+    // Re-render so the checked combination's Upgrader badge appears/disappears
+    // immediately (buildCombinationCheckboxListHtml only shows it for a
+    // checked row) -- toggling a combination checkbox used to update `sel`
+    // and rely on the browser's own native checked state for everything
+    // visual, which was enough before the badge existed but left it always
+    // one click stale otherwise. Matches the same refresh readTypeCheckboxes
+    // already does above.
+    refreshComboList();
     notify();
   }
 

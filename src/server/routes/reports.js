@@ -505,11 +505,64 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   let bugRows = [];
   if (completedIds.length) {
     bugRows = (await q(`
-      SELECT id, key, title, status, priority, assignee_id, reporter_id, sprint_id
+      SELECT id, key, title, status, priority, assignee_id, reporter_id, sprint_id, product_type
       FROM issues WHERE sprint_id = ANY($1::varchar[]) AND type='bug' AND deleted_at IS NULL
     `, [completedIds])).rows;
   }
 
+  // Bugs by Combination, sprint-wise — only when this space actually has a
+  // Combination field configured (same detection custom-fields.js uses:
+  // field_key='combination', or a plain field literally named that for
+  // spaces that predate the built-in field_key). A bug's combination value
+  // lives in issue_field_values, not a column on issues itself, and a bug
+  // with no value set (or the field missing entirely) is grouped under
+  // "No Combination" rather than dropped, so the sprint's full bug count
+  // still reconciles against the Bug Summary total above.
+  const combinationField = (await q(
+    `SELECT id, options FROM custom_fields WHERE space_id=$1 AND (field_key='combination' OR LOWER(name)='combination') LIMIT 1`,
+    [spaceId]
+  )).rows[0];
+  let bugCombinationByIssueId = {};
+  // Nested combo -> role -> upgrader row, since one combination can now have
+  // an upgrader per role (migration 024) instead of exactly one.
+  let upgraderByComboRole = {};
+  // combination string -> the Product Type it's grouped under in the field's
+  // own options (see combination-options.js's {v:2, groups:{productType:[...]}}
+  // shape) -- a combination belongs to exactly one product type group, so this
+  // is a stable per-combination fact, not something that varies per bug.
+  let productTypeByCombination = {};
+  let upgraderRoleRows = [];
+  if (combinationField && bugRows.length) {
+    const valueRows = (await q(
+      `SELECT issue_id, value FROM issue_field_values WHERE field_id=$1 AND issue_id = ANY($2::varchar[])`,
+      [combinationField.id, bugRows.map(r => r.id)]
+    )).rows;
+    valueRows.forEach(r => { bugCombinationByIssueId[r.issue_id] = r.value; });
+
+    const upgraderRows = (await q(
+      `SELECT cu.combination, cu.role, cu.user_id, u.name AS user_name, u.email AS user_email
+       FROM combination_upgraders cu LEFT JOIN users u ON u.id = cu.user_id
+       WHERE cu.field_id=$1`,
+      [combinationField.id]
+    )).rows;
+    upgraderRows.forEach(r => {
+      if (!upgraderByComboRole[r.combination]) upgraderByComboRole[r.combination] = {};
+      upgraderByComboRole[r.combination][r.role] = r;
+    });
+
+    upgraderRoleRows = (await q(
+      `SELECT name, key FROM combination_upgrader_roles WHERE field_id=$1 ORDER BY position, name`,
+      [combinationField.id]
+    )).rows;
+
+    let rawOptions = combinationField.options;
+    if (typeof rawOptions === 'string') { try { rawOptions = JSON.parse(rawOptions); } catch (_) { rawOptions = null; } }
+    if (rawOptions && rawOptions.v === 2 && rawOptions.groups && typeof rawOptions.groups === 'object') {
+      Object.keys(rawOptions.groups).forEach(pt => {
+        (rawOptions.groups[pt] || []).forEach(combo => { productTypeByCombination[combo] = pt; });
+      });
+    }
+  }
   const doneBySprintId = {};
   doneRows.forEach(r => { (doneBySprintId[r.sprint_id] = doneBySprintId[r.sprint_id] || []).push(r); });
   const spilloverBySprintId = {};
@@ -573,15 +626,31 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     sprints.filter(sp => sp.status === 'completed')
       .flatMap(sp => [...(sp.developer_ids || []), ...(sp.qa_ids || [])])
   )];
-  const members = rosterIds.length
-    ? (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [rosterIds])).rows
+  // A spillover issue's assignee is not guaranteed to be on the sprint's own
+  // Developer/QA roster (that roster and an issue's Assignee field are two
+  // separate things) — resolving names ONLY for rosterIds left anyone else
+  // hardcoded as the literal string 'Unknown' below, even though they are a
+  // real, known user. Fetching every spillover assignee's name too (still
+  // ONE query, still keyed off real ids) fixes that without touching which
+  // rows get seeded up front or in what order.
+  const spilloverAssigneeIds = completedSprintRows.flatMap(sp => sp.spillover_issues.map(i => i.assignee_id)).filter(Boolean);
+  const nameIds = [...new Set([...rosterIds, ...spilloverAssigneeIds])];
+  const members = nameIds.length
+    ? (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [nameIds])).rows
     : [];
+  const userNameById = {};
+  members.forEach(u => { userNameById[u.id] = u; });
   const byUser = {};
-  members.forEach(u => { byUser[u.id] = { name: u.name, color: u.color, per_sprint: {} }; });
+  rosterIds.forEach(id => {
+    if (userNameById[id]) byUser[id] = { name: userNameById[id].name, color: userNameById[id].color, per_sprint: {} };
+  });
   completedSprintRows.forEach(sp => {
     sp.spillover_issues.forEach(i => {
       if (!i.assignee_id) return;
-      if (!byUser[i.assignee_id]) byUser[i.assignee_id] = { name: 'Unknown', color: '#6b7280', per_sprint: {} };
+      if (!byUser[i.assignee_id]) {
+        const u2 = userNameById[i.assignee_id];
+        byUser[i.assignee_id] = { name: u2 ? u2.name : 'Unknown', color: (u2 && u2.color) || '#6b7280', per_sprint: {} };
+      }
       const u = byUser[i.assignee_id];
       const ps = (u.per_sprint[sp.id] = u.per_sprint[sp.id] || { sprint_id: sp.id, sprint_name: sp.name, points: 0, count: 0, issues: [] });
       ps.points += Number(i.story_points) || 0;
@@ -606,7 +675,11 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
   // who assigned/reported a bug can show up here (not scoped to a sprint's
   // Developer/QA lists like spillover is, since a bug's assignee or reporter
   // can genuinely be anyone).
-  const bugUserIds = [...new Set(bugRows.flatMap(r => [r.assignee_id, r.reporter_id]).filter(Boolean))];
+  const bugUserIds = [...new Set(
+    bugRows.flatMap(r => [r.assignee_id, r.reporter_id])
+      .concat(Object.values(upgraderByComboRole).flatMap(byRole => Object.values(byRole).map(u => u.user_id)))
+      .filter(Boolean)
+  )];
   const bugUserMap = {};
   if (bugUserIds.length) {
     const users = (await q('SELECT id, name, color FROM users WHERE id = ANY($1)', [bugUserIds])).rows;
@@ -643,6 +716,98 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     closed_bugs: bugRows.filter(r => r.status === 'Done').length
   };
 
+  // Bugs by Combination, Upgrader, sprint-wise — mirrors buildBugBreakdown's
+  // per-sprint shape but keyed by combination string instead of a user id,
+  // with each grouped issue enriched with resolved assignee/reporter names
+  // so the client's per-sprint drill-down (ticket, assigned to, raised by)
+  // needs no further lookups. A bug is filed under every combination it
+  // names, so a value naming more than one combination counts once per
+  // combination rather than being silently collapsed into one bucket.
+  //
+  // The stored value is NOT always a bare string. Picking more than one
+  // combination (or one combination alongside more than one Product Type)
+  // serializes the whole selection as JSON — {"v":2,"productTypes":[...],
+  // "combinations":[...]}, or the older {"v":1,"sets":[{productType,
+  // combinations}]} — see serializePtComboSelection/parsePtComboSelection in
+  // drawer-panels.js, which this mirrors. Treating that JSON as a bare
+  // comma-joined string (the original version of this code did) split the
+  // JSON's own syntax apart into garbage rows: {"v":2, "productTypes":
+  // ["Message"], "combinations":["Chat - Slack" and "Chat - Team"]} each
+  // showing up as their own bogus "combination".
+  // Returns combination name strings. A ticket no longer declares a Role
+  // (the per-ticket Role picker was removed), so a v3 payload's "roles" key
+  // is simply ignored here -- same as parsePtComboSelection's own client-side
+  // read of it, see drawer-panels.js.
+  function parseCombinationFieldStoredValue(raw) {
+    if (!raw) return [];
+    const trimmed = String(raw).trim();
+    if (trimmed.charAt(0) === '{') {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && (parsed.v === 2 || parsed.v === 3)) {
+          return Array.isArray(parsed.combinations) ? parsed.combinations.filter(Boolean) : [];
+        }
+        if (parsed && parsed.v === 1 && Array.isArray(parsed.sets)) {
+          const out = [];
+          const seen = {};
+          parsed.sets.forEach(s => (s.combinations || []).forEach(c => {
+            if (c && !seen[c]) { seen[c] = true; out.push(c); }
+          }));
+          return out;
+        }
+        return [];
+      } catch (_) { return []; }
+    }
+    return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  let bugsByCombination = null;
+  if (combinationField) {
+    const grouped = {};
+    bugRows.forEach(r => {
+      const combos = parseCombinationFieldStoredValue(bugCombinationByIssueId[r.id]);
+      // Grouped by combination alone -- dedupe in case old data names the
+      // same combination more than once (a leftover v3 payload could).
+      const comboNames = combos.length ? [...new Set(combos)] : ['No Combination'];
+      const enriched = {
+        ...r,
+        assignee_name: (bugUserMap[r.assignee_id] && bugUserMap[r.assignee_id].name) || null,
+        reporter_name: (bugUserMap[r.reporter_id] && bugUserMap[r.reporter_id].name) || null
+      };
+      comboNames.forEach(name => {
+        const g = (grouped[name] = grouped[name] || { combination: name, per_sprint: {} });
+        const ps = (g.per_sprint[r.sprint_id] = g.per_sprint[r.sprint_id] || { sprint_id: r.sprint_id, sprint_name: sprintNameById[r.sprint_id] || '', count: 0, issues: [] });
+        ps.count += 1;
+        ps.issues.push(enriched);
+      });
+    });
+    bugsByCombination = Object.keys(grouped).map(name => {
+      const g = grouped[name];
+      const perSprintArr = Object.values(g.per_sprint);
+      const productType = productTypeByCombination[g.combination] || null;
+      // Every configured role for the field gets an entry here, whether or
+      // not it has an Upgrader assigned yet, so the client's "show all
+      // roles" popup always lists the full set rather than only the ones
+      // someone happened to assign.
+      const upgradersForCombo = upgraderByComboRole[g.combination] || {};
+      const upgraders = upgraderRoleRows.map(roleRow => {
+        const u = upgradersForCombo[roleRow.key];
+        return {
+          role_key: roleRow.key,
+          role_name: roleRow.name,
+          user_name: (u && u.user_name) || null,
+          user_email: (u && u.user_email) || null
+        };
+      });
+      return {
+        combination: g.combination,
+        product_type: productType,
+        upgraders,
+        total_count: perSprintArr.reduce((s, p) => s + p.count, 0),
+        per_sprint: perSprintArr
+      };
+    }).sort((a, b) => b.total_count - a.total_count);
+  }
+
   res.json({
     sprints: allSprintRows,
     completed_sprints: completedSprintRows,
@@ -650,7 +815,8 @@ app.get('/api/reports/mbr/:spaceId', requireAuth, wrap(async (req, res) => {
     spillover_by_user: spilloverByUser,
     bug_summary: bugSummaryOverall,
     bugs_by_assignee: bugsByAssignee,
-    bugs_by_reporter: bugsByReporter
+    bugs_by_reporter: bugsByReporter,
+    bugs_by_combination: bugsByCombination
   });
 }));
 

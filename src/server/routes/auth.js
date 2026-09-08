@@ -3,6 +3,7 @@ const { uid, wrap } = require('../core');
 const { q } = require('../db');
 const { requireOrgAdmin } = require('../deps');
 const { app } = require('../express-app');
+const { createNotif } = require('../notify');
 // ── Login throttling ──────────────────────────────────────
 // In-memory fixed-window counters, deliberately not a new dependency: the
 // project's invariant is no dependency changes, and this mirrors the existing
@@ -123,6 +124,19 @@ app.post('/api/auth/accept-invite', wrap(async (req, res) => {
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await q('INSERT INTO sessions(id,user_id,token,expires_at) VALUES($1,$2,$3,$4)', [`ses-${uid()}`, userId, sessionToken, expires]);
   const newUser = (await q('SELECT id,name,email,role,color,is_active FROM users WHERE id=$1', [userId])).rows[0];
+  // Org admins want to know when an invitation they (or a peer admin) sent
+  // out actually got accepted -- there is no admin "actor" on this route (the
+  // person accepting isn't one), so every active owner/admin in the org gets
+  // this, invited_by included.
+  const orgAdmins = (await q(
+    `SELECT id FROM users WHERE org_id=$1 AND role IN ('owner','admin') AND is_active=true`,
+    [orgId]
+  )).rows;
+  orgAdmins.forEach(function (a) {
+    createNotif({ user_id: a.id, type: 'org_member_joined',
+      title: newUser.name + ' joined your organization',
+      body: 'Invited as ' + (inv.role || 'member') + '. Email: ' + newUser.email });
+  });
   res.status(201).json({ token: sessionToken, user: newUser });
 }));
 

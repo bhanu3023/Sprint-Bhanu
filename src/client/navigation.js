@@ -2,12 +2,29 @@
 // ═══════════════════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════
+// Captured once, at parse time, before anything could have changed it --
+// the one correct value to restore the tab title to on leaving a ticket,
+// without hardcoding a second copy of index.html's own <title> text that
+// could silently drift out of sync with it.
+var DEFAULT_PAGE_TITLE = document.title;
+
 function _closeIssueDrawer() {
+  // Same reasoning as openDrawer's own flushFocusedDrawerField() call: a
+  // title/description/fix-description edit can still be sitting focused and
+  // unsaved at the exact moment the drawer closes (Back, the close button,
+  // closeIssueFromAllWork), which never fires a blur on its own.
+  if (typeof flushFocusedDrawerField === 'function') flushFocusedDrawerField();
   document.body.classList.remove('issue-page');
   var drawer = $('issueDrawer');
   if (drawer) drawer.setAttribute('hidden', '');
   S.drawerIssueId = null;
   window._currentIssueKey = null;
+  // openDrawer sets the tab title to the ticket's own key/title on open, but
+  // nothing ever set it back on close -- so leaving a ticket for a list/board
+  // view (Back, the close button, closeIssueFromAllWork) left that ticket's
+  // title showing in the tab, and in browser history, for every page visited
+  // afterward until another ticket happened to be opened.
+  document.title = DEFAULT_PAGE_TITLE;
 }
 
 function _exitIssuePage() {

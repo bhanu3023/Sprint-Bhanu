@@ -698,6 +698,17 @@ body.light .topbar {
 .notif-item-time { font-size: 11px; color: var(--text3); margin-top: 4px; }
 .notif-item-dot { width: 8px; height: 8px; border-radius: 50%; background: #0129AC; flex-shrink: 0; margin-top: 8px; }
 
+.draft-item-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text3);
+  font-size: 15px;
+  align-self: flex-start;
+}
+.draft-item-delete:hover { background: var(--bg4, rgba(0,0,0,0.06)); color: var(--red, #dc2626); }
+
 .notif-badge {
   position: absolute;
   top: -2px;
@@ -1222,7 +1233,61 @@ body.light .backlog-lane-header { background: #f7f8fa; }
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, padding-left 0.12s ease;
+  position: relative;
+}
+
+/* Backlog multi-select: the checkbox overlays the row's own left padding
+   rather than joining the 7-column grid above, so turning select mode on/off
+   never has to touch that grid (see backlogRow's own comment on why). Only
+   .bl-selectable rows (the ungrouped Backlog lane) ever get bl-select-mode. */
+.backlog-row.bl-select-mode { padding-left: 34px; }
+/* Hidden by default -- the <input> is always in the markup for every
+   selectable row (backlogRow renders it whenever `selectable` is true,
+   independent of select mode being on), so visibility has to be gated in
+   CSS rather than by leaving the element out of the DOM. Only a row that
+   ALSO carries .bl-select-mode (added once double-click turns select mode
+   on) reveals it. */
+.bl-row-checkbox { display: none; }
+.backlog-row.bl-select-mode .bl-row-checkbox {
+  display: block;
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.backlog-row.bl-row-selected { background: var(--accent-bg); }
+.backlog-row.bl-row-selected:hover { background: var(--accent-bg); }
+
+.bl-select-toolbar { gap: 10px; }
+.bl-select-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  white-space: nowrap;
+}
+.bl-select-cancel { color: var(--text3); }
+
+/* The "pick a planning sprint" popup reuses .yw-filter-panel's own visuals
+   (border/shadow/radius) but is appended to <body> and positioned fixed at
+   the clicked button's own coordinates, rather than living inside a
+   position:relative <th> the way the header filters do. */
+.bl-planning-picker {
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* Same "popup appended to body" pattern as .bl-planning-picker above, for the
+   MBR combo table's "Show" (Upgraders) button. */
+.mbr-upgrader-popup {
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .bl-cell { min-width: 0; display: flex; align-items: center; }
@@ -1495,6 +1560,178 @@ body.light .board-col {
   text-align: center;
   color: var(--text2);
   background: var(--bg3);
+}
+
+/* ------------------------------------------------------------
+   COMBINATION UPGRADERS
+   ------------------------------------------------------------ */
+.combination-upgraders-groups {
+  max-height: 55vh;
+  overflow-y: auto;
+}
+.cu-group + .cu-group {
+  margin-top: 18px;
+}
+.cu-group-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+.cu-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+/* When the trailing .cu-row-error actually has something to show, the
+   border moves down to sit under IT instead of between the row and its own
+   error message -- avoids a double border stacked right on top of the
+   error text. */
+.cu-row:has(+ .cu-row-error:not([hidden])) {
+  border-bottom: none;
+}
+.cu-row-error {
+  font-size: 12px;
+  color: var(--red, #dc2626);
+  line-height: 1.4;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.cu-row-error:last-child {
+  border-bottom: none;
+}
+.cu-combo-label {
+  flex: 1;
+  min-width: 120px;
+  font-size: 13px;
+  color: var(--text1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cu-row-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* One of these per configured role, side by side — width is fixed rather
+   than flex so 2-3 roles line up into tidy columns instead of each row
+   negotiating its own widths independently. */
+.cu-role-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 168px;
+  flex-shrink: 0;
+}
+.cu-role-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.cu-role-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cu-input {
+  width: 100%;
+  min-width: 0;
+}
+.cu-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Role management chips above the combination list. */
+.cu-roles-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cu-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text1);
+}
+.cu-role-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.cu-role-chip-remove:hover {
+  background: var(--red, #dc2626);
+  color: #fff;
+}
+.cu-role-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cu-role-add input {
+  width: 130px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text1);
+}
+.cu-role-add button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Bulk-assign toolbar — appears once at least one combination is checked. */
+.cu-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-faint, rgba(1,41,172,0.06));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.cu-bulk-bar select,
+.cu-bulk-bar input {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.cu-bulk-bar-count {
+  font-weight: 700;
+  color: var(--text1);
+  margin-right: auto;
 }
 
 /* ------------------------------------------------------------
@@ -3771,6 +4008,39 @@ body.light .data-table tr:hover td { background: #f7f8fa; }
   color: var(--accent);
   font-weight: 600;
 }
+/* Only ever rendered on a CHECKED combination's row (see
+   buildCombinationCheckboxListHtml), so this reads as the one highlighted
+   piece of information for whichever combination is actually selected --
+   full-strength accent color, not dimmed, with the name itself in <strong>.
+   display:block puts it on its own line below the combination name instead
+   of running inline beside it, which crowded the row and could wrap
+   mid-sentence for a long combination value. */
+.pt-combo-upgrader {
+  display: block;
+  color: var(--accent);
+  font-size: 0.85em;
+  margin-top: 2px;
+}
+.pt-combo-upgrader strong {
+  font-weight: 700;
+}
+/* One line per configured role, under the combination name -- only rendered
+   for a checked row (see buildCombinationCheckboxListHtml). Purely
+   informational (no picker any more): every role shows its own Upgrader at
+   once instead of one at a time behind a dropdown. */
+.pt-combo-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+.pt-combo-role-item {
+  color: var(--accent);
+  font-size: 0.85em;
+}
+.pt-combo-role-item strong {
+  font-weight: 700;
+}
 .pt-type-list .pt-combo-check-label {
   white-space: nowrap;
 }
@@ -4744,6 +5014,14 @@ body.light .yw-tab-badge {
 }
 .yw-table-wrap {
   position: relative;
+  /* This table has up to 9 columns (Key, Title, Type, Status, Priority,
+     Space, Product Type, Combination, Reporter/Assignee) and no per-column
+     width caps, so it easily runs wider than the viewport. Without this, the
+     overflow spilled into .views-container's own implicit horizontal scroll
+     -- which also carries the sidebar and topbar along with it -- instead of
+     scrolling just the table. Confining it here keeps the rest of the page
+     fixed while only the table itself pans left/right. */
+  overflow-x: auto;
 }
 .yw-table-toolbar {
   display: flex;
@@ -4775,7 +5053,15 @@ body.light .yw-tab-badge {
   font-size: 13px;
 }
 .yw-table thead th {
-  position: relative;
+  /* sticky (not relative) so the header row stays pinned to the top of
+     .views-container -- the page's actual vertical scroll container -- as
+     the table's rows scroll past underneath it. Still works as the
+     containing block for .yw-filter-panel's absolute positioning below,
+     same as relative did. The opaque background is required for this: a
+     transparent sticky header would let scrolled-past rows show through. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
   text-align: left;
   padding: 8px 14px;
   font-size: 11px;
@@ -4787,6 +5073,16 @@ body.light .yw-tab-badge {
   background: var(--bg2);
   white-space: nowrap;
 }
+/* `.yw-filter-panel` below is `position: absolute` and needs ITS OWN <th> as
+   the positioned containing block -- Your Work's own table gets that for free
+   from `.yw-table thead th`'s `position: sticky` (higher specificity, so it
+   still wins there), but a plain <th class="yw-th-filter"> with no `.yw-table`
+   ancestor (the MBR Bugs-by-Combination table reuses this same filter
+   pattern without adopting the whole .yw-table class) had no positioned
+   ancestor at all, so the panel positioned against the nearest ancestor that
+   DID have one -- however far up the DOM that happened to be -- instead of
+   sitting under its own trigger button. */
+.yw-th-filter { position: relative; }
 .yw-th-filter-wrap {
   display: inline-flex;
   align-items: center;

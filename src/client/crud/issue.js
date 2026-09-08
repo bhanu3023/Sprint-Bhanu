@@ -3,6 +3,13 @@
 // ISSUE CRUD
 // ═══════════════════════════════════════════════════════════
 function resetIssueForm() {
+  // A fresh Create Issue session is never attached to a previous draft --
+  // openCreateIssueModalFromDraft (crud/issue-draft.js) re-sets this AFTER
+  // calling resetIssueForm, once the draft's values have actually been
+  // restored, not before.
+  _currentIssueDraftId = null;
+  _issueDraftLastSavedJSON = null;
+  clearTimeout(_issueDraftAutosaveTimer);
   $('issueId').value = '';
   $('issueSpaceId').value = S.currentSpace || '';
   $('issueParentId').value = '';
@@ -56,6 +63,20 @@ function populateIssueFormSelects(opts) {
 
 async function handleIssueSubmit(e) {
   e.preventDefault();
+  // A debounced draft-autosave from the last keystroke before Save was
+  // clicked can still be PENDING here (1.2s hasn't elapsed yet), or already
+  // IN FLIGHT (its network request already sent). Left alone, either one
+  // could resolve AFTER the success path below has already deleted the
+  // draft and nulled out _currentIssueDraftId -- a pending POST landing then
+  // would resurrect a brand new draft for a ticket that was just created for
+  // real, since _currentIssueDraftId being null makes saveIssueDraftNow
+  // create rather than update. Cancelling the timer AND awaiting any save
+  // already in flight brings _currentIssueDraftId to its final, settled
+  // value before this function ever reads or deletes it, closing the race
+  // window completely -- either this submit succeeds (the draft is deleted
+  // below) or it fails (the form's already-autosaved state is untouched).
+  clearTimeout(_issueDraftAutosaveTimer);
+  if (_issueDraftSaveInFlight) await _issueDraftSaveInFlight;
   // Space first — required-field validation is per space, so it needs to be
   // resolved before anything else can be checked.
   // No spaces[0] fallback: it made the guard below unreachable, so submitting
@@ -188,6 +209,17 @@ async function handleIssueSubmit(e) {
     }
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save'; }
     } catch(e) { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save"; } toast("Issue creation failed — " + errorReason(e), "error"); return; }
+    // The ticket this draft was for now exists for real -- the draft's job is
+    // done. Fire-and-forget: a stray leftover draft row is harmless clutter,
+    // not worth blocking the rest of this success path over.
+    if (_currentIssueDraftId) {
+      var draftIdToClear = _currentIssueDraftId;
+      _currentIssueDraftId = null;
+      _issueDraftLastSavedJSON = null;
+      api('/api/issue-drafts/' + draftIdToClear, 'DELETE', null, { silent: true }).catch(function () {}).then(function () {
+        if (typeof loadIssueDraftsList === 'function') loadIssueDraftsList();
+      });
+    }
     closeModal('modal-issue');
     await refreshData();
     // Captured before anything below navigates: renderCurrentView() ->

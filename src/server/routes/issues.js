@@ -1,7 +1,7 @@
 const { requireAuth } = require('../auth');
 const { uid, wrap } = require('../core');
 const { q } = require('../db');
-const { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays, upsertIssueFieldValue } = require('../deps');
+const { UPDATE_WHITELIST, buildDynamicUpdate, denyUnlessCanAct, getIssueSpaceId, isBuiltinSelectValueAllowed, isOrgAdmin, normalizeSpaceRole, pickAllowed, purgeIssueRows, requireOrgAdmin, retentionDays, upsertIssueFieldValue } = require('../deps');
 const { app } = require('../express-app');
 const { createNotif } = require('../notify');
 // ── Issues ────────────────────────────────────────────────
@@ -293,19 +293,32 @@ app.delete('/api/issues/:id/permanent', requireAuth, wrap(async (req, res) => {
 
 app.get('/api/issues/:id', requireAuth, wrap(async (req, res) => {
   const param = req.params.id;
+  // PERFORMANCE: the actor's own space_members role is fetched in the SAME
+  // query as the issue itself (LEFT JOIN, param $2) instead of a second
+  // sequential round trip that denyUnlessCanAct would otherwise make via
+  // getSpaceMemberRole -- this is the single most-hit read in the app (every
+  // ticket open), so removing one full DB round trip here is worth the join.
+  // Org admins skip the role check entirely either way (canActInSpace's own
+  // early return), so this only saves a query for everyone else. actor_role
+  // is stripped before the response goes out -- it was never part of this
+  // endpoint's contract and isn't meant to become part of it now.
   const issue = (await q(`SELECT i.*,
       a.name AS assignee_name, a.color AS assignee_color,
       rep.name AS reporter_name, rep.color AS reporter_color,
       s.key AS project_key, s.name AS space_name,
-      p.key AS parent_key, p.title AS parent_title, p.type AS parent_type
+      p.key AS parent_key, p.title AS parent_title, p.type AS parent_type,
+      sm.role AS actor_role
     FROM issues i
     LEFT JOIN users a ON a.id=i.assignee_id
     LEFT JOIN users rep ON rep.id=i.reporter_id
     LEFT JOIN spaces s ON s.id=i.space_id
     LEFT JOIN issues p ON p.id=i.parent_id
-    WHERE (i.id=$1 OR UPPER(i.key)=UPPER($1)) AND i.deleted_at IS NULL`, [param])).rows[0];
+    LEFT JOIN space_members sm ON sm.space_id=i.space_id AND sm.user_id=$2
+    WHERE (i.id=$1 OR UPPER(i.key)=UPPER($1)) AND i.deleted_at IS NULL`, [param, req.user.id])).rows[0];
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
-  if (!(await denyUnlessCanAct(q, req.user, res, issue.space_id, 'issue.read'))) return;
+  const knownRole = issue.actor_role != null ? normalizeSpaceRole(issue.actor_role) : null;
+  delete issue.actor_role;
+  if (!(await denyUnlessCanAct(q, req.user, res, issue.space_id, 'issue.read', knownRole))) return;
   const issueId = issue.id;
   const [worklogs, comments, links, subtasks, cfv, history, attachments] = await Promise.all([
     q(`SELECT w.*, u.name AS user_name, u.color AS user_color FROM worklogs w
@@ -420,7 +433,25 @@ async function createIssueRow(spaceId, actorUserId, fields) {
   }
   await q(`INSERT INTO issue_history(id,issue_id,user_id,field_name,old_value,new_value)
     VALUES($1,$2,$3,'created',NULL,$4)`, [uid(), id, actorUserId, key]).catch(function () {});
-  return r.rows[0];
+  const created = r.rows[0];
+  // Notify the assignee/reporter set AT CREATION time too, not just on a
+  // later update -- previously issue_assigned only fired from PUT, so
+  // creating a ticket with an assignee already picked notified nobody.
+  // Shared by both the single-create route and bulk CSV import below, since
+  // both go through this function. Skips the actor (self-assignment never
+  // notifies) and skips reporter_assigned when the reporter IS the assignee
+  // (they already got the assignment notice, a second "you're also the
+  // reporter" ping on the same ticket at the same moment is just noise).
+  const createLink = '/?issue=' + encodeURIComponent(key);
+  if (created.assignee_id && created.assignee_id !== actorUserId) {
+    createNotif({ user_id: created.assignee_id, space_id: spaceId, type: 'issue_assigned',
+      title: 'You were assigned to ' + key, body: created.title, link: createLink });
+  }
+  if (created.reporter_id && created.reporter_id !== actorUserId && created.reporter_id !== created.assignee_id) {
+    createNotif({ user_id: created.reporter_id, space_id: spaceId, type: 'reporter_assigned',
+      title: 'You were set as reporter on ' + key, body: created.title, link: createLink });
+  }
+  return created;
 }
 
 app.post('/api/issues', requireAuth, wrap(async (req, res) => {
@@ -496,23 +527,43 @@ app.put('/api/issues/:id', requireAuth, wrap(async (req, res) => {
           body: oldRow.title, link });
       }
     }
-    // Notify assignee when status changes
-    if (keys.includes('status') && req.body.status !== oldRow.status) {
-      const assignee = newRow.assignee_id;
-      if (assignee && assignee !== actor) {
-        createNotif({ user_id: assignee, space_id: spaceId, type: 'status_changed',
-          title: issueKey + ' status changed to ' + req.body.status,
+    // Notify new reporter when reporter_id changes -- symmetric to the
+    // assignee notification above. Skipped when the new reporter IS the
+    // (possibly just-set) assignee, same dedup reason as at creation.
+    if (keys.includes('reporter_id') && req.body.reporter_id && req.body.reporter_id !== oldRow.reporter_id) {
+      const newReporter = req.body.reporter_id;
+      if (newReporter !== actor && newReporter !== newRow.assignee_id) {
+        createNotif({ user_id: newReporter, space_id: spaceId, type: 'reporter_assigned',
+          title: 'You were set as reporter on ' + issueKey,
           body: oldRow.title, link });
       }
     }
-    // Notify assignee when priority changes
+    // Notify assignee AND reporter when status changes -- the reporter filed
+    // this ticket and cares about it moving, not only whoever it's currently
+    // assigned to. Deduplicated the same way comment_added already handles
+    // "assignee and reporter are the same person" (comments.js), and the
+    // actor is never notified of their own change.
+    if (keys.includes('status') && req.body.status !== oldRow.status) {
+      const notifyUsers = new Set([newRow.assignee_id, newRow.reporter_id].filter(Boolean));
+      notifyUsers.forEach(function (uid_) {
+        if (uid_ !== actor) {
+          createNotif({ user_id: uid_, space_id: spaceId, type: 'status_changed',
+            title: issueKey + ' status changed to ' + req.body.status,
+            body: oldRow.title, link });
+        }
+      });
+    }
+    // Notify assignee AND reporter when priority changes -- same reasoning
+    // and dedup as status above.
     if (keys.includes('priority') && req.body.priority !== oldRow.priority) {
-      const assignee = newRow.assignee_id;
-      if (assignee && assignee !== actor) {
-        createNotif({ user_id: assignee, space_id: spaceId, type: 'priority_changed',
-          title: issueKey + ' priority changed to ' + req.body.priority,
-          body: oldRow.title, link });
-      }
+      const notifyUsers = new Set([newRow.assignee_id, newRow.reporter_id].filter(Boolean));
+      notifyUsers.forEach(function (uid_) {
+        if (uid_ !== actor) {
+          createNotif({ user_id: uid_, space_id: spaceId, type: 'priority_changed',
+            title: issueKey + ' priority changed to ' + req.body.priority,
+            body: oldRow.title, link });
+        }
+      });
     }
   }
   res.json(newRow);
