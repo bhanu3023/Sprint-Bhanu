@@ -815,6 +815,40 @@ document.addEventListener('paste', function (e) {
   if (added) toast(added + ' file' + (added > 1 ? 's' : '') + ' pasted', 'success');
 }, true);
 
+// Inserts plain text at the caret inside a description editor, converting
+// newlines to <br> -- the DOM-manipulation equivalent of the deprecated
+// execCommand('insertText'), consistent with insertDescImageAtCaret above.
+function insertPlainTextAtCaret(editorEl, text) {
+  var sel = window.getSelection();
+  var range = null;
+  if (sel && sel.rangeCount) {
+    var r = sel.getRangeAt(0);
+    if (editorEl.contains(r.commonAncestorContainer)) range = r;
+  }
+  if (!range) {
+    range = document.createRange();
+    range.selectNodeContents(editorEl);
+    range.collapse(false);
+  }
+  range.deleteContents();
+  var lines = String(text).split(/\r\n|\r|\n/);
+  var frag = document.createDocumentFragment();
+  var lastNode = null;
+  for (var i = 0; i < lines.length; i++) {
+    if (i > 0) { lastNode = document.createElement('br'); frag.appendChild(lastNode); }
+    lastNode = document.createTextNode(lines[i]);
+    frag.appendChild(lastNode);
+  }
+  range.insertNode(frag);
+  if (lastNode) {
+    var after = document.createRange();
+    after.setStartAfter(lastNode);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
+  }
+}
+
 // Description editors — paste screenshot as bottom-left thumbnail inside description
 document.addEventListener('paste', function (e) {
   var active = document.activeElement;
@@ -822,14 +856,30 @@ document.addEventListener('paste', function (e) {
   var items = e.clipboardData && e.clipboardData.items;
   if (!items || !items.length) return;
   var imageFiles = _dedupePasteFiles(items).filter(function (f) { return f.type && f.type.indexOf('image/') === 0; });
-  if (!imageFiles.length) return;
+  if (imageFiles.length) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (_issuePasteBusy) return;
+    _issuePasteBusy = true;
+    handleDescImagePaste(active, imageFiles[0]).finally(function () {
+      setTimeout(function () { _issuePasteBusy = false; }, 500);
+    });
+    return;
+  }
+  // No image: nothing intercepted this before, so the browser's native paste
+  // inserted the source app's raw clipboard HTML verbatim. Word/Google Docs/
+  // Notion HTML carries heavy inline styling and wrapper markup (mso-list
+  // hacks, nested <p>/<span>) that renders as huge, oddly-spaced numbered
+  // lists once dropped into this editor -- reported as "paste looks broken".
+  // The toolbar above is the supported way to apply real formatting, so paste
+  // now always brings the text across clean instead of the source's markup.
+  var text = e.clipboardData.getData('text/plain');
+  if (!text) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  if (_issuePasteBusy) return;
-  _issuePasteBusy = true;
-  handleDescImagePaste(active, imageFiles[0]).finally(function () {
-    setTimeout(function () { _issuePasteBusy = false; }, 500);
-  });
+  insertPlainTextAtCaret(active, text);
+  active.dispatchEvent(new Event('input', { bubbles: true }));
+  if (active.id === 'drawerDesc' || active.id === 'drawerFixDesc') markDrawerDescDirty(active.id);
 }, true);
 
 // ── Comment file attachment helpers ──────────────────────
