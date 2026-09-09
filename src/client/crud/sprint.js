@@ -5,12 +5,24 @@
 async function handleSprintSubmit(e) {
   e.preventDefault();
   var id = $('sprintIdInput').value;
+  var startDate = $('sprintStartDate').value || null;
+  var endDate = $('sprintEndDate').value || null;
+  // Start Date has no lower bound of its own -- a sprint may legitimately be
+  // planned to have started in the past -- but an End Date before Start Date
+  // is never meaningful. The End Date picker's own min attribute (set in
+  // _openSprintModal) already steers away from this, but typing a date
+  // directly bypasses that, so it's checked again here before saving. The
+  // server enforces the same rule regardless of caller (sprint-lifecycle.md).
+  if (startDate && endDate && endDate < startDate) {
+    toast('End Date cannot be before Start Date', 'error');
+    return;
+  }
   var payload = {
     space_id: $('sprintSpaceId').value || S.currentSpace,
     name: $('sprintNameInput').value,
     goal: $('sprintGoal').value,
-    start_date: $('sprintStartDate').value || null,
-    end_date: $('sprintEndDate').value || null,
+    start_date: startDate,
+    end_date: endDate,
     developer_ids: collectCheckedIds('sprintDeveloperList'),
     qa_ids: collectCheckedIds('sprintQaList'),
     public_holidays: Array.from(window._sprintHolidaySet || []).sort(),

@@ -610,6 +610,17 @@ window._addIssueToSprint = function (sprintId) {
 };
 
 window._startSprint = async function (id) {
+  // Checked client-side first so a missing date shows a dialog immediately
+  // instead of a round trip -- the server enforces the same rule regardless
+  // (see sprint-lifecycle.md), so this is a UX shortcut, not the real guard.
+  var sp = (S.data.sprints || []).find(function (s) { return s.id === id; });
+  if (sp && (!sp.start_date || !sp.end_date)) {
+    await confirmDialog(
+      'This sprint needs both a Start Date and an End Date before it can start. Edit the sprint to set them.',
+      { yesLabel: 'OK', noLabel: 'OK' }
+    );
+    return;
+  }
   // /start returns the started sprint row, so its name is already in hand.
   var started;
   try {
@@ -864,7 +875,16 @@ window._openSprintModal = function (id) {
   }
   renderDeveloperLeavesList();
   renderSprintPublicHolidaysCalendar();
-  $('sprintStartDate').onchange = renderSprintPublicHolidaysCalendar;
+  // End Date's own min stops the native picker from ever offering a date
+  // before Start Date -- Start Date carries no such restriction, since a
+  // sprint may legitimately be planned to have started in the past. This is
+  // the picker-level half of the check; handleSprintSubmit still validates
+  // on save too, since typing a date directly bypasses the picker entirely.
+  if ($('sprintStartDate').value) $('sprintEndDate').min = $('sprintStartDate').value;
+  $('sprintStartDate').onchange = function () {
+    renderSprintPublicHolidaysCalendar();
+    $('sprintEndDate').min = $('sprintStartDate').value || '';
+  };
   $('sprintEndDate').onchange = renderSprintPublicHolidaysCalendar;
   openModal('modal-sprint');
 };

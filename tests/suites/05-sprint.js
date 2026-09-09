@@ -207,6 +207,67 @@ module.exports = {
       const got = await c.get('/api/issues/' + w.issues[0].id, { token: x.users.admin.token });
       A.status(got, 200, 'the issue must survive its sprint being deleted');
       A.eq(got.body.sprint_id, null, 'the issue must be back in the backlog, not orphaned to a dead sprint');
+    }},
+
+    { name: 'a sprint cannot start without both a Start Date and an End Date', fn: async (c, x, own) => {
+      const sp = await c.post('/api/spaces', { token: x.users.admin.token,
+        body: { name: 'Sprint World SI ' + x.tag, key: 'SI' + x.tag.slice(0, 4), space_type: 'scrum', visibility: 'team', owner_id: x.users.admin.id } });
+      A.statusIn(sp, [200, 201], 'create space for SI');
+      own.space(sp.body.id);
+
+      // No dates at all
+      const bare = await c.post('/api/sprints', { token: x.users.admin.token,
+        body: { space_id: sp.body.id, name: 'Bare ' + x.tag } });
+      A.statusIn(bare, [200, 201], 'create sprint with no dates');
+      own.sprint(bare.body.id);
+      const bareStart = await c.post('/api/sprints/' + bare.body.id + '/start', { token: x.users.admin.token });
+      A.status(bareStart, 400, 'starting with neither date set must be refused');
+      A.includes(bareStart.raw, 'Start Date', 'the 400 must say why');
+
+      // Start Date only
+      const halfway = await c.post('/api/sprints', { token: x.users.admin.token,
+        body: { space_id: sp.body.id, name: 'Halfway ' + x.tag, start_date: x.soon } });
+      A.statusIn(halfway, [200, 201], 'create sprint with only a start date');
+      own.sprint(halfway.body.id);
+      const halfwayStart = await c.post('/api/sprints/' + halfway.body.id + '/start', { token: x.users.admin.token });
+      A.status(halfwayStart, 400, 'starting with only Start Date set must still be refused');
+
+      // Both set, Start Date in the past: allowed -- start_date has no lower bound
+      const backdated = await c.post('/api/sprints', { token: x.users.admin.token,
+        body: { space_id: sp.body.id, name: 'Backdated ' + x.tag, start_date: x.past, end_date: x.future } });
+      A.statusIn(backdated, [200, 201], 'create sprint with a past start date');
+      own.sprint(backdated.body.id);
+      A.statusIn(await c.post('/api/sprints/' + backdated.body.id + '/start', { token: x.users.admin.token }),
+        [200, 201], 'a past Start Date must not block starting');
+    }},
+
+    { name: 'End Date cannot be before Start Date, on create or update', fn: async (c, x, own) => {
+      const sp = await c.post('/api/spaces', { token: x.users.admin.token,
+        body: { name: 'Sprint World SJ ' + x.tag, key: 'SJ' + x.tag.slice(0, 4), space_type: 'scrum', visibility: 'team', owner_id: x.users.admin.id } });
+      A.statusIn(sp, [200, 201], 'create space for SJ');
+      own.space(sp.body.id);
+
+      // Reversed on create
+      const reversed = await c.post('/api/sprints', { token: x.users.admin.token,
+        body: { space_id: sp.body.id, name: 'Reversed ' + x.tag, start_date: x.future, end_date: x.soon } });
+      A.status(reversed, 400, 'End Date before Start Date must be refused on create');
+      A.includes(reversed.raw, 'End Date', 'the 400 must say why');
+
+      // Valid on create, then reversed via update touching only end_date
+      const valid = await c.post('/api/sprints', { token: x.users.admin.token,
+        body: { space_id: sp.body.id, name: 'Valid ' + x.tag, start_date: x.soon, end_date: x.future } });
+      A.statusIn(valid, [200, 201], 'create with a valid range');
+      own.sprint(valid.body.id);
+      const badUpdate = await c.put('/api/sprints/' + valid.body.id, { token: x.users.admin.token,
+        body: { end_date: x.past } });
+      A.status(badUpdate, 400, 'moving End Date before the existing Start Date must be refused');
+      // The 400 itself is the proof nothing was persisted -- the route
+      // returns before running the UPDATE when this check fails. Not
+      // re-verified via a GET here: GET /api/sprints hands DATE columns
+      // through the driver's own (locale-sensitive) parsing rather than
+      // to_char, so comparing an exact date string back out of it is
+      // unrelated to what this test is checking and fails for reasons that
+      // have nothing to do with this validation.
     }}
   ]
 };

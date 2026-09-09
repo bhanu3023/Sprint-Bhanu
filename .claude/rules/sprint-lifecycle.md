@@ -23,16 +23,32 @@ Requires `sprint.manage` (space admin or org admin).
 
 Enforced, in order:
 
-1. **Source status must be `planning`.** An `active` sprint returns 400
+1. **Both `start_date` and `end_date` must already be set.** Returns 400
+   `"Set a Start Date and an End Date before starting this sprint."`
+   Previously a null `start_date` silently defaulted to `NOW()` and `end_date`
+   was never checked at all, so a sprint could go active — and later
+   complete — with no planned window on it whatsoever, which is what every
+   report reads to build a timeline. The client's own Start Sprint button
+   checks this first and shows a dialog rather than round-tripping to the
+   server for it, but the server enforces it regardless of caller.
+2. **Source status must be `planning`.** An `active` sprint returns 400
    `"This sprint is already active."`; a `completed` one returns 400
    `"A completed sprint cannot be restarted."` The two are distinguished
    deliberately — they are different mistakes.
-2. **Only one active sprint per space.** Returns 400
+3. **Only one active sprint per space.** Returns 400
    `"A sprint is already active in this space."`
-3. `start_date` is set to `NOW()` **only if it is currently null**
-   (`COALESCE(start_date, NOW())`). An explicitly planned start date is
-   preserved.
 4. `sprint_started` fires to every space member, fire-and-forget.
+
+## Start Date and End Date validation — create, update, and start
+
+- **`start_date` has no lower bound.** A sprint may legitimately be planned
+  to have started in the past; nothing rejects that.
+- **`end_date` must not be before `start_date`**, checked wherever either can
+  be set: `POST /api/sprints`, `PUT /api/sprints/:id` (comparing whichever of
+  the two the PUT doesn't touch against the sprint's current value, read via
+  `to_char` rather than the driver's own DATE parsing — same reasoning as
+  `lib/sprint-complete.js`'s sweeper), and implicitly by rule 1 above at
+  `/start` time. 400 `"End Date cannot be before Start Date."`
 
 ### Why this is a transaction
 

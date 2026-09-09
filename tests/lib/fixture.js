@@ -76,6 +76,10 @@ async function up() {
   // mid-run, which would both break tests and drift the fingerprint.
   const future = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
   const soon = new Date(Date.now() + 1 * 864e5).toISOString().slice(0, 10);
+  // Sprint start_date has no lower bound -- a sprint may legitimately be
+  // planned to have started already -- so a couple of tests need a date
+  // that's actually in the past to exercise that.
+  const past = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
   const sprintId = uid();
   await q(`INSERT INTO sprints(id,space_id,name,goal,start_date,end_date,status)
            VALUES($1,$2,$3,'fixture sprint',$4,$5,'planning')`,
@@ -85,7 +89,7 @@ async function up() {
     tag, password: PASSWORD, orgId, spaceId, space2Id, sprintId,
     spaceKey: SPACE_KEY, spaceKey2: SPACE_KEY_2,
     users: { owner, admin, manager, member, viewer, outsider },
-    future, soon
+    future, soon, past
   };
 }
 
