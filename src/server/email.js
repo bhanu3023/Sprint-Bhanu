@@ -1,6 +1,7 @@
 var __dirname = require("path").dirname(require.resolve("../../package.json"));
 const { execSync } = require('child_process');
 const { q } = require('./db');
+const { MS_CLIENT_ID, MS_CLIENT_SECRET, MS_TENANT_ID, msAppOnlyToken, msGraphSendMail } = require('./oauth-helpers');
 // Install nodemailer if not present
 let nodemailer;
 try {
@@ -62,10 +63,51 @@ function emailWrapper(bodyHtml) {
   </div>`;
 }
 
+// Sends via Microsoft Graph's app-only /sendMail, using the SAME Azure AD
+// app registration this codebase already uses for "Sign in with Microsoft"
+// (MS_CLIENT_ID/SECRET/TENANT_ID in oauth-helpers.js) -- just a different
+// OAuth grant (client_credentials instead of authorization_code), and a
+// Mail.Send Application permission added to that one registration, with
+// admin consent, in Entra ID. That single addition is the only new setup
+// this requires; nothing here creates a second app registration.
+//
+// This exists because plain SMTP AUTH (nodemailer below) kept failing with
+// 535 5.7.139 against smtp.office365.com even after the password was rotated
+// and the mailbox's own "Authenticated SMTP" toggle was confirmed on --
+// Microsoft has been deprecating legacy basic-auth SMTP broadly, and Graph's
+// OAuth-bearer-token /sendMail call isn't subject to that block at all.
+async function sendEmailViaGraph(fromUser, toEmail, subject, bodyHtml) {
+  const token = await msAppOnlyToken();
+  if (!token || !token.access_token) {
+    const reason = (token && (token.error_description || token.error)) || 'no access_token in response';
+    return { sent: false, reason: 'Graph app-only token request failed: ' + reason };
+  }
+  const result = await msGraphSendMail(token.access_token, fromUser, toEmail, subject, emailWrapper(bodyHtml));
+  if (result.ok) {
+    console.log(`[email] Sent via Graph "${subject}" → ${toEmail}`);
+    return { sent: true };
+  }
+  return { sent: false, reason: `Graph sendMail failed: ${result.status} ${result.body}` };
+}
+
 async function sendEmail(toEmail, subject, bodyHtml) {
-  if (!nodemailer) return { sent: false, reason: 'nodemailer not available' };
   const cfg = await getEmailSettings();
-  if (!cfg) return { sent: false, reason: 'SMTP not configured' };
+  if (!cfg) return { sent: false, reason: 'Email not configured' };
+  // Prefer Graph whenever the Microsoft sign-in app registration is
+  // configured -- it sidesteps the SMTP-AUTH deprecation entirely, unlike
+  // the nodemailer path below. Falls through to SMTP on any Graph failure
+  // (including Mail.Send not yet consented), so this never makes email
+  // strictly worse than before while that permission is being set up.
+  if (MS_CLIENT_ID && MS_CLIENT_SECRET && MS_TENANT_ID && cfg.smtp_user) {
+    try {
+      const graphResult = await sendEmailViaGraph(cfg.smtp_user, toEmail, subject, bodyHtml);
+      if (graphResult.sent) return graphResult;
+      console.error('[email] Graph send failed, falling back to SMTP:', graphResult.reason);
+    } catch (e) {
+      console.error('[email] Graph send threw, falling back to SMTP:', e.message);
+    }
+  }
+  if (!nodemailer) return { sent: false, reason: 'nodemailer not available' };
   try {
     const isMicrosoft = cfg.smtp_host && (cfg.smtp_host.includes('office365') || cfg.smtp_host.includes('outlook') || cfg.smtp_host.includes('hotmail'));
     const transporter = nodemailer.createTransport({
