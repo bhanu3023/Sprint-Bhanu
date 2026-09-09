@@ -8,6 +8,29 @@ const { execSync } = require('child_process');
 const uid = () => crypto.randomUUID();
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(next);
 
+// Comment/description bodies are rich HTML from the client's editor. A
+// notification preview built by truncating that HTML at a raw character
+// count (the previous behaviour) cuts mid-tag and leaves the surviving tags
+// in the string; escapeHtml() then neuters them into visible literal text
+// instead of removing them, so an email showed "Completed <strong>Level 4
+// ...</strong>" verbatim rather than the plain words. No DOMParser here --
+// this runs server-side -- so it's a regex strip plus the handful of
+// entities rich-text output actually produces, not a general HTML parser.
+function stripHtmlToText(html) {
+  if (!html) return '';
+  return String(html)
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Custom fields live in a separate issue_field_values table — a custom field
 // named e.g. "Story Points" would render right next to the real built-in
 // story_points field in the drawer, but editing it writes to a completely
@@ -77,4 +100,4 @@ try {
 }
 
 
-module.exports = { express, Pool, path, crypto, execSync, uid, wrap, multer, compression, RESERVED_FIELD_NAMES, normalizeFieldName, isReservedFieldName, LINK_TYPE_INVERSE, reservedNameBlockedForUpdate };
+module.exports = { express, Pool, path, crypto, execSync, uid, wrap, stripHtmlToText, multer, compression, RESERVED_FIELD_NAMES, normalizeFieldName, isReservedFieldName, LINK_TYPE_INVERSE, reservedNameBlockedForUpdate };

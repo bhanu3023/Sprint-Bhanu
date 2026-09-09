@@ -1,5 +1,5 @@
 const { requireAuth, requireAuthFile } = require('../auth');
-const { multer, uid, wrap } = require('../core');
+const { multer, uid, wrap, stripHtmlToText } = require('../core');
 const { pool, q } = require('../db');
 const { denyUnlessCanAct, getCommentIssueSpaceId } = require('../deps');
 const { app } = require('../express-app');
@@ -19,7 +19,8 @@ app.post('/api/comments', requireAuth, wrap(async (req, res) => {
   if (issue) {
     const commenter = user_id;
     const link = '/?issue=' + encodeURIComponent(issue.key || issue_id);
-    const preview = body.length > 80 ? body.slice(0, 80) + '…' : body;
+    const plainBody = stripHtmlToText(body);
+    const preview = plainBody.length > 80 ? plainBody.slice(0, 80) + '…' : plainBody;
     const notifyUsers = new Set([issue.assignee_id, issue.reporter_id].filter(Boolean));
     notifyUsers.forEach(function(uid_) {
       if (uid_ !== commenter) {
