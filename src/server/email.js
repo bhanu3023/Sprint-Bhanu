@@ -56,7 +56,7 @@ function emailWrapper(bodyHtml) {
   return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;background:#f0f4f8;padding:32px;border-radius:8px">
     <div style="text-align:center;margin-bottom:24px">
       <h1 style="color:#174F96;font-size:22px;margin:0">Neutara Technologies</h1>
-      <p style="color:#64748b;margin:4px 0 0;font-size:13px">SprintBoard Enterprise</p>
+      <p style="color:#64748b;margin:4px 0 0;font-size:13px">SprintBoard</p>
     </div>
     <div style="background:#fff;border-radius:8px;padding:32px;border:1px solid #e2e8f0">${bodyHtml}</div>
     <p style="text-align:center;font-size:11px;color:#94a3b8;margin-top:16px">© Neutara Technologies. This is an automated notification.</p>
