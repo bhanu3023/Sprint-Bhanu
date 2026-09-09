@@ -653,18 +653,24 @@ window._deleteSprint = async function (id) {
   }
   var live = (S.data.issues || []).filter(function (i) { return i.sprint_id === id; }).length;
   var name = sp.name || 'this sprint';
-  var ok = await typedConfirmDialog({
-    title: 'Delete sprint "' + name + '"?',
-    intro: live
-      ? 'Its ' + live + ' ticket' + (live === 1 ? '' : 's') + ' move to the backlog. Nothing is deleted with the sprint — ' +
-        'and if the sprint is restored they come back with it.'
-      : 'This sprint has no tickets in it.',
-    note: softDeleteNote(),
-    phrase: name,
-    phraseHint: 'To confirm, type the sprint name',
-    confirmLabel: 'Delete sprint'
-  });
-  if (!ok) return;
+  // Only ask when there's actually something at stake: a sprint with live
+  // tickets in it is about to have all of them detached to the backlog, which
+  // is worth a deliberate, typed confirmation. A sprint with none has nothing
+  // for that confirmation to protect, so it deletes straight away -- this is
+  // exactly the "roopa" / "......" case (empty completed sprints with no way
+  // to clear them without a popup that had nothing real to warn about).
+  if (live) {
+    var ok = await typedConfirmDialog({
+      title: 'Delete sprint "' + name + '"?',
+      intro: 'Its ' + live + ' ticket' + (live === 1 ? '' : 's') + ' move to the backlog. Nothing is deleted with the sprint — ' +
+        'and if the sprint is restored they come back with it.',
+      note: softDeleteNote(),
+      phrase: name,
+      phraseHint: 'To confirm, type the sprint name',
+      confirmLabel: 'Delete sprint'
+    });
+    if (!ok) return;
+  }
   try {
     await api('/api/sprints/' + id, 'DELETE', null, { silent: true });
     await refreshData();
