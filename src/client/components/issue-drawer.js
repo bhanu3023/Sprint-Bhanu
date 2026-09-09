@@ -425,6 +425,7 @@ function startDrawerLiveSync(issueId) {
     // Don't overwrite while user has pending edits
     if (window._drawerPending && Object.keys(window._drawerPending).length) return;
     if (S.drawerIssueId !== issueId) return stopDrawerLiveSync();
+    var mySeq = DRAWER_FETCH.start();
     try {
       var fresh = await api('/api/issues/' + issueId);
       // Fetch custom field values separately if not included
@@ -433,6 +434,11 @@ function startDrawerLiveSync(issueId) {
         fresh.custom_field_values = cfVals || [];
       }
       if (!fresh) return;
+      // A newer fetch (comment/worklog refetch, tab switch, or a later tick
+      // of this same poll) already landed while these two awaits were in
+      // flight -- applying this response now would roll the drawer back to
+      // data older than what's already showing.
+      if (S.drawerIssueId !== issueId || DRAWER_FETCH.isStale(mySeq)) return;
       // Update right-side fields silently (only if not focused by user)
       var activeId = document.activeElement && document.activeElement.id;
       if (activeId !== 'drawerStatus')    $('drawerStatus').value    = fresh.status    || '';
@@ -1312,9 +1318,15 @@ function bindDrawerEdits(issue) {
     submitBtn._submitting = false;
     submitBtn.disabled = false;
     submitBtn.textContent = 'Comment';
-    // Refresh in background to get real comment ID
+    // Refresh in background to get real comment ID. Captured before the
+    // fetch, same as the live-sync poll: a slower request from elsewhere
+    // (the poll, a tab switch) can still resolve after this one starts, and
+    // without this check whichever RESPONSE lands last wins regardless of
+    // which was actually the newest data -- this is the exact race that made
+    // a just-added comment intermittently vanish from the activity feed.
+    var _commentRefetchSeq = DRAWER_FETCH.start();
     api('/api/issues/' + issueId).then(function(updated) {
-      if (updated) {
+      if (updated && S.drawerIssueId === issueId && !DRAWER_FETCH.isStale(_commentRefetchSeq)) {
         _drawerIssueData = updated;
         renderDrawerActivity(updated);
       }

@@ -343,6 +343,22 @@ window._removeLink = async function(linkId) {
 // Store current issue data for tab switching
 var _drawerIssueData = null;
 
+// Bumped every time a fresh GET /api/issues/:id fetch starts, from any of the
+// several independent places that refresh the open drawer (the 15s live-sync
+// poll, the post-comment/post-worklog refetch, and the activity-tab-switch
+// refetch). All of them race against each other with no coordination
+// otherwise -- whichever RESPONSE arrives last overwrites _drawerIssueData,
+// not whichever REQUEST started last. A slower poll response landing after a
+// faster comment-add refetch silently discarded the just-added comment,
+// intermittently, exactly matching what got reported. Each fetch site
+// captures its own number before awaiting and discards its result if a newer
+// fetch has since started -- see DRAWER_FETCH usage below.
+var _drawerDataFetchSeq = 0;
+var DRAWER_FETCH = {
+  start: function () { return ++_drawerDataFetchSeq; },
+  isStale: function (mySeq) { return mySeq !== _drawerDataFetchSeq; }
+};
+
 function renderDrawerActivity(issue) {
   // Support legacy call with just comments array
   if (Array.isArray(issue)) issue = { comments: issue, history: [], worklogs: [] };

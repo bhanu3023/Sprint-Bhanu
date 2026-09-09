@@ -866,13 +866,25 @@ document.addEventListener('paste', function (e) {
     });
     return;
   }
-  // No image: nothing intercepted this before, so the browser's native paste
-  // inserted the source app's raw clipboard HTML verbatim. Word/Google Docs/
-  // Notion HTML carries heavy inline styling and wrapper markup (mso-list
-  // hacks, nested <p>/<span>) that renders as huge, oddly-spaced numbered
-  // lists once dropped into this editor -- reported as "paste looks broken".
-  // The toolbar above is the supported way to apply real formatting, so paste
-  // now always brings the text across clean instead of the source's markup.
+  // No image: this used to flatten ALL pasted content to plain text here,
+  // to kill the huge/oddly-spaced numbered lists that Word/Google Docs/Notion
+  // HTML produces (mso-list hacks, nested <p>/<span>, heavy inline styling).
+  // That also threw away legitimate structure (real bullets, paragraphs,
+  // bold) that WAS on the clipboard -- reported separately as "paste isn't
+  // coming in proper structure". admin-settings.js already has a whitelist-
+  // based sanitizer (sanitizeRichPasteHtml) built for exactly this: it keeps
+  // B/I/U/H1-H6/UL/OL/LI/P/A/CODE/PRE/BLOCKQUOTE and unwraps everything else,
+  // which strips the Word/Docs bloat without losing real formatting. Reuse it
+  // here instead of re-solving the same problem worse.
+  var html = e.clipboardData.getData('text/html');
+  if (html) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    document.execCommand('insertHTML', false, sanitizeRichPasteHtml(html));
+    return;
+  }
+  // No HTML on the clipboard either (plain-text copy) -- nothing to preserve,
+  // so keep line breaks the same way it always has.
   var text = e.clipboardData.getData('text/plain');
   if (!text) return;
   e.preventDefault();

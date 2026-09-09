@@ -472,11 +472,19 @@ document.addEventListener('DOMContentLoaded', function () {
     // Drive CSS-based comment box visibility via data attribute
     var body = $('activitySectionBody');
     if (body) body.dataset.activeTab = tab;
-    // Always re-fetch fresh issue data so worklogs + history are current
+    // Always re-fetch fresh issue data so worklogs + history are current.
+    // Sequence-guarded like every other _drawerIssueData refresh: a slower
+    // request from the live-sync poll or a comment/worklog refetch can
+    // resolve after this one, and without the check whichever RESPONSE
+    // lands last wins even if it's the older data.
     if (S.drawerIssueId) {
+      var _tabSwitchIssueId = S.drawerIssueId;
+      var _tabSwitchSeq = DRAWER_FETCH.start();
       try {
-        var fresh = await api('/api/issues/' + S.drawerIssueId);
-        if (fresh) { _drawerIssueData = fresh; }
+        var fresh = await api('/api/issues/' + _tabSwitchIssueId);
+        if (fresh && S.drawerIssueId === _tabSwitchIssueId && !DRAWER_FETCH.isStale(_tabSwitchSeq)) {
+          _drawerIssueData = fresh;
+        }
       } catch(_) {}
     }
     _renderActivityTab(tab);

@@ -35,10 +35,16 @@ async function handleWorklogSubmit(e) {
   toast(fmtMins(timeSpent) + ' logged on ' + (cachedIssueKey(payload.issue_id) || 'this issue'));
 
   if (S.drawerIssueId) {
-    // Re-fetch fresh issue data (includes new worklog) then switch to Work log tab
+    // Re-fetch fresh issue data (includes new worklog) then switch to Work log
+    // tab. Sequence-guarded like every other _drawerIssueData refresh: a
+    // slower request from the live-sync poll or another refetch can resolve
+    // after this one, and without the check whichever RESPONSE lands last
+    // wins even if it's the older data.
+    var _worklogIssueId = S.drawerIssueId;
+    var _worklogRefetchSeq = DRAWER_FETCH.start();
     try {
-      var fresh = await api('/api/issues/' + S.drawerIssueId);
-      if (fresh) {
+      var fresh = await api('/api/issues/' + _worklogIssueId);
+      if (fresh && S.drawerIssueId === _worklogIssueId && !DRAWER_FETCH.isStale(_worklogRefetchSeq)) {
         _drawerIssueData = fresh;
         // Update time spent display
         var totalSpent = (fresh.worklogs || []).reduce(function(s,w){ return s+(w.time_spent||0); }, 0);
