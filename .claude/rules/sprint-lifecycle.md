@@ -84,14 +84,23 @@ no step may be skipped:
 
 ## Deleting a sprint — `DELETE /api/sprints/:id`
 
-Requires `sprint.manage`. **Only allowed while `status='planning'`.**
+Requires `sprint.manage`. Allowed while `status='planning'`, and allowed for a
+`completed` sprint **only if it never held any issues** (checked as
+`sprint_id=$1 OR former_sprint_id=$1` — nothing currently in it, and nothing
+that ever spilled out of it either).
 
 - `active` → 400 `"An active sprint cannot be deleted. Complete it first."`
-- `completed` → 400
-  `"A completed sprint cannot be deleted; it is the historical record."`
-  Completed is refused because its issue set and frozen velocity are what the
-  velocity chart and burndown read; deleting it would silently drop a row from
-  every report.
+- `completed`, with issues → 400
+  `"A completed sprint with issues cannot be deleted; it is the historical record."`
+  Refused because its issue set and frozen velocity are what the velocity
+  chart and burndown read; deleting it would silently drop a row from every
+  report.
+- `completed`, no issues ever → deleted, same as a planning sprint. There is
+  no historical record to protect in this case — the block exists to guard
+  real report data, not to make "completed" an unconditionally irreversible
+  status. Without this carve-out, a sprint completed empty by mistake (or
+  closed empty by the 23:59 auto-completer before anyone put work in it) was
+  stuck forever: completion has no path back, and deletion was refused too.
 
 **Superseded:** the older spec said "move all issues to backlog, then delete the
 sprint row". The delete is a **soft** delete:

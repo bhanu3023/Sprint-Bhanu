@@ -40,14 +40,26 @@ app.delete('/api/sprints/:id', requireAuth, wrap(async (req, res) => {
   // planning. There was no status gate, so an ACTIVE sprint could be binned
   // mid-sprint and every issue in it detached to the backlog -- the same
   // data-integrity hole as the unguarded /start, reached from the other side.
-  // A completed sprint is refused too: its issues and velocity are the
-  // historical record the reports read.
+  // A completed sprint is refused too, UNLESS it never held any issues: the
+  // whole point of the block is that its issue set and frozen velocity are
+  // the historical record the reports read, and a sprint that never had an
+  // issue (current or spilled-through-former_sprint_id) has no such record to
+  // protect. Without this carve-out, a sprint completed empty by mistake --
+  // or one the 23:59 auto-completer closed before anyone put work in it --
+  // was stuck forever with no path back (completion is terminal) and no way
+  // to clear it, which is exactly the "roopa" / "......" case reported.
   const target = (await q('SELECT status FROM sprints WHERE id=$1 AND deleted_at IS NULL', [req.params.id])).rows[0];
   if (!target) return res.status(404).json({ error: 'Sprint not found' });
-  if (target.status !== 'planning') {
-    return res.status(400).json({ error: target.status === 'active'
-      ? 'An active sprint cannot be deleted. Complete it first.'
-      : 'A completed sprint cannot be deleted; it is the historical record.' });
+  if (target.status === 'active') {
+    return res.status(400).json({ error: 'An active sprint cannot be deleted. Complete it first.' });
+  }
+  if (target.status === 'completed') {
+    const hasIssues = (await q(
+      'SELECT 1 FROM issues WHERE sprint_id=$1 OR former_sprint_id=$1 LIMIT 1', [req.params.id]
+    )).rows.length > 0;
+    if (hasIssues) {
+      return res.status(400).json({ error: 'A completed sprint with issues cannot be deleted; it is the historical record.' });
+    }
   }
   // Soft delete so the sprint lands in Deleted Items and an org admin can restore
   // it. Its issues are still detached to the backlog (unchanged behaviour) — a

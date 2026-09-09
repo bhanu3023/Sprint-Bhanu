@@ -155,7 +155,7 @@ module.exports = {
       A.eq(Number(mixed.body.velocity), 0, 'velocity must be ignored, not applied');
     }},
 
-    { name: 'a sprint can only be deleted while in planning', fn: async (c, x, own) => {
+    { name: 'a sprint can only be deleted while in planning, or completed with no issues', fn: async (c, x, own) => {
       const w = await world(c, x, own, 'SG', []);
 
       // PLANNING: allowed
@@ -172,15 +172,30 @@ module.exports = {
       A.status(activeDel, 400, 'deleting an ACTIVE sprint must be refused');
       A.includes(activeDel.raw, 'active sprint cannot be deleted', 'the 400 must say why');
 
-      // COMPLETED: refused -- it is the historical record the reports read
+      // COMPLETED, no issues ever: allowed -- there is no historical record to
+      // protect. w.sprintId was built with an empty issue list and never had
+      // any moved through it, so this is exactly the "completed by mistake,
+      // empty" case (reported as sprints named "roopa" / "......" stuck with
+      // no way to clear them).
       A.statusIn(await c.post('/api/sprints/' + w.sprintId + '/complete', { token: x.users.admin.token }),
         [200, 201], 'complete');
-      const doneDel = await c.del('/api/sprints/' + w.sprintId, { token: x.users.admin.token });
-      A.status(doneDel, 400, 'deleting a COMPLETED sprint must be refused');
+      A.statusIn(await c.del('/api/sprints/' + w.sprintId, { token: x.users.admin.token }),
+        [200, 204], 'deleting a COMPLETED sprint with no issues must be allowed');
+
+      // COMPLETED, with issues: still refused -- this is the actual
+      // historical-record protection, and it must survive the carve-out above.
+      const w2 = await world(c, x, own, 'SG2', [{ title: 'a', points: 2, status: 'Done' }]);
+      A.statusIn(await c.post('/api/sprints/' + w2.sprintId + '/start', { token: x.users.admin.token }),
+        [200, 201], 'start w2');
+      A.statusIn(await c.post('/api/sprints/' + w2.sprintId + '/complete', { token: x.users.admin.token }),
+        [200, 201], 'complete w2');
+      const doneDel = await c.del('/api/sprints/' + w2.sprintId, { token: x.users.admin.token });
+      A.status(doneDel, 400, 'deleting a COMPLETED sprint WITH issues must be refused');
+      A.includes(doneDel.raw, 'historical record', 'the 400 must say why');
 
       // and it is still there, still completed
-      const list = await c.get('/api/sprints?space_id=' + w.spaceId, { token: x.users.admin.token });
-      const still = (list.body || []).find(s => s.id === w.sprintId);
+      const list = await c.get('/api/sprints?space_id=' + w2.spaceId, { token: x.users.admin.token });
+      const still = (list.body || []).find(s => s.id === w2.sprintId);
       A.ok(still, 'the refused sprint must still exist');
       A.eq(still.status, 'completed', 'and still be completed');
     }},
